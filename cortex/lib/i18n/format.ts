@@ -33,6 +33,9 @@ export function fmt(locale: Locale) {
       const cents = Math.round(amount * 100) % 100 !== 0;
       return new Intl.NumberFormat(tag, { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 }).format(amount);
     },
+    /** Montant d'un document de paiement (reçu, facture), en unités mineures, toujours au centime : « 9,00 € », « €9.00 ». */
+    money: (cents: number, currency: string) =>
+      new Intl.NumberFormat(tag, { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100),
     /** « 17 novembre 2026 » ; `short` : « 17 nov. ». */
     date: (v: string | number | Date, style: "long" | "short" = "long") =>
       dated(v, style === "long" ? { day: "numeric", month: "long", year: "numeric" } : { day: "numeric", month: "short" }),

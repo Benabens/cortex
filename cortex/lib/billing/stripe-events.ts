@@ -7,6 +7,7 @@ import {
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, toCenti,
 } from "./credits";
 import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } from "./revenue";
+import { dropReceipt, queueReceipt } from "./receipts";
 
 /**
  * TRAITEMENT DES ÉVÉNEMENTS STRIPE (webhook). Séparé de la route pour être
@@ -105,6 +106,11 @@ export const HANDLED_EVENTS = [
 
 export function isPlanKey(v: unknown): v is PlanKey {
   return typeof v === "string" && v in PLANS;
+}
+
+/** lookup_key d'un prix → offre Cortex (cortex_pro_yearly → pro_yearly), sinon null. */
+export function planOfLookupKey(key: string | null | undefined): PlanKey | null {
+  return (Object.keys(PLANS) as PlanKey[]).find((k) => PLANS[k].lookupKey === key) ?? null;
 }
 
 /** id depuis un champ Stripe qui est soit une string, soit l'objet étendu. */
@@ -214,6 +220,8 @@ export type HandleResult = {
   ok: boolean; action: string; duplicate?: boolean; credited?: boolean; reversed?: boolean; error?: string;
   /** Reprise : centièmes retirés par cet événement, dont `debtCenti` en dette ; abonnement suspendu ; facture de la période en cours. */
   retiredCenti?: number; debtCenti?: number; suspended?: boolean; currentPeriod?: boolean;
+  /** Paiement encaissé dont le reçu Cortex est en file (source : cs_… ou in_…) : la route l'envoie après sa réponse. */
+  receipt?: string;
 };
 
 // ─────────────────── appartenance d'un événement à Cortex ───────────────────
@@ -441,6 +449,8 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
         sourceId: s.id, kind: "pack", paymentIntent: pi, userId, currency: s.currency ?? "eur", amountCents: amount,
         taxCents: Number(s.total_details?.amount_tax ?? 0), feeCents: fee, livemode, paidAt: at,
       }, tx);
+      // Reçu Cortex de cet achat, dans la même transaction : crédité ⇔ reçu en file.
+      await queueReceipt({ sourceId: s.id, kind: "pack", userId, invoiceId: idOf(s.invoice), plan: isPlanKey(plan) ? plan : null }, tx);
     }
     return true;
   }).catch(async (e) => {
@@ -453,15 +463,18 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
     const orphan = await authGet<{ why: string; amount_cents: number | null }>(`SELECT why, amount_cents FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
     if (orphan) {
       // Remboursement partiel mémorisé : au prorata du montant, jamais plus que l'achat.
-      const amount = Number(orphan.amount_cents ?? 0);
-      const take = amount > 0 ? Math.min(centi, creditsCentiForAmount(amount)) : centi;
+      const refunded = Number(orphan.amount_cents ?? 0);
+      const take = refunded > 0 ? Math.min(centi, creditsCentiForAmount(refunded)) : centi;
       const reversed = await addTransaction(userId, -take, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
       await authRun(`DELETE FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
       log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, retiredCenti: reversed ? take : 0 });
-      return { ok: true, action: "pack-credited-then-reversed", credited, reversed };
+      // Rendu EN ENTIER avant même d'être crédité : pas de reçu « paiement reçu ». Partiel : le reçu part.
+      const whole = refunded <= 0 || (amount != null && refunded >= amount);
+      if (whole) await dropReceipt(s.id);
+      return { ok: true, action: "pack-credited-then-reversed", credited, reversed, ...(!whole && amount ? { receipt: s.id } : {}) };
     }
   }
-  return { ok: true, action: "pack-credited", credited };
+  return { ok: true, action: "pack-credited", credited, ...(credited && amount ? { receipt: s.id } : {}) };
 }
 
 async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
@@ -512,6 +525,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
       Math.max(0, Number(previous.remaining) || 0), userId, previous.period_end,
     );
   }
+  let receipt: { receipt?: string } = {};
   if (inv.id) {
     // Montant encaissé : compté même si la facture n'accorde rien (période plus ancienne), l'argent est là.
     const paid = Number(amountPaid ?? 0);
@@ -521,6 +535,8 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
         sourceId: inv.id, kind: "subscription", paymentIntent: invPi, userId, currency: inv.currency ?? "eur", amountCents: paid,
         taxCents: invoiceTaxCents(inv), feeCents: await realFeeCents(lookup, invPi), livemode: !!inv.livemode, paidAt: at,
       });
+      await queueReceipt({ sourceId: inv.id, kind: "subscription", userId, invoiceId: inv.id, plan: planOfLookupKey(plan) });
+      receipt = { receipt: inv.id };
     }
     // Enregistrée même si elle n'accorde rien (période plus ancienne) : idempotence et reprise s'y rattachent.
     await authRun(
@@ -530,7 +546,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
       granted ? monthly : 0, periodEnd, nowStr(),
     );
   }
-  return { ok: true, action: granted ? "subscription-granted" : "invoice-older-period" };
+  return { ok: true, action: granted ? "subscription-granted" : "invoice-older-period", ...receipt };
 }
 
 /** Abonnement Stripe à Cortex ? prix Cortex, métadonnée Cortex, ou déjà lié chez nous. */

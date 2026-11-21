@@ -13,3 +13,13 @@ export function contactEmail(env: Partial<NodeJS.ProcessEnv> = process.env): str
   const raw = env.PUBLIC_CONTACT_EMAIL?.trim() ?? env.CONTACT_EMAIL?.trim();
   return raw && PLAIN_EMAIL.test(raw) ? raw : DEFAULT_CONTACT_EMAIL;
 }
+
+/**
+ * Adresse de contact CONFIGURÉE (PUBLIC_CONTACT_EMAIL ou CONTACT_EMAIL), sans repli : null
+ * sinon. Pour ce que reçoit un acheteur (reçu de paiement) : jamais l'adresse personnelle
+ * par défaut de l'éditeur.
+ */
+export function configuredContactEmail(env: Partial<NodeJS.ProcessEnv> = process.env): string | null {
+  const raw = env.PUBLIC_CONTACT_EMAIL?.trim() ?? env.CONTACT_EMAIL?.trim();
+  return raw && PLAIN_EMAIL.test(raw) ? raw : null;
+}

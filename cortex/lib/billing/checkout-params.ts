@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import { PLANS, type PlanKey } from "./stripe-events";
 import { publicOrigin } from "@/lib/public-url";
+import { checkoutBranding } from "./brand";
 
 /** Paramètres de la session Checkout, testables sans réseau hors du module de route Next.js. */
 export function checkoutParams(o: {
@@ -21,6 +22,8 @@ export function checkoutParams(o: {
     // Link) sont ceux activés dans le tableau de bord Stripe. Une liste écrite ici
     // prendrait sa place : ['card'] retirerait Link (docs/STRIPE-LIVE.md § 2).
     line_items: [{ price: o.priceId, quantity: 1 }],
+    // Cortex en haut de la page, pas le nom public du compte partagé (lib/billing/brand).
+    branding_settings: checkoutBranding(origin),
     // Champ « code promo » : seuls les codes créés dans le tableau de bord fonctionnent.
     // Un pack à 0 € n'est crédité que si son code est dans STRIPE_FREE_PROMO_CODES (webhook).
     allow_promotion_codes: true,

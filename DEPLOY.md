@@ -276,6 +276,13 @@ LEGAL_TERMS_VERSION=2026-11-18
 # Adresse qui reçoit les demandes de rétractation (et, à défaut de
 # CORTEX_OWNER_EMAIL, les alertes de dépense et celles du rappel de reconduction).
 PUBLISHER_EMAIL=⟨ton adresse⟩
+# Facture PDF Cortex (Mon compte, lien du reçu) : vendeur imprimé sur la facture
+# seulement. Sans ces trois variables, aucune facture n'est émise (docs/STRIPE-LIVE.md § 7).
+INVOICE_SELLER_NAME=Benjamin Abensur EI
+INVOICE_SELLER_ADDRESS=⟨rue⟩|⟨code postal et ville⟩|France
+INVOICE_SELLER_SIRET=⟨14 chiffres⟩
+# Reçu Cortex après paiement (webhook + reprise toutes les 5 min) : 0 le coupe.
+# CORTEX_RECEIPTS=0
 
 # — stockage : quota par compte lié au revenu (base gratuite, + 100 Mo par $ net,
 #   plafond 3 Go, borné par le volume), + refus sous 10 % d'espace libre —

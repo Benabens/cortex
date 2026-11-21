@@ -110,6 +110,50 @@ abonnement mort.
 
 **Stripe Tax** : ne pas l'activer (franchise en base de TVA).
 
+## 2 bis. Ce que voit l'acheteur : Cortex, et ce qui reste à la marque du compte
+
+Le compte Stripe sert aussi Kairo : son nom public, son icône, son adresse et ses
+e-mails sont ceux de **Benabens**, et on ne les change pas pour Cortex. Ce que
+Cortex règle lui-même, **par paiement**, sans toucher au compte :
+
+| Où | Ce que voit l'acheteur | Comment |
+|---|---|---|
+| Page de paiement Checkout | nom `Cortex`, logo et favicon Cortex, couleurs sombres de l'app | `branding_settings` sur chaque session (`lib/billing/brand.ts`) ; images servies par l'app sous `/brand/`, donc `AUTH_URL` en https |
+| Reçu après paiement | e-mail Cortex (`AUTH_EMAIL_FROM`), FR ou EN selon la langue du compte : produit, montant, date, n° de commande, réduction par son nom | webhook → file `stripe_receipts` → envoi (`lib/billing/receipts.ts`) ; reprise toutes les 5 min ; `CORTEX_RECEIPTS=0` le coupe |
+| Facture | PDF Cortex depuis Mon compte (et le lien du reçu), **même numéro** que la facture Stripe | `lib/billing/invoice-pdf.ts` ; vendeur lu dans `INVOICE_SELLER_*` (§ 7) |
+| Réductions | nom du coupon, sinon le code promo saisi, sinon « Réduction » ; jamais l'identifiant | donne un **nom** à chaque coupon (Produits → Coupons) ; `stripe-setup` signale ceux qui n'en ont pas |
+| Portail client | titre « Cortex : moyen de paiement et résiliation », **sans** historique des factures Stripe | configuration étiquetée `app=cortex` (§ 5) |
+
+Ce qui **reste à la marque Benabens**, parce que Stripe ne le règle qu'au niveau
+du compte (aucun champ par session, par client ou par facture) :
+
+- **Les e-mails automatiques de Stripe** : reçu de paiement, facture payée,
+  remboursement, renouvellement à venir, échec de paiement. Tant qu'ils sont
+  activés (§ 2), l'acheteur reçoit **deux** reçus : celui de Cortex et celui de
+  Benabens, avec l'adresse publique du compte.
+- **La facture PDF et la page de facture hébergées par Stripe** (lien de ses
+  e-mails) : nom, icône, adresse et pied de page du compte.
+- **Le portail client** lui-même : nom et icône du compte en haut de page (seul
+  le titre est réglable par configuration).
+- **La ligne de conditions en pied de la page Checkout** (« Powered by Stripe »,
+  conditions du compte).
+- **Le relevé bancaire** : `BENABENS* CORTEX` pour un pack (préfixe du compte +
+  suffixe posé par le code), `BENABENS CORTEX` pour l'abonnement (libellé complet
+  du produit `cortex_pro`, posé par `stripe-setup`). Le préfixe n'est pas modifié.
+
+Deux façons d'aller au bout, à trancher (aucune n'est faite par le code) :
+
+1. **Couper les e-mails automatiques du compte** (Paramètres → E-mails clients :
+   paiements réussis, remboursements ; Facturation → Abonnements et e-mails).
+   Cortex envoie déjà son reçu ; il faudrait encore un e-mail Cortex pour
+   l'échec de paiement et le renouvellement. **Touche aussi Kairo** : à faire
+   seulement si Kairo n'a pas besoin de ces e-mails.
+2. **Un second compte Stripe « Cortex »** dans la même organisation Stripe
+   (même entreprise, EI et SIREN) : nom public, icône, e-mails, factures et
+   portail propres à Cortex, sans rien changer pour Kairo. Demande de recréer
+   produits, prix, webhook et clés (`stripe-setup` le fait) et de migrer les
+   abonnés existants : la solution propre si Cortex a ses premiers clients.
+
 ## 3. Produits et prix
 
 **Catalogue de produits → Ajouter un produit.** La `lookup_key` se saisit sur le
@@ -161,13 +205,13 @@ Copie le **secret de signature** (`whsec_…`) pour l'étape 7.
 ## 5. Portail client
 
 **Paramètres → Facturation → Portail client.** C'est par lui que l'abonné
-change de carte, télécharge ses factures et résilie (bouton « Gérer mon
-abonnement » de l'app).
+change de carte et résilie (bouton « Gérer mon abonnement » de l'app). Ses
+factures sont dans Mon compte, à la marque Cortex (§ 2 bis).
 
 | Fonctionnalité | Réglage |
 |---|---|
 | Mettre à jour le moyen de paiement | activé |
-| Historique des factures | activé |
+| Historique des factures | **désactivé** (factures Stripe à la marque du compte ; celles de Cortex sont dans Mon compte) |
 | Résilier un abonnement | activé, **à la fin de la période de facturation** |
 | Changer d'offre | **désactivé** |
 | Mettre en pause | désactivé |
@@ -216,6 +260,13 @@ elles sont déjà justes :
 | `SIGNUP_FREE_CREDITS` | `0` |
 | `SUBSCRIPTION_MONTHLY_CREDITS` | `20` (ou absente) |
 | `PUBLISHER_EMAIL` | l'adresse qui reçoit les demandes de rétractation et, à défaut de `CORTEX_OWNER_EMAIL`, les alertes (dépense, rappel de reconduction : § 12) |
+| `INVOICE_SELLER_NAME` | `Benjamin Abensur EI` : nom de l'entrepreneur **suivi de « EI »** (obligatoire depuis 2022) |
+| `INVOICE_SELLER_ADDRESS` | adresse du vendeur, lignes séparées par `|` (elle n'apparaît que sur la facture PDF, jamais dans l'e-mail) |
+| `INVOICE_SELLER_SIRET` | SIRET (14 chiffres) ou SIREN (9) |
+| `INVOICE_SELLER_REGISTRATION` | facultatif : immatriculation (RCS / RNE) si elle existe |
+
+Sans les trois premières, la facture PDF n'est pas émise (Mon compte répond
+« Facture indisponible ») : jamais de facture sans les mentions obligatoires.
 
 Tant que la clé est une clé de test et que l'instance est ouverte au public,
 la page « Abonnement & crédits » affiche « Les achats ouvrent bientôt » et le

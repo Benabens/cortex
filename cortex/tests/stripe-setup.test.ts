@@ -18,8 +18,8 @@ import { findPortalConfiguration, setupStripe, type SetupOptions } from "../lib/
 
 type Row = Record<string, unknown> & { id: string };
 /** Faux compte Stripe : quatre collections en mémoire et le journal des écritures. */
-function fakeStripe(seed: { prices?: Row[]; products?: Row[]; portals?: Row[]; webhooks?: Row[] } = {}) {
-  const db = { prices: [...(seed.prices ?? [])], products: [...(seed.products ?? [])], portals: [...(seed.portals ?? [])], webhooks: [...(seed.webhooks ?? [])] };
+function fakeStripe(seed: { prices?: Row[]; products?: Row[]; portals?: Row[]; webhooks?: Row[]; coupons?: Row[] } = {}) {
+  const db = { prices: [...(seed.prices ?? [])], products: [...(seed.products ?? [])], portals: [...(seed.portals ?? [])], webhooks: [...(seed.webhooks ?? [])], coupons: [...(seed.coupons ?? [])] };
   const writes: string[] = [];
   let n = 0;
   const id = (prefix: string) => `${prefix}_${++n}`;
@@ -49,6 +49,7 @@ function fakeStripe(seed: { prices?: Row[]; products?: Row[]; portals?: Row[]; w
         update: async (configId: string, p: Record<string, unknown>) => { writes.push(`portal.update ${configId}`); return patch(db.portals, configId, p); },
       },
     },
+    coupons: { list: async () => ({ data: db.coupons }) },
     webhookEndpoints: {
       list: async () => ({ data: db.webhooks }),
       create: async (p: Record<string, unknown>) => { writes.push(`webhooks.create ${p.url}`); const row = { id: id("we"), status: "enabled", secret: "whsec_fake_generated", ...p }; db.webhooks.push(row); return row; },
@@ -208,4 +209,26 @@ test("clé de l'app : ses droits sont vérifiés (lectures seules) avant d'être
   );
   // Une panne n'est pas un droit manquant : elle remonte telle quelle.
   await assert.rejects(missingRuntimeAccess(withAccess({ invoices: { list: () => Promise.reject(new Error("réseau coupé")) } })), /réseau coupé/);
+});
+
+test("portail de Cortex : moyen de paiement et résiliation, sans l'historique des factures Stripe (à la marque du compte partagé)", async () => {
+  const { client, db } = fakeStripe();
+  await setupStripe(client, OPTIONS);
+  const portal = db.portals[0] as unknown as { features: { invoice_history: { enabled: boolean } }; business_profile: { headline: string } };
+  assert.equal(portal.features.invoice_history.enabled, false, "les factures Cortex sont dans Mon compte");
+  assert.doesNotMatch(portal.business_profile.headline, /factures/i);
+  assert.match(portal.business_profile.headline, /^Cortex/);
+});
+
+test("coupons sans nom : signalés (Stripe montrerait leur identifiant sur ses reçus), jamais modifiés", async () => {
+  const { client, writes } = fakeStripe({ coupons: [
+    { id: "QxJO9DZs", name: null, valid: true },
+    { id: "named", name: "Bienvenue -30 %", valid: true },
+    { id: "old", name: null, valid: false },
+  ] });
+  const report = await setupStripe(client, OPTIONS);
+  const flagged = report.steps.filter((st) => st.what === "coupon");
+  assert.deepEqual(flagged.map((st) => st.action), ["attention"]);
+  assert.match(flagged[0].detail, /QxJO9DZs/);
+  assert.ok(!writes.some((w) => w.startsWith("coupons")), "aucune écriture sur les coupons");
 });

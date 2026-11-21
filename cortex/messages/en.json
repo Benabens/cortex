@@ -65,6 +65,7 @@
     "auth_url_missing": "AUTH_URL is missing.",
     "auth_url_missing_checkout": "AUTH_URL is missing, so return URLs can’t be built.",
     "no_subscription": "There’s no subscription to manage.",
+    "invoice_unavailable": "The invoice isn’t available right now. Try again in a few minutes, or write to us at {email}.",
     "monitoring_envelope_unreadable": "Unreadable envelope",
     "monitoring_project_unknown": "Unknown project",
     "connected_app_not_found": "App not found.",
@@ -748,6 +749,15 @@
       "history": "History",
       "historyEmpty": "No transactions yet. Choose a subscription or pack above to get credits.",
       "historyLabel": "Credit history, scrollable table",
+      "payments": "Payments and invoices",
+      "paymentsLabel": "Payments and invoices, scrollable table",
+      "paymentsHint": "The invoice for each payment, as a PDF.",
+      "paymentPack": "Credit pack",
+      "paymentSubscription": "Pro subscription",
+      "amount": "Amount",
+      "invoice": "Invoice",
+      "invoicePdf": "PDF",
+      "invoiceFor": "Download the invoice from {date} (PDF)",
       "date": "Date",
       "movement": "Transaction",
       "purchased": "Purchased",
@@ -1667,5 +1677,56 @@
     "shortfall": "{missing, plural, one {# question of {requested} couldn’t be generated} other {# questions of {requested} couldn’t be generated}}",
     "shortfallBack": "{shortfall}: {credits} {back, plural, one {credit returned} other {credits returned}}",
     "errorBack": "{error} ({credits} {back, plural, one {credit returned} other {credits returned}})."
+  },
+  "order": {
+    "product": {
+      "credits_10": "10-credit pack",
+      "pro_monthly": "Cortex Pro monthly",
+      "pro_yearly": "Cortex Pro yearly"
+    },
+    "discount": "Discount",
+    "discountNamed": "Discount “{name}”"
+  },
+  "receipt": {
+    "subject": {
+      "credits_10": "Your Cortex receipt: 10-credit pack",
+      "pro_monthly": "Your Cortex receipt: Pro monthly subscription",
+      "pro_yearly": "Your Cortex receipt: Pro yearly subscription"
+    },
+    "title": "Payment received",
+    "leadPack": "Thank you for your purchase: your 10 credits are in your Cortex account.",
+    "leadSubscription": "Thank you: we have received the payment for your Cortex Pro subscription.",
+    "product": "Product",
+    "period": "Period",
+    "periodValue": "{start} to {end}",
+    "price": "Price",
+    "paid": "Amount paid",
+    "date": "Date",
+    "number": "Order number",
+    "row": "{label}: {value}",
+    "invoice": "Download the invoice (PDF)",
+    "account": "View my account",
+    "accountHint": "Your payments and invoices stay available on your Account page.",
+    "help": "A question about this payment? Write to us at {email}.",
+    "sign": "The Cortex team"
+  },
+  "invoicePdf": {
+    "title": "Invoice",
+    "filename": "invoice",
+    "number": "No. {number}",
+    "issued": "Issue date: {date}",
+    "sale": "Date of sale: {date}",
+    "seller": "Seller",
+    "customer": "Customer",
+    "item": "Description",
+    "qty": "Qty",
+    "unit": "Unit price",
+    "amount": "Amount",
+    "subtotal": "Subtotal",
+    "total": "Total",
+    "paid": "Amount paid",
+    "paidOn": "Paid on {date}.",
+    "vat": "{note} (VAT not applicable)",
+    "period": "Period {start} to {end}"
   }
 }

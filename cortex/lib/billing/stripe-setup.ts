@@ -15,6 +15,11 @@
  *
  * Un prix existant dont le montant diffère est SIGNALÉ, jamais modifié : c'est
  * de l'argent, la décision n'appartient pas à un script.
+ *
+ * COUPONS : ce script n'en crée aucun. S'il en crée un jour, toujours avec un
+ * `name` : sans nom, Stripe affiche l'identifiant du coupon (« QxJO9DZs ») sur ses
+ * reçus et factures. Les coupons actifs sans nom du compte sont SIGNALÉS (Ben les
+ * renomme dans le tableau de bord ; un coupon peut servir Kairo, rien n'est modifié).
  */
 import type Stripe from "stripe";
 import { HANDLED_EVENTS, PLANS } from "./stripe-events";
@@ -53,7 +58,7 @@ export interface SetupOptions {
 }
 
 export interface SetupStep {
-  what: "produit" | "prix" | "portail" | "webhook" | "ancien webhook";
+  what: "produit" | "prix" | "portail" | "webhook" | "ancien webhook" | "coupon";
   action: "créé" | "mis à jour" | "inchangé" | "désactivé" | "à créer" | "à mettre à jour" | "à désactiver" | "attention";
   detail: string;
 }
@@ -67,14 +72,16 @@ export interface SetupReport {
 export function portalParams(site: string, landing: string) {
   return {
     business_profile: {
-      headline: "Cortex : carte, factures, résiliation",
+      // Factures : celles de Cortex sont dans Mon compte ; l'historique du portail montrerait
+      // les factures Stripe, à la marque du compte partagé (pas de marque par configuration).
+      headline: "Cortex : moyen de paiement et résiliation",
       privacy_policy_url: `${landing}/privacy`,
       terms_of_service_url: `${landing}/terms`,
     },
     default_return_url: `${site}/compte`,
     features: {
       customer_update: { enabled: false },
-      invoice_history: { enabled: true },
+      invoice_history: { enabled: false },
       payment_method_update: { enabled: true },
       // Résiliation en ligne, effet à la fin de la période payée.
       subscription_cancel: { enabled: true, mode: "at_period_end" as const },
@@ -112,7 +119,7 @@ function portalMatches(c: Stripe.BillingPortal.Configuration, want: ReturnType<t
     c.business_profile?.privacy_policy_url === want.business_profile.privacy_policy_url &&
     c.business_profile?.terms_of_service_url === want.business_profile.terms_of_service_url &&
     f?.customer_update?.enabled === false &&
-    f?.invoice_history?.enabled === true &&
+    f?.invoice_history?.enabled === false &&
     f?.payment_method_update?.enabled === true &&
     f?.subscription_cancel?.enabled === true &&
     f?.subscription_cancel?.mode === "at_period_end" &&
@@ -200,6 +207,16 @@ export async function setupStripe(s: Stripe, o: SetupOptions): Promise<SetupRepo
       else await s.billingPortal.configurations.create(want);
     }
     say("portail", portal ? "mis à jour" : "créé", portal ? "à mettre à jour" : "à créer", `${portal?.id ?? "configuration"} étiquetée app=${PORTAL_APP_TAG} (résiliation en fin de période, pas de changement d'offre)`);
+  }
+
+  // --- Coupons sans nom : lus, signalés, jamais modifiés ------------------------------
+  try {
+    const unnamed = (await s.coupons.list({ limit: 100 })).data.filter((c) => c.valid && !c.name?.trim());
+    for (const c of unnamed) {
+      steps.push({ what: "coupon", action: "attention", detail: `${c.id} n'a pas de nom : les reçus et factures de Stripe afficheraient « ${c.id} ». Lui donner un nom dans le tableau de bord (Produits → Coupons).` });
+    }
+  } catch (err) {
+    steps.push({ what: "coupon", action: "attention", detail: `coupons illisibles avec cette clé (${(err as Error)?.message ?? err}) : vérifier à la main qu'ils ont tous un nom` });
   }
 
   // --- Webhook --------------------------------------------------------------------
