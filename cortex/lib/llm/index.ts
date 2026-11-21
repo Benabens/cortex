@@ -73,10 +73,10 @@ function assistMaxTokens(): number {
 
 /**
  * Plafond d'une aide qui fixe sa propre taille (le drill : énoncé, indices et corrigé, réflexion
- * comprise). 16 k tokens de Sonnet 5 = 0,16 $ ; le plafond par réservation (0,3 crédit × 0,9 $)
- * borne de toute façon la somme des essais d'une même aide.
+ * comprise : 10 000 demandés). 12 k tokens de Sonnet 5 ≈ 0,12 $ ; le plafond par réservation
+ * (0,3 crédit × 0,9 $ = 0,27 $) borne de toute façon la somme des essais d'une même aide.
  */
-export const ASSIST_MAX_TOKENS_CAP = 16_000;
+export const ASSIST_MAX_TOKENS_CAP = 12_000;
 
 async function completeWith(provider: LlmProvider, req: CompleteRequest): Promise<CompleteResult> {
   // Attribution (llm_usage) : site d'appel capturé AVANT tout await (pile sync),

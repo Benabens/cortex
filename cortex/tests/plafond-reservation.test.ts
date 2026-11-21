@@ -167,7 +167,8 @@ test("I5 : une aide (0,3 crédit) : modèle borné à sonnet, réponse bornée, 
   });
   assert.equal(hits, 1);
   assert.equal(seen[0].model, "claude-sonnet-5", "une aide ne part jamais sur opus");
-  assert.ok((seen[0].max_tokens ?? Infinity) <= 8000, `réponse bornée (${seen[0].max_tokens})`);
+  // Borne dure des aides (lib/llm ASSIST_MAX_TOKENS_CAP) : le drill demande 10 000 jetons (réflexion comprise).
+  assert.ok((seen[0].max_tokens ?? Infinity) <= 12_000, `réponse bornée (${seen[0].max_tokens})`);
   const refund = await authGet<{ delta: number; offered: number | null }>(
     `SELECT delta, offered FROM credit_transactions WHERE user_id = 'helper' AND ref LIKE 'refund:assist:%'`,
   );
