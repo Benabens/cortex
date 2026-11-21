@@ -1,6 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { nowStr, q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
+import { annaleExercisePoints, exercisePoints } from "@/lib/exam-points";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
 import { EXAM_OUTPUT_MAX_TOKENS, HARD_STOP_CODES, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
@@ -769,9 +770,16 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   // = longueur du blueprint → comportement HISTORIQUE inchangé (régression byte-identique). count>0
   // tronque ou ré-instancie cycliquement les slots du blueprint pour atteindre la longueur demandée.
   const want = opts.count && opts.count > 0 ? Math.min(12, Math.floor(opts.count)) : 0;
+  const blueprintTotal = slots.reduce((s, x) => s + x.points, 0);
   if (want && want !== slots.length) {
     if (want < slots.length) slots = slots.slice(0, want);
     else { const base = slots.slice(); while (slots.length < want) slots.push(base[slots.length % base.length]); }
+  }
+  // Barème par exercice (lib/exam-points) : celui de l'annale quand elle le donne, sinon les poids des
+  // slots sur le total du blueprint, quel que soit le nombre demandé. Hors CS-202, blueprint figé.
+  if (currentCourse() !== DEFAULT_COURSE && slots.length) {
+    const pts = exercisePoints(slots.map((s) => s.points), blueprintTotal, await annaleExercisePoints());
+    slots = slots.map((s, i) => ({ ...s, points: pts[i] }));
   }
   // « Mets l'accent sur… » (focus générique) — force 1-2 slots à porter sur le thème choisi
   // SANS monopoliser (le reste du blueprint est préservé). Catégorie/barème gardés ; on remplace par
