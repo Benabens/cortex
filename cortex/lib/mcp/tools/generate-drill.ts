@@ -1,14 +1,18 @@
 import * as z from "zod/v4";
 import { creditCost } from "@/lib/billing/credits";
-import { generateDrill } from "@/lib/drill";
+import { startDrillJob } from "@/lib/drill-job";
+import { AssistRefused } from "@/lib/billing/reserve";
+import { errorText } from "@/lib/i18n/user-error";
+import { activeJob, ReservationRefused } from "@/lib/jobs";
+import { log } from "@/lib/metrics";
+import { redactMessage } from "@/lib/observability";
 import { FIELD_LIMITS } from "@/lib/field-limits";
 import { dueConcepts } from "@/lib/schedule";
 import { topWeaknessTopic } from "@/lib/weaknesses";
-import { runAssist } from "../assist";
-import { clip, htmlToText } from "../content";
+import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { defineTool, pendingResult, SPENDING_HINTS, ToolError, paidCall } from "../tool";
+import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError, paidCall } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -18,9 +22,15 @@ const output = z.object({
   declined: declinedSchema.nullable().describe("When status is declined: why, and the cost that was announced."),
   drill: z.object({
     statement: z.string(),
-    hints: z.array(z.string()).describe("Five hints, from vague to almost the solution: reveal them one at a time."),
+    hints: z.array(z.string()).describe("Five hints, from vague to the decisive step: reveal them one at a time."),
     solution: z.string(),
-  }).nullable(),
+  }).nullable().describe("Always null since the question is written in the background: get_job_status returns it."),
+  // Champ RACINE (seule la racine des schémas publiés tolère un champ ajouté, docs/MCP.md).
+  job: z.object({
+    job_id: z.number(),
+    estimated_minutes: z.string(),
+    track_with: z.string(),
+  }).nullable().describe("When status is started or already_running: the background job that writes the question."),
 });
 
 /** Concept par défaut : le point faible le plus grave, sinon le concept le plus en retard en répétition espacée. */
@@ -37,8 +47,9 @@ export default defineTool({
   title: "Generate a practice question",
   description:
     "Generates ONE exam-style practice question on a concept, in the style of the course's real exams, with five progressive hints and a worked solution. " +
-    "Without a concept, it targets the student's most serious weak point. Takes up to a few minutes. " +
-    paidCall("assistance"),
+    "Without a concept, it targets the student's most serious weak point. " +
+    paidCall("assistance") +
+    " After confirmation, the question is written in the background (usually 1-3 minutes): read it with get_job_status and the returned job_id.",
   kind: "generate",
   annotations: SPENDING_HINTS,
   userSummary: "generateDrill",
@@ -52,7 +63,11 @@ export default defineTool({
     return ctx.inCourse(args.course, async (c) => {
       const concept = args.concept?.trim() || (await defaultConcept());
       if (!concept) throw new ToolError("invalid_input", "This course has no tracked weak point or concept due for review. Specify the concept to practise with “concept”.");
-      const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, declined: null, drill: null };
+      const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, declined: null, drill: null, job: null };
+      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "1-3", track_with: `get_job_status with job_id=${jobId}` });
+      // Un drill déjà en cours dans ce cours est rendu tel quel : rien à confirmer, rien de débité.
+      const running = await activeJob("drill");
+      if (running) return { ...base, status: "already_running" as const, job: track(running.id) };
       const decision = await ctx.confirm(
         { bucket: "assist", kind: "drill", costCenti: creditCost("assist"), summary: `Generate one practice question with five hints and a worked solution on “${clip(concept, 80)}” for ${courseLabel(c)}.` },
         { course: c.id, concept },
@@ -60,22 +75,28 @@ export default defineTool({
       );
       const pending = pendingResult(decision, base);
       if (pending) return pending;
-      await ctx.progress("Writing the practice question…");
-      const d = await runAssist("drill", () => generateDrill(concept));
+      // En job (lib/drill-job) : un appel de 1 à 3 minutes faisait couper le client (CS-250, 21/11).
+      // La réservation est faite ici : un refus (solde, quota, moteur absent) revient tout de suite.
+      let started: Awaited<ReturnType<typeof startDrillJob>>;
+      try {
+        started = await startDrillJob(concept);
+      } catch (e) {
+        if (e instanceof AssistRefused || e instanceof ReservationRefused) throw new ToolError(codeForStatus(e.status), `${errorText("en", e)} Nothing was charged.`, undefined, e.code);
+        log("error", "mcp.drill_start_failed", { message: redactMessage(e instanceof Error ? e.message : String(e)) });
+        // Réservé et peut-être en file : relancer sans regarder lancerait (et débiterait) deux fois.
+        throw new ToolError("internal", "Starting the practice question failed on the server. It may have been queued: check with get_job_status (without job_id) before trying again.");
+      }
       return {
         ...base,
-        status: "done" as const,
-        drill: {
-          statement: clip(htmlToText(d.statement_html), 6000),
-          hints: (d.hints ?? []).slice(0, 5).map((h) => clip(htmlToText(h), 1500)),
-          solution: clip(htmlToText(d.solution_html), 8000),
-        },
+        status: started.existing ? "already_running" as const : "started" as const,
+        job: track(started.jobId),
       };
     });
   },
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    return "The practice question is ready. Offer the hints one at a time before showing the worked solution.";
+    if (o.job) return `${o.status === "started" ? "The practice question is being written" : "A practice question is already being written"} (job ${o.job.job_id}, usually 1–3 min). Read it with get_job_status (job_id=${o.job.job_id}), checking every 30 seconds or so.`;
+    return "Practice question.";
   },
 });

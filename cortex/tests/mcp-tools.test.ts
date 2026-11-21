@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { finishDrillJob } from "./helpers/drill-job";
 import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
@@ -485,8 +486,16 @@ test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmati
 
   const done = await call(client, "generate_drill", { concept: "valeurs propres", confirmation_token: sc.confirmation.confirmation_token });
   assert.equal(done.isError, undefined, text(done));
-  const drill = (done.structuredContent as { status: string; drill: { hints: string[]; statement: string } });
-  assert.equal(drill.status, "done");
+  // Le drill s'écrit en job (lib/drill-job) : débité au lancement, rendu par get_job_status.
+  const started = done.structuredContent as { status: string; drill: unknown; job: { job_id: number } };
+  assert.equal(started.status, "started");
+  assert.equal(started.drill, null);
+  assert.equal(await balance(ALICE), before - 30);
+  assert.ok((await finishDrillJob(ALICE, started)).ok);
+  const status = await call(client, "get_job_status", { job_id: started.job.job_id });
+  const drill = status.structuredContent as { job: { status: string; type: string }; drill: { hints: string[]; statement: string } };
+  assert.equal(drill.job.status, "done");
+  assert.equal(drill.job.type, "drill");
   assert.equal(drill.drill.hints.length, 5);
   assert.equal(drill.drill.statement, "Diagonalise A.");
   assert.equal(await balance(ALICE), before - 30);
@@ -596,7 +605,8 @@ test("client 2026-07-28 avec élicitation : la personne confirme dans le client,
   const before = await balance(ALICE);
   const r = await call(client, "generate_drill", { concept: "matrices semblables" });
   assert.equal(r.isError, undefined, text(r));
-  assert.equal((r.structuredContent as { status: string }).status, "done");
+  assert.equal((r.structuredContent as { status: string }).status, "started");
+  assert.ok((await finishDrillJob(ALICE, r.structuredContent)).ok);
   assert.equal(asked.length, 1);
   assert.match(asked[0], /Exact cost: 0\.3 credits/);
   assert.equal(await balance(ALICE), before - 30);
@@ -703,7 +713,8 @@ test("client 2026-07-28 : une confirmation acceptée ne sert qu'une fois (rejoue
   const retry = { arguments: { concept: "déterminant" }, inputResponses: { confirm: { action: "accept", content: { confirm: true } } }, requestState: first.result!.requestState };
   const before = await balance(ALICE);
   const done = await modernCall(access, "generate_drill", retry);
-  assert.equal((done.result?.structuredContent as { status: string }).status, "done");
+  assert.equal((done.result?.structuredContent as { status: string }).status, "started");
+  assert.ok((await finishDrillJob(ALICE, done.result?.structuredContent)).ok);
   assert.equal(await balance(ALICE), before - 30);
   const replay = await modernCall(access, "generate_drill", retry);
   assert.equal(replay.result?.isError, true);

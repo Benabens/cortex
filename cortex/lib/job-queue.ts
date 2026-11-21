@@ -26,9 +26,12 @@ import { log } from "@/lib/metrics";
  * Chaque file a son FIFO et ses places ; une entrée sait la sienne (colonne `pool`). Dans la file
  * des imports, un compte ne tient qu'UNE place à la fois : ses autres imports attendent, et ceux
  * des autres comptes passent devant eux (20 cours relancés d'un coup ne bloquent personne).
+ * TROISIÈME FILE, les aides en arrière-plan (« drill » du connecteur) : un appel au modèle d'une
+ * à trois minutes, payé 0,3 crédit, qui n'attend pas derrière des examens de 10 à 35 minutes.
+ * MAX_GLOBAL_ASSIST_JOBS (défaut 4) places, une à la fois par compte.
  */
 
-export type QueuePool = "gen" | "ingest";
+export type QueuePool = "gen" | "ingest" | "assist";
 export type QueueEntry = { user: string; course: string; jobId: number };
 export type Admission = { admitted: true } | { admitted: false; position: number };
 
@@ -42,14 +45,19 @@ export function maxGlobalIngestJobs(): number | null {
   return intLimit("MAX_GLOBAL_INGEST_JOBS", 2);
 }
 
-const POOLS: QueuePool[] = ["gen", "ingest"];
-const capOf = (pool: QueuePool) => (pool === "ingest" ? maxGlobalIngestJobs() : maxGlobalJobs());
-/** File du type de job : l'import a la sienne, tout le reste (payé) partage l'autre. */
-export const poolOfJobType = (type: string): QueuePool => (type === "ingest" ? "ingest" : "gen");
+/** Aides en arrière-plan (drill) simultanées pour toute l'instance, hors des deux autres files. */
+export function maxGlobalAssistJobs(): number | null {
+  return intLimit("MAX_GLOBAL_ASSIST_JOBS", 4);
+}
+
+const POOLS: QueuePool[] = ["gen", "ingest", "assist"];
+const capOf = (pool: QueuePool) => (pool === "ingest" ? maxGlobalIngestJobs() : pool === "assist" ? maxGlobalAssistJobs() : maxGlobalJobs());
+/** File du type de job : l'import et l'aide ont chacun la leur, les générations partagent l'autre. */
+export const poolOfJobType = (type: string): QueuePool => (type === "ingest" ? "ingest" : type === "drill" ? "assist" : "gen");
 /** Aucune des deux files n'a de plafond : rien n'est écrit (dev sans garde-fous). */
 const queueOff = () => POOLS.every((p) => capOf(p) === null);
 /** Places d'une file qu'un même compte tient à la fois (null : pas de borne, MAX_ACTIVE_JOBS borne déjà les générations). */
-const perUserCapOf = (pool: QueuePool): number | null => (pool === "ingest" ? 1 : null);
+const perUserCapOf = (pool: QueuePool): number | null => (pool === "gen" ? null : 1);
 
 type QueueRow = { user_id: string; course: string; job_id: number; pool: QueuePool; state: string; started_at: string | null; heartbeat_at: string | null };
 const sameEntry = (r: QueueRow, user: string, course: string, jobId: number) => r.user_id === user && r.course === course && Number(r.job_id) === jobId;

@@ -61,7 +61,7 @@
               "description": "Paid generation: the cost is announced first and nothing runs before the student agrees.",
               "prompt": "Give me one practice question on discrete random variables.",
               "tools_triggered": "generate_drill",
-              "expected_behavior": "The first call spends nothing and returns a confirmation token with the exact cost quoted by the first call; ChatGPT asks the student, quoting that cost; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
+              "expected_behavior": "The first call spends nothing and returns a confirmation token with the exact cost quoted by the first call; ChatGPT asks the student, quoting that cost; after an explicit yes, the second call starts writing the question and returns a job_id; get_job_status with that job_id then returns one exam-style question with five progressive hints and a worked solution (usually within 1-3 minutes)."
             },
             {
               "description": "Credit balance and daily limits.",

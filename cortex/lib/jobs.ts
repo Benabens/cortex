@@ -20,7 +20,8 @@ import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-erro
  * Le worker (scripts/run-job.ts) écrit ici après chaque étape → survit au reload.
  */
 export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done" | "error" | "canceled";
-export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare";
+/** « drill » : une aide (0,3 crédit) lancée par le connecteur, exécutée en job pour ne pas faire attendre le client (lib/drill-job). */
+export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill";
 export type Job = {
   id: number;
   type: JobType;
@@ -132,6 +133,24 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     await releaseQuotaEvent(user, ingestRef);
   }
   return { ...res, costCenti: res.existing ? 0 : costCenti };
+}
+
+/**
+ * Insertion EXCLUSIVE d'un job dont la réservation est déjà faite par l'appelant (aide en job,
+ * lib/drill-job : 0,3 crédit réservé comme une aide, pas comme une génération). Le job actif du
+ * même type est re-vérifié dans la transaction ; s'il existe, l'appelant rend sa réservation.
+ */
+export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {
+  await ensureJobsSchema();
+  return q.tx(async () => {
+    const active = await q.get<{ id: number }>(`SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`, type);
+    if (active) return { id: active.id, existing: true };
+    const id = await q.insert(
+      `INSERT INTO jobs (type, target, status, current_step, progress, credit_ref) VALUES (?,?,'queued','En file…',0,?)`,
+      type, target, ref,
+    );
+    return { id, existing: false };
+  });
 }
 
 /** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion) : crédit, place en cours et génération du jour. */
@@ -538,6 +557,8 @@ export async function listJobs(limit = 10): Promise<Job[]> {
 export async function retryJob(id: number, course?: string): Promise<Job | null> {
   const old = await getJob(id);
   if (!old) return null;
+  // Un drill se redemande par le connecteur, avec un nouveau devis (son tarif est celui d'une aide).
+  if (old.type === "drill") return old;
   const { id: newId, existing } = await createJobExclusive(old.type, old.target ?? undefined);
   if (!existing) await startWorker(newId, course);
   return await getJob(newId);
@@ -563,7 +584,8 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   // le job attend son tour, en file. Il est démarré par la distribution quand une place se libère.
   // Les imports ont leur propre file (audit fuites B3) : ils ne prennent jamais la place d'une génération.
   const { admitJob, dispatchQueue, poolOfJobType, releaseJob } = await import("@/lib/job-queue");
-  const pool = poolOfJobType((await q.get<{ type: string }>(`SELECT type FROM jobs WHERE id = ?`, jobId))?.type ?? "");
+  const jobType = (await q.get<{ type: string }>(`SELECT type FROM jobs WHERE id = ?`, jobId))?.type ?? "";
+  const pool = poolOfJobType(jobType);
   const admission = await admitJob(currentUser(), c, jobId, pool);
   if (!admission.admitted) {
     const what = pool === "ingest" ? "ton import démarre" : "ta génération démarre";
@@ -592,7 +614,8 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   // CORTEX_USER : le worker détaché doit hériter du TENANT de l'appelant
   // (contexte requête = user connecté ; pompe/sweep = user du tenant balayé),
   // sinon en Postgres multi-user il écrirait dans le tenant « owner ».
-  const env = { ...process.env, CORTEX_COURSE: c, CORTEX_USER: currentUser() };
+  // CORTEX_JOB_TYPE : un drill démarre sans rapatrier les fichiers du cours (scripts/run-job.ts).
+  const env = { ...process.env, CORTEX_COURSE: c, CORTEX_USER: currentUser(), CORTEX_JOB_TYPE: jobType };
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
   // Suivi jusqu'à sa sortie : un arrêt gracieux attend ce worker (lib/drain).
   trackWorker(child, { jobId, user: env.CORTEX_USER, course: c });
@@ -895,11 +918,14 @@ function orderedUnits(target: string | null): number | null {
   } catch { return null; }
 }
 
-/** Le job actif le plus récent (pour réafficher la progression au reload). */
+/**
+ * Le job actif le plus récent (pour réafficher la progression au reload). Sans type : les
+ * générations du cours, sans les aides en job (drill) — ni bandeau de l'Accueil, ni attente.
+ */
 export async function activeJob(type?: JobType): Promise<Job | null> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  const where = type ? `AND type = '${type}'` : "";
+  const where = type ? `AND type = '${type}'` : `AND type <> 'drill'`;
   const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`);
   return r ? rowToJob(r) : null;
 }

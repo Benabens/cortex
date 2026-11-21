@@ -86,7 +86,8 @@ sources, même archive ; l'empreinte sha256 affichée à la fin identifie ce qui
 
 
 Les cas de test supposent le compte démo du § 5 (cours `DEMO-101`). Le cas « generate_drill » montre le devis
-(le coût exact annoncé par le premier appel) puis la question après un « oui ».
+(le coût exact annoncé par le premier appel), puis, après un « oui », un `job_id` : `get_job_status` rend la question
+(en 1 à 3 minutes en général).
 
 ## 5. Compte de démo : connexion par mot de passe réservée à la revue (voie retenue)
 

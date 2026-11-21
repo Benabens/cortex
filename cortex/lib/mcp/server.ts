@@ -47,7 +47,7 @@ export const SERVER_INSTRUCTIONS = [
   "Costs and what is left: get_account_status gives the cost of each kind of generation and the remaining limits; check it before suggesting a paid action, and quote the exact cost returned by the first call.",
   "To add a course: create_course, then add_course_source for each material (past exams matter most), then prepare_course (costs credits, confirmed like a generation) and follow the job with get_job_status.",
   "If generate_mock_exam answers format_required, ask the student how the exam looks (type, number of questions, duration), then record it with set_exam_format or pass format for this exam only.",
-  "Long jobs (generate_mock_exam, prepare_course): poll get_job_status at most every 30-60 seconds.",
+  "Long jobs (generate_mock_exam, prepare_course): poll get_job_status at most every 30-60 seconds. A confirmed generate_drill is a short job (1-3 minutes): poll get_job_status about every 30 seconds.",
   "When the course the student mentions is unclear, list_courses gives the account's courses; to report several faulty questions of an exam, call report_question once per question with the reason in comment.",
   "Answer in the student's language; course content keeps its own language.",
 ].join("\n");

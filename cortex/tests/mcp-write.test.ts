@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { finishDrillJob } from "./helpers/drill-job";
 import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { textPdf } from "./helpers/pdf";
@@ -588,7 +589,9 @@ test("génération par le MCP : le propriétaire génère directement (rien à c
   const owner = await mcp((await connectAs(OWNER, { generate: true })).access);
   for (let i = 0; i < 2; i++) { // au-delà du quota d'assistance du jour (1), sans aucun crédit
     const done = await call(owner, "generate_drill", { course: "MATH-203", concept: `intégrales ${i}` });
-    assert.equal((done.structuredContent as { status: string }).status, "done", text(done));
+    // En job (lib/drill-job) : lancé sans devis, exécuté ici comme par le worker.
+    assert.equal((done.structuredContent as { status: string }).status, "started", text(done));
+    assert.ok((await finishDrillJob(OWNER, done.structuredContent)).ok);
   }
   assert.equal(await credits.getBalanceCenti(OWNER), 0);
   const counted = await authGet<{ n: number }>(`SELECT count(*) n FROM gen_events WHERE user_id = ?`, OWNER);

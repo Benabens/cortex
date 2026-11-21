@@ -18,8 +18,8 @@ import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
 import { INGEST_REPORT_ENV, ingestFailureMessage } from "../lib/ingest-report";
-import { jobErrorOf } from "../lib/i18n/job-text";
-import { userError, type UserError } from "../lib/i18n/user-error";
+import { jobErrorOf, type JobError } from "../lib/i18n/job-text";
+import { userError } from "../lib/i18n/user-error";
 import { readIngestReport } from "../lib/ingest-report-file";
 import { ingestMaxHeapMb, ingestTimeoutMs, spawnBounded } from "../lib/ingest-limits";
 import fs from "node:fs";
@@ -53,7 +53,7 @@ function finish(code: number): Promise<never> {
  * `info` : l'erreur sans langue (lib/i18n/job-text) ; `msg` reste la phrase française du journal
  * et du lecteur français.
  */
-async function fail(msg: string, info: UserError = userError("job_failed")): Promise<never> {
+async function fail(msg: string, info: JobError = userError("job_failed"), opts: { refund?: boolean } = {}): Promise<never> {
   // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
   // « done » aussi : un QCM annulé après livraison est clos par cancelJob avec ce qu'il contenait.
   try { if (["canceled", "done"].includes((await getJob(jobId))?.status ?? "")) process.exit(0); } catch {}
@@ -83,7 +83,8 @@ async function fail(msg: string, info: UserError = userError("job_failed")): Pro
   // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier (idempotent — ref
   // refund:job:…, et seulement si le débit a eu lieu) ; après des appels payants,
   // en crédits offerts, que le budget lié au revenu borne. No-op sans BILLING_ENABLED.
-  try {
+  // Un drill a déjà appliqué la règle des aides (lib/drill-job) : opts.refund = false.
+  if (opts.refund !== false) try {
     const { refundJobCredits } = await import("../lib/jobs");
     const { fmtCreditsBack } = await import("../lib/billing/credits");
     const j = await getJob(jobId);
@@ -225,6 +226,15 @@ async function main() {
     const { resolveExamFormat } = await import("../lib/exam-format");
     await resolveExamFormat().catch(() => null);
   }
+
+  // Aide en job (drill du connecteur) : un appel au modèle, sans fichier du cours (cf. FILELESS).
+  if (job.type === "drill") {
+    await logJob(jobId, `Worker démarré (PID ${process.pid})`);
+    const r = await (await import("../lib/drill-job")).executeDrillJob(jobId);
+    if (!r.ok) await fail(r.message, r.info, { refund: false });
+    return finish(0);
+  }
+  if (FILELESS) await fail(`Job ${job.type} lancé sans les fichiers du cours.`);
 
   if (job.type === "ingest") {
     try {
@@ -428,6 +438,12 @@ async function main() {
 })();
 
 /**
+ * Drill (CORTEX_JOB_TYPE, posé par startWorker) : il ne lit que la base du cours, jamais ses
+ * fichiers. Sans ce raccourci, chaque drill rapatriait tout le cours depuis le seau.
+ */
+const FILELESS = process.env.CORTEX_JOB_TYPE === "drill";
+
+/**
  * Les fichiers du cours (annales, contenu, examens, captures) sont sur le disque
  * pendant tout le job : rapatriés depuis le seau en stockage objet, puis ce que
  * le job a créé, modifié ou supprimé y est renvoyé — même en cas d'échec, pour
@@ -456,4 +472,4 @@ async function runWithCourseFiles(): Promise<void> {
   process.exit(code);
 }
 
-ensureCoursesLoaded().then(runWithCourseFiles).catch(failWith);
+ensureCoursesLoaded().then(() => FILELESS ? main().then(() => process.exit(0)) : runWithCourseFiles()).catch(failWith);
