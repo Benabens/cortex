@@ -332,7 +332,9 @@ jobs:
             set -e
             mkdir -p /tmp/r && cp /app/cortex/latex/epfl-logo.png /tmp/r/ 2>/dev/null || true
             node --import tsx -e "
-              import(\"./lib/exam-latex.ts\").then(({ withUnicodeFonts }) => {
+              import(\"./lib/exam-latex.ts\").then((m) => {
+                // tsx charge le module en CommonJS : ses exports sont sous default.
+                const { withUnicodeFonts } = m.withUnicodeFonts ? m : m.default;
                 const fs = require(\"fs\"), L = \"latex/\";
                 const pre = [\"preamble.tex\", \"figures.tex\", \"generic.tex\"].map((f) => fs.readFileSync(L + f, \"utf8\")).join(\"\");
                 const body = \"어떤 함수가 연속입니까?\n\nאיזו פונקציה רציפה בשנת 2024?\n\nأي دالة متصلة؟\n\";
