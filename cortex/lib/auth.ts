@@ -178,7 +178,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   trustHost: true,
   // Pages sur mesure (DA sombre de la landing) au lieu des pages NextAuth par défaut.
-  pages: { signIn: "/login", error: "/login" },
+  pages: { signIn: "/login", error: "/login", verifyRequest: "/verify-request", signOut: "/signout" },
   providers: authProviders(),
   callbacks: authCallbacks,
   // Erreurs d'Auth.js dans le journal structuré (audit fuites I14) : sans logger, elles

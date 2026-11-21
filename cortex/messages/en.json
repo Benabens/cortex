@@ -528,6 +528,21 @@
     "retry": "Try again",
     "close": "Close"
   },
+  "verifyRequest": {
+    "title": "Check your inbox",
+    "sentTo": "A sign-in link was sent to {email}.",
+    "sentGeneric": "A sign-in link was just sent.",
+    "spamHint": "Don’t see it? Check your spam folder too.",
+    "resend": "Resend the link",
+    "resending": "Sending…",
+    "resent": "Link resent.",
+    "changeAddress": "Use a different address",
+    "backToLogin": "Back to sign in"
+  },
+  "signout": {
+    "title": "Signing out…",
+    "description": "One moment, heading back to sign in."
+  },
   "shell": {
     "skip": "Skip to content",
     "noCourse": "No course",
@@ -552,6 +567,7 @@
     "days": "{count, plural, one {# day} other {# days}}",
     "search": "Search",
     "account": "My account",
+    "signOut": "Sign out",
     "openMenu": "Open menu"
   },
   "nav": {
@@ -573,6 +589,7 @@
     "title": "My account",
     "description": "Your subscription, credits, usage and data.",
     "signedInAs": "Signed in as",
+    "signOut": "Sign out",
     "connectAssistant": "Connect your assistant",
     "connectAssistantHint": "Claude, ChatGPT, Cursor, VS Code, Codex, Gemini CLI: the address and setup instructions.",
     "managementDisabled": "Account management is available once authentication is enabled (single-user local mode: no account to manage).",

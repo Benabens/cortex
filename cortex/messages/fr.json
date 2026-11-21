@@ -528,6 +528,21 @@
     "retry": "Réessayer",
     "close": "Fermer"
   },
+  "verifyRequest": {
+    "title": "Vérifie ta boîte mail",
+    "sentTo": "Un lien de connexion est parti vers {email}.",
+    "sentGeneric": "Un lien de connexion vient de partir.",
+    "spamHint": "Pas reçu ? Regarde aussi dans les indésirables.",
+    "resend": "Renvoyer le lien",
+    "resending": "Envoi…",
+    "resent": "Lien renvoyé.",
+    "changeAddress": "Changer d’adresse",
+    "backToLogin": "Retour à la connexion"
+  },
+  "signout": {
+    "title": "Déconnexion…",
+    "description": "Un instant, retour à la connexion."
+  },
   "shell": {
     "skip": "Aller au contenu",
     "noCourse": "Aucun cours",
@@ -552,6 +567,7 @@
     "days": "{count} j",
     "search": "Rechercher",
     "account": "Mon compte",
+    "signOut": "Se déconnecter",
     "openMenu": "Ouvrir le menu"
   },
   "nav": {
@@ -573,6 +589,7 @@
     "title": "Mon compte",
     "description": "Ton abonnement, tes crédits, ton usage et tes données.",
     "signedInAs": "Connecté en tant que",
+    "signOut": "Se déconnecter",
     "connectAssistant": "Connecter ton assistant",
     "connectAssistantHint": "Claude, ChatGPT, Cursor, VS Code, Codex, Gemini CLI : l’adresse et la marche à suivre.",
     "managementDisabled": "La gestion du compte est disponible une fois l’authentification activée (mode local mono-utilisateur : aucun compte à gérer).",

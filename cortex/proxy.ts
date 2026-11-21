@@ -22,7 +22,9 @@ import type { NextRequest } from "next/server";
 
 const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
-const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/api/health", "/api/relais", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/"];
+// /verify-request et /signout : atteintes AVANT ou PENDANT la perte de session (lien
+// magique envoyé, déconnexion en cours) — jamais de session à ce moment-là.
+const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/verify-request", "/signout", "/api/health", "/api/relais", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/"];
 
 /** Icônes et manifest (fichiers de métadonnées Next) : lus SANS session par
  *  l'onglet et l'écran d'accueil. Égalité stricte : un préfixe « /icon » ouvrirait

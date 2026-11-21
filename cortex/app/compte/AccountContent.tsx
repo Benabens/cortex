@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { getT } from "@/lib/i18n/server";
 import styles from "@/app/secondary.module.css";
+import { AccountSignOut } from "./AccountSignOut";
 import { BillingPanel } from "./BillingPanel";
 import { UsagePanel } from "./UsagePanel";
 import { WithdrawalForm } from "./WithdrawalForm";
@@ -28,6 +29,7 @@ export async function AccountContent({ email, enabled, connectedAppsEnabled }: {
         <div className="d2-card p-5 sm:p-6">
           <div className="text-sm text-ink-3">{t("signedInAs")}</div>
           <div className="mt-1 break-all text-lg font-medium text-ink-1">{email}</div>
+          <AccountSignOut />
         </div>
       )}
 

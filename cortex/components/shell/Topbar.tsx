@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
+import { Search, Menu, CalendarClock } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
+import { AccountMenu } from "./AccountMenu";
 
 import { useApi } from "@/lib/ux/api";
 import { useTranslations } from "use-intl/react";
@@ -64,13 +65,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
 
           <ThemeToggle />
 
-          <Link
-            href="/compte"
-            aria-label={t("account")}
-            className="hidden size-11 min-[360px]:grid place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1"
-          >
-            <UserRound className="size-[1.15rem]" strokeWidth={2} />
-          </Link>
+          <AccountMenu />
 
           <button
             type="button"
