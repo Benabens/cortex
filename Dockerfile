@@ -146,6 +146,22 @@ RUN set -eux; \
     cd /; rm -rf /tmp/tectonic-warm
 USER root
 
+# Coréen (hangul-fonts.tex), hébreu et arabe (rtl.tex, hebrew-fonts.tex, arabic-fonts.tex, balisés
+# par lib/tex-bidi) : leurs polices du bundle (Un, FreeSerif, Amiri) en cache, chaque graisse et
+# chaque style, pour compiler hors ligne. Couche à part : +26 Mo de cache tectonic (mesure du 21/11).
+# \cn{1} et une formule : énumérateurs entourés (pifont, uzdr.pfb) de tout QCM et polices math
+# (lm-mathit.enc…), absents des documents ci-dessus.
+COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/unicode-fonts.tex cortex/latex/cjk-fonts.tex cortex/latex/hangul-fonts.tex cortex/latex/rtl.tex cortex/latex/hebrew-fonts.tex cortex/latex/arabic-fonts.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm-rtl/
+USER cortex
+RUN set -eux; \
+    cd /tmp/tectonic-warm-rtl; \
+    cat preamble.tex figures.tex generic.tex unicode-fonts.tex cjk-fonts.tex hangul-fonts.tex rtl.tex hebrew-fonts.tex arabic-fonts.tex > warm-rtl.tex; \
+    printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\n한 \\textbf{한} \\textsf{한 \\textbf{한}} \\texttt{한}\n\\CortexRL{\\CortexHe{א \\textbf{א} \\textit{א} \\textbf{\\textit{א}}} \\CortexLR{1}} \\CortexRL{\\CortexAr{ب \\textbf{ب} \\textit{ب} \\textbf{\\textit{ب}}}} \\cn{1}\n$f(x)=x_i^2+\\sum_{k} \\int_0^1 \\sqrt{t}\\,dt \\in \\mathbb{R}$\n\\end{document}\n' >> warm-rtl.tex; \
+    /usr/local/bin/tectonic --chatter minimal warm-rtl.tex \
+      || echo "AVERTISSEMENT: warm-up des polices coréennes, hébraïques et arabes incomplet (téléchargées au 1er examen concerné)"; \
+    cd /; rm -rf /tmp/tectonic-warm-rtl
+USER root
+
 # Aucun contenu de cours n'est embarqué : annales, slides et supports
 # appartiennent à leur université et ne sont pas dans ce dépôt. Ce que
 # l'utilisateur importe via l'app vit sur le volume persistant

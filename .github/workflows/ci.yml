@@ -333,6 +333,42 @@ jobs:
             echo "✓ cyrillique, grec et chinois imprimés hors ligne"
           '
 
+      # Coréen, hébreu et arabe : le source passe par le vrai withUnicodeFonts (polices + balisage
+      # bidi de lib/tex-bidi), puis compile réseau coupé avec le seul cache préchauffé au build.
+      # pdftotext relit le texte et l'ordre des mots (à l'envers sans bidi).
+      - name: Coréen, hébreu, arabe — compilés hors ligne, mots dans l'ordre de lecture
+        run: |
+          docker run --rm --network none --entrypoint bash cortex-app -c '
+            set -e
+            mkdir -p /tmp/r && cp /app/cortex/latex/epfl-logo.png /tmp/r/ 2>/dev/null || true
+            node --import tsx -e "
+              import(\"./lib/exam-latex.ts\").then((m) => {
+                // tsx charge le module en CommonJS : ses exports sont sous default.
+                const { withUnicodeFonts } = m.withUnicodeFonts ? m : m.default;
+                const fs = require(\"fs\"), L = \"latex/\";
+                const pre = [\"preamble.tex\", \"figures.tex\", \"generic.tex\"].map((f) => fs.readFileSync(L + f, \"utf8\")).join(\"\");
+                const body = \"어떤 함수가 연속입니까?\n\nאיזו פונקציה רציפה בשנת 2024?\n\nأي دالة متصلة؟\n\";
+                fs.writeFileSync(\"/tmp/r/doc.tex\", withUnicodeFonts(pre + \"\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\n\" + body + \"\\\\end{document}\n\"));
+              });"
+            cd /tmp/r
+            /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
+            text=$(pdftotext -enc UTF-8 doc.pdf - | perl -CSD -pe "s/[\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]//g")
+            for s in "어떤 함수가 연속입니까" "איזו פונקציה רציפה" "أي دالة متصلة"; do echo "$text" | tr -d " " | grep -qF "${s// /}" || { echo "::error::$s absent du PDF"; echo "$text"; exit 1; }; done
+            for s in "רציפה פונקציה איזו" "متصلة دالة أي"; do if echo "$text" | tr -d " " | grep -qF "${s// /}"; then echo "::error::phrase à l envers : $s"; exit 1; fi; done
+            echo "✓ coréen, hébreu et arabe imprimés hors ligne, dans l ordre de lecture"
+          '
+
+      # Le chemin complet (QCM → PDF → pdftotext) de tests/pdf-rtl-hangul.test.ts, rejoué dans
+      # l'image (tectonic 0.15 et poppler de Debian) : la CI des tests unitaires n'a pas tectonic.
+      - name: Coréen, hébreu, arabe — tests du PDF dans l'image
+        run: |
+          # Proxy mort : un fichier absent du cache échoue tout de suite (sans lui, chaque requête
+          # attend le DNS d'un réseau coupé, 25 min pour un QCM).
+          out=$(timeout 600 docker run --rm --network none --entrypoint bash -e NODE_ENV= -e CORTEX_CLAUDE_BIN=/usr/bin/false -e HTTPS_PROXY=http://127.0.0.1:9 -e https_proxy=http://127.0.0.1:9 cortex-app -c 'node --import tsx --test tests/pdf-rtl-hangul.test.ts 2>&1') || { echo "$out"; exit 1; }
+          if echo "$out" | grep -q "from network"; then echo "$out" | grep "from network" | sort -u | head; echo "::error::fichiers LaTeX absents du cache de l'image"; exit 1; fi
+          echo "$out" | tail -12
+          echo "$out" | grep -q "skipped 0" || { echo "::error::tests du PDF sautés (tectonic ou pdftotext absent ?)"; exit 1; }
+
       # Volume Railway : monté en root, conteneur lancé en root par RAILWAY_RUN_UID=0.
       - name: Volume monté en root — chown à l'entrypoint, app en cortex, sauvegarde du volume
         run: |
