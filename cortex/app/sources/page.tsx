@@ -3,7 +3,7 @@
 import styles from "@/app/secondary.module.css";
 import { WifiOff, RotateCw, FolderOpen } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { FileManager } from "@/components/sources/FileManager";
+import { FileManager, useReindex } from "@/components/sources/FileManager";
 import { ImportPanel } from "@/components/sources/ImportPanel";
 import { BackToCloudNote, CloudRetentionBanner } from "@/components/sources/OriginalsNotes";
 import { Panel } from "@/components/ui/primitives";
@@ -15,6 +15,7 @@ import { useTranslations } from "use-intl/react";
 export default function SourcesPage() {
   const t = useTranslations("sources");
   const { data, loading, error, refetch } = useApi<SourcesResp>("/api/sources");
+  const reindex = useReindex(refetch);
 
   return (
     <div className={styles.page}>
@@ -24,6 +25,11 @@ export default function SourcesPage() {
       />
       {data?.originals && <CloudRetentionBanner originals={data.originals} />}
       {data?.originals && <BackToCloudNote originals={data.originals} />}
+      {/* Reclassement d'un fichier : annoncé sans voler le focus, et toujours monté (la liste se
+          démonte pendant son rechargement). */}
+      <p role="status" aria-live="polite" className={reindex.notice ? "text-[0.85rem] text-ink-2" : "sr-only"}>
+        {reindex.notice}
+      </p>
       <div className={styles.split}>
         {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
             garde la liste montée → plus de saut/remontage (fix jank). */}
@@ -52,7 +58,7 @@ export default function SourcesPage() {
             </p>
           </Panel>
         ) : (
-          <FileManager data={data} onChanged={refetch} />
+          <FileManager data={data} onChanged={refetch} reindex={reindex} />
         )}
         <ImportPanel onChanged={refetch} unread={data?.unread} originals={data?.originals} />
       </div>

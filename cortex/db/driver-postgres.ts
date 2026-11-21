@@ -273,7 +273,7 @@ function rawExec(schema: string): TenantExec {
  * a un tenant vide et ne peut rien générer. Idempotent (cible non vide → no-op).
  */
 const SEED_CONTENT_TABLES = [
-  "sources", "items", "vocab", "exam_refs", "topics", "plan_chapters",
+  "sources", "items", "vocab", "exam_refs", "exam_labels", "topics", "plan_chapters",
   "bank_questions", "revision_plan", "format_profile", "exam_dna", "exam_exercises", "course_facts",
 ];
 

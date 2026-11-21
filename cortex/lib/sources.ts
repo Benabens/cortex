@@ -110,7 +110,10 @@ async function readRefFile(relPath: string, opts: { ocr?: boolean } = {}): Promi
  */
 export async function writeRef({ relPath, title, pages, ocr }: ParsedRef): Promise<number> {
   ensureFts();
-  const { kind, year } = inferExamMeta(path.basename(relPath));
+  // L'année et le type choisis par l'étudiant (lib/reclassify) priment sur le nom du fichier.
+  await q.ensureTable("exam_labels");
+  const label = await q.get<{ kind: string; year: number | string | null }>(`SELECT kind, year FROM exam_labels WHERE path = ?`, relPath);
+  const { kind, year } = label ? { kind: label.kind, year: label.year == null ? null : Number(label.year) } : inferExamMeta(path.basename(relPath));
   const old = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, relPath);
   for (const { id } of old) {
     await unindexSource(id);

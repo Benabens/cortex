@@ -286,7 +286,11 @@
     "job_course_unavailable": "Ce cours n’est plus accessible depuis ton compte (supprimé ou transféré) : génération annulée.",
     "job_corpus_missing": "Les supports du cours n’ont pas encore été lus. Ajoute des supports et prépare le cours d’abord.",
     "job_pdf_failed": "Compilation LaTeX échouée : PDF indisponible, l’examen reste lisible dans l’app.",
-    "job_qcm_all_dropped": "Aucun QCM généré : les {dropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le."
+    "job_qcm_all_dropped": "Aucun QCM généré : les {dropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le.",
+    "classify_not_found": "Fichier introuvable dans ce cours : recharge la liste des sources, puis réessaie.",
+    "classify_invalid": "Classement impossible : choisis annale ou support, et pour une annale « final » ou « partiel », avec une année entre 1950 et {max}.",
+    "classify_busy": "Un import est en cours sur ce cours : réessaie quand il sera terminé.",
+    "classify_name_taken": "Trop de fichiers portent déjà ce nom dans cette catégorie : renomme le fichier, puis réessaie."
   },
   "ingestReport": {
     "unreadable": "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
@@ -944,7 +948,24 @@
     "corpusSerie": "Séries",
     "corpusExercise": "Exercices",
     "corpusCheatsheet": "Cheat sheets",
-    "corpusReview": "Reviews"
+    "corpusReview": "Reviews",
+    "classifyAsExam": "Classer comme annale",
+    "classifyAsSupport": "Classer comme support",
+    "classifyAsExamFor": "Classer « {title} » comme annale",
+    "classifyAsSupportFor": "Classer « {title} » comme support de cours",
+    "editExamLabel": "Modifier",
+    "editExamLabelFor": "Modifier l’année et le type d’épreuve de « {title} »",
+    "examKind": "Type d’épreuve",
+    "kindFinal": "Final",
+    "kindMidterm": "Partiel",
+    "examYear": "Année",
+    "examYearHint": "facultatif",
+    "saveLabel": "Enregistrer",
+    "cancel": "Annuler",
+    "classifiedExam": "« {title} » est rangé dans les annales : mise à jour du corpus en cours.",
+    "classifiedSupport": "« {title} » est rangé dans les supports de cours : mise à jour du corpus en cours.",
+    "classifyDone": "Corpus à jour.",
+    "classifyFailed": "Classement impossible : {error}"
   },
   "originals": {
     "localNote": "Ton fichier reste sur ton ordinateur : Cortex lit son texte (et les pages d’une annale, le temps de préparer le cours), puis le retire de ses serveurs, au plus tard sous {hours} h. Seul l’index est gardé, pour la recherche et tes examens blancs.",
