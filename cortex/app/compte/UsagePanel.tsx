@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
@@ -31,6 +31,10 @@ export function UsageView({ data }: { data: UsageLimits }) {
     : l.unit === "%" ? t("percentUsed", { value: f.number(l.used ?? 0) }) : t("limitValue", { used: f.number(l.used ?? 0), limit: f.number(l.limit ?? 0), unit: l.unit });
   const resetText = (l: UsageLimit) => !l.resetAt ? null : t(l.key === "credits" ? "recharge" : "reset", { when: formatReset(l.resetAt, data.now, locale) });
   const kinds = ORDER.map((k) => data.generations[k]).filter(Boolean);
+  // Limites des crédits offerts : une ligne courte par type, l'explication complète une seule fois.
+  const freeBlocked = (u: KindUsage) => !u.allowed && (u.blockedBy === "free_budget" || u.blockedBy === "free_capacity");
+  const freeNotes = (["free_budget", "free_capacity"] as const).filter((k) => kinds.some((u) => freeBlocked(u) && u.blockedBy === k));
+  const recharge = (chunks: ReactNode) => <a href="#credits" className="font-medium text-ink-1 underline underline-offset-2">{chunks}</a>;
   return (
     <Panel className="overflow-hidden divide-y divide-line p-0">
       <div className="px-5 py-4">
@@ -55,14 +59,23 @@ export function UsageView({ data }: { data: UsageLimits }) {
                 </span>
               ) : u.blockedBy === "credits" ? (
                 <span className="text-right text-warning">
-                  {t.rich("needed", { count: u.costCredits, formatted: f.number(u.costCredits), link: (chunks) => <a href="#credits" className="font-medium text-ink-1 underline underline-offset-2">{chunks}</a> })}
+                  {t.rich("needed", { count: u.costCredits, formatted: f.number(u.costCredits), link: recharge })}
                 </span>
+              ) : u.blockedBy === "free_budget" ? (
+                <span className="text-right text-warning">
+                  {t.rich("purchasedNeeded", { count: u.costCredits, formatted: f.number(u.costCredits), link: recharge })}
+                </span>
+              ) : u.blockedBy === "free_capacity" ? (
+                <span className="text-right text-warning">{t.rich("freeCapacity", { when: u.blockedUntil ? formatReset(u.blockedUntil, data.now, locale) : "", link: recharge })}</span>
               ) : (
                 <span className="max-w-md text-right text-warning">{u.reason}</span>
               )}
             </li>
           ))}
         </ul>
+        {freeNotes.map((k) => (
+          <p key={k} data-free-limit={k} className="mt-3 text-[0.78rem] leading-relaxed text-ink-3">{t(k === "free_budget" ? "freeBudgetNote" : "freeCapacityNote")}</p>
+        ))}
       </div>
       {data.limits.length > 0 && (
         <div className="px-5 py-4">

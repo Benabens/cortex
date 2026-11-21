@@ -61,7 +61,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
 
   const [jobId, setJobId] = useState<number | null>(null);
   const [launching, setLaunching] = useState(false);
-  const [genError, setGenError] = useState<{ message: string; command?: string; paywall?: boolean } | null>(null);
+  const [genError, setGenError] = useState<{ message: string; command?: string; paywall?: boolean; code?: string | null } | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
   const [doneHref, setDoneHref] = useState<string | null>(null);
   // Sur le site ou en PDF : le même examen, au même prix (le PDF est compilé à la génération).
@@ -137,6 +137,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
       setGenError({
         message: engineCode(err.code) ? err.message : engineDown(err) ? t("llmUnavailable", { error: err.message }) : err.message || t("startFailed"),
         paywall: err.status === 402,
+        code: err.code,
       });
     } finally {
       setLaunching(false);
@@ -272,7 +273,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             </span>
           </div>
         )}
-        {genError?.paywall && <div className="mt-3"><PaywallNotice credits={isQcm ? 1 : 2} /></div>}
+        {genError?.paywall && <div className="mt-3"><PaywallNotice credits={isQcm ? 1 : 2} code={genError.code} /></div>}
       </Panel>
 
       {/* Format détecté (réel) */}

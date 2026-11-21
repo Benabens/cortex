@@ -127,7 +127,8 @@ abonnement mort.
   (`allow_promotion_codes`) depuis le 13/11/2026, mais aucun code n'existe tant
   que tu n'en crées pas. Un code à 100 % sur le pack ne crédite que si son id
   `promo_…` est dans `STRIPE_FREE_PROMO_CODES` (DEPLOY.md § 7, « Codes promo ») ;
-  sur un abonnement, il donne les 20 crédits du mois comme une facture payée.
+  ces crédits sont alors utilisables, bornés par `JOB_SPEND_CAP_USD_PER_CREDIT`.
+  Sur un abonnement, une facture payée 0 € ouvre la période sans crédit (#132, I2).
 - L'app n'utilise que les prix **actifs**. Pour changer un tarif : crée un
   nouveau prix, transfère-lui la `lookup_key`, archive l'ancien.
 - `CREDIT_PRICE_CENTS` (défaut 90) doit rester égal au prix du pack divisé par

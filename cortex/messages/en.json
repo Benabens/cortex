@@ -199,8 +199,8 @@
     "billing_daily_generation_quota": "Daily generation quota reached ({used}/{max}). It resets {when}.",
     "billing_daily_assistance_quota": "Daily assistance quota reached ({used}/{max}). It resets {when}.",
     "billing_active_jobs_limit": "Too many generations are running ({max} max per account). Wait for one to finish.",
-    "billing_free_capacity_exhausted": "This month’s free generation capacity is exhausted. Purchased credits still work: buy a pack or subscribe, or wait until it reopens {when}. https://app.cortexexam.com/compte#credits",
-    "billing_free_budget_exceeded": "This generation exceeds your account’s free allowance. You have {balance, number} purchased credits and need {cost, number}. Purchased credits still work: buy a pack or subscribe. https://app.cortexexam.com/compte#credits",
+    "billing_free_capacity_exhausted": "This month’s free generation capacity is exhausted. Purchased credits still work: top up your account to continue, or wait until it reopens {when}.",
+    "billing_free_budget_exceeded": "Free credit limit reached: of your {balance, plural, one {# credit} other {# credits}}, {paid, plural, =0 {none is purchased} one {only # is purchased} other {only # are purchased}}, and this generation needs {cost, plural, one {# purchased credit} other {# purchased credits}}. Top up your account to continue.",
     "billing_daily_compute_limit": "Your daily compute limit has been reached. It resets {when}; your credits remain available.",
     "billing_monthly_capacity_limit": "Cortex’s monthly generation capacity has been reached. Generation reopens {when}; the rest of the site still works.",
     "billing_budget_unavailable": "The compute budget can’t be checked because the database is unavailable. Try again shortly.",
@@ -770,6 +770,10 @@
       "withBalance": " with your balance",
       "resetSuffix": " · resets {when}",
       "needed": "You need {count, plural, one {{formatted} credit} other {{formatted} credits}} · <link>Top up</link>",
+      "purchasedNeeded": "You need {count, plural, one {{formatted} purchased credit} other {{formatted} purchased credits}} · <link>Top up</link>",
+      "freeCapacity": "This month’s free capacity is used up, it reopens {when} · <link>Top up</link>",
+      "freeBudgetNote": "Your balance includes free credits, and your account has reached the usage limit for them: only purchased credits can start a generation now. Your credits stay in your balance.",
+      "freeCapacityNote": "The capacity reserved for free credits is used up for this month. Purchased credits still work.",
       "limitsTitle": "Your limits",
       "dailyCompute": "The daily compute limit caps generation per account and per day; it doesn’t use your credits. ",
       "timezone": "Times are shown in Lausanne time.",
@@ -902,8 +906,10 @@
   },
   "billing": {
     "creditsNeeded": "You need {count, plural, one {{formatted} credit} other {{formatted} credits}}",
+    "purchasedCreditsNeeded": "You need {count, plural, one {{formatted} purchased credit} other {{formatted} purchased credits}}",
     "paidEngine": "This action uses Cortex’s paid engine.",
-    "buyCredits": "Buy credits"
+    "buyCredits": "Buy credits",
+    "topUp": "Top up"
   },
   "labels": {
     "statusNeverSeen": "Never seen",

@@ -95,9 +95,39 @@ test("compte sans aucun paiement : crédits offerts bloqués par le budget (402,
   assert.equal(r.ok, false);
   if (r.ok) return;
   assert.equal(r.status, 402);
-  assert.match(r.error, /crédits achetés restent toujours utilisables/);
-  assert.match(r.error, /compte#credits/);
+  // Le message dit vrai : le solde (5 crédits) n'est pas nié, c'est la limite des crédits offerts qui bloque.
+  assert.equal(r.code, "billing_free_budget_exceeded");
+  assert.deepEqual(r.params, { balance: 5, paid: 0, cost: 2 });
+  assert.match(r.error, /solde de 5 crédits/);
+  assert.match(r.error, /aucun n’est acheté/);
+  assert.match(r.error, /crédits offerts/);
+  assert.doesNotMatch(r.error, /https?:\/\//, "pas d'URL brute : l'interface met le lien Recharger");
   assert.equal(await credits.getBalanceCenti("free1"), 500);
+});
+
+test("Mon usage : la limite des crédits offerts tient en une ligne par type avec un lien Recharger, l'explication une seule fois", async () => {
+  await gift("free-usage", 5);
+  const { getUsageLimits } = await import("../lib/billing/limits");
+  const { UsageView } = await import("../app/compte/UsagePanel");
+  const { renderIntl } = await import("./helpers/intl");
+  const { createElement } = await import("react");
+  const data = await inMl("free-usage", () => getUsageLimits("free-usage"));
+  const blocked = Object.values(data.generations).filter((g) => g.blockedBy === "free_budget");
+  assert.ok(blocked.length >= 2, `plusieurs types bloqués par la limite : ${JSON.stringify(Object.values(data.generations).map((g) => g.blockedBy))}`);
+  const html = renderIntl(createElement(UsageView, { data }));
+  assert.doesNotMatch(html, /Limite des crédits offerts atteinte/, "le motif long n'est pas répété ligne par ligne");
+  assert.equal(html.split("la limite d’usage de ces crédits est atteinte").length - 1, 1, "l'explication tient en une note");
+  const refused = Object.values(data.generations).filter((g) => !g.allowed);   // + l'examen (6 crédits), bloqué par le solde
+  assert.equal(html.split(">Recharger</a>").length - 1, refused.length, "un lien Recharger par type bloqué");
+  assert.match(html, /Il te faut 2 crédits achetés/);
+  assert.match(html, /href="#credits"/);
+  assert.doesNotMatch(html, /https?:\/\//, "aucune URL brute");
+  // Sous « Préparer le cours » : le motif, puis un vrai lien Recharger.
+  const { UsageLine } = await import("../components/billing/UsageIndicator");
+  const line = renderIntl(createElement(UsageLine, { usage: data.generations.prepare, now: data.now }));
+  assert.match(line, /Limite des crédits offerts atteinte/);
+  assert.match(line, /<a href="\/compte#credits"[^>]*>Recharger<\/a>/);
+  assert.doesNotMatch(line, /cortexexam\.com/, "aucune URL brute");
 });
 
 test("AI_BUDGET_FREE_USD : un essai gratuit borné ; la dépense déjà faite (échecs remboursés compris) compte", async () => {

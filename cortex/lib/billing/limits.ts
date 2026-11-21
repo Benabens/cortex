@@ -344,7 +344,8 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
           key: "free_budget",
           capacity: paidCount + Math.max(0, Math.floor((b.budgetUsd - b.spentUsd - s.committedUserUsd) / expected + EPS)),
           transient: false, status: 402, resetAt: null,
-          userError: () => ({ code: "billing_free_budget_exceeded", params: { balance: fromCenti(Math.max(0, c.paidCenti)), cost: fromCenti(cost) } }),
+          // Solde ET part achetée : le refus vient de la limite des crédits offerts, pas d'un solde vide.
+          userError: () => ({ code: "billing_free_budget_exceeded", params: { balance: fromCenti(Math.max(0, c.balanceCenti)), paid: fromCenti(Math.max(0, c.paidCenti)), cost: fromCenti(cost) } }),
         });
       }
     }

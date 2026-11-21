@@ -8,6 +8,7 @@ import { claimFreeOffer } from "./free-offer";
 import { quotaFor } from "./guards";
 import { ownerUserIds } from "./owner";
 import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
+import { spendCapUsdPerCredit } from "./usage";
 
 /**
  * BUDGET IA LIÉ AU REVENU — règle de Ben (verrouillée) : ce que Cortex dépense
@@ -31,7 +32,8 @@ import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
  * générations ; ce qui reste au-delà vient du cadeau. Un job échoué après des
  * appels payants est remboursé en crédits offerts : sa dépense reste comptée et
  * le budget borne la boucle « échec → remboursement → relance » (audit B1).
- * Les crédits d'abonnement de la période en cours sont achetés.
+ * Les crédits d'abonnement de la période en cours sont achetés, comme un pack offert par un
+ * code promo de la liste blanche tant que le plafond par crédit le borne (PROMO_PACK_SQL).
  *
  * Marge 0,6 par défaut : le coût réel d'un job varie du simple au triple
  * (QCM en prod : 4,48 $ de médiane au 14/11 avant #106, 2 à 2,9 $ au 17/11 après) et
@@ -147,10 +149,22 @@ export async function accountBudget(userId: string): Promise<AccountBudget | nul
  */
 export const OFFERED_CREDIT_SQL = `(offered = 1 OR ref LIKE 'signup:%')`;
 
+/**
+ * Pack à 0 € d'un code promo de la liste blanche (STRIPE_FREE_PROMO_CODES) : la seule ligne
+ * offerte écrite sous l'id d'une session Checkout. Cadeau voulu par Ben (21/11) : compté comme
+ * ACHETÉ — sinon le budget lié au revenu (0 $ sans paiement) le rend inutilisable — tant que
+ * JOB_SPEND_CAP_USD_PER_CREDIT le borne : chaque job ≤ crédits débités × plafond (B2), un échec
+ * après dépense rend des crédits offerts (B1), soit N × 0,9 $ au plus par pack de N crédits.
+ * Plafond levé (`unlimited`) : il redevient offert, soumis au budget. La liste blanche et
+ * max_redemptions (Stripe) bornent le nombre de packs.
+ */
+export const PROMO_PACK_SQL = `(offered = 1 AND ref LIKE 'stripe:cs:%')`;
+
 /** Crédits ACHETÉS disponibles dans le ledger (tout sauf les crédits offerts, consommés en dernier), en centièmes. */
 export async function purchasedLedgerCenti(tx: AuthTx, userId: string, ledgerCenti: number): Promise<number> {
+  const offered = spendCapUsdPerCredit() === null ? OFFERED_CREDIT_SQL : `(${OFFERED_CREDIT_SQL} AND NOT ${PROMO_PACK_SQL})`;
   const r = await tx.get<{ total: number | string | null }>(
-    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ? AND ${DELTA_CENTI} > 0 AND ${OFFERED_CREDIT_SQL}`, userId,
+    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ? AND ${DELTA_CENTI} > 0 AND ${offered}`, userId,
   );
   return Math.max(0, ledgerCenti - Math.max(0, Number(r?.total ?? 0)));
 }
