@@ -1,0 +1,6 @@
+% Droite à gauche (hébreu, arabe) : chargé par lib/exam-latex avant leurs polices, quand le source
+% en contient. lib/tex-bidi balise chaque passage : \CortexRL fixe le sens de lecture (TeX--XeT de
+% XeTeX), \CortexLR rend le sien à un mot latin, un nombre ou une formule qu'il contient.
+\TeXXeTstate=1
+\newcommand\CortexRL[1]{\beginR#1\endR}
+\newcommand\CortexLR[1]{\beginL#1\endL}

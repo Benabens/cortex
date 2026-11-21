@@ -362,29 +362,43 @@ const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\
 const HANGUL = /\p{Script=Hangul}/u;
 
 /**
+ * Blocs de polices de latex/, dans l'ordre de chargement, chacun avec les écritures qui le demandent.
+ * Le Dockerfile les préchauffe tous dans le cache tectonic (compilation hors ligne).
+ */
+const FONT_BLOCKS: { file: string; needed: (printed: string) => boolean }[] = [
+  { file: "unicode-fonts.tex", needed: () => true },
+  { file: "cjk-fonts.tex", needed: (p) => CJK.test(p) || HANGUL.test(p) },
+  { file: "hangul-fonts.tex", needed: (p) => HANGUL.test(p) },
+  { file: "rtl.tex", needed: (p) => rightToLeftScripts(p).hebrew || rightToLeftScripts(p).arabic },
+  { file: "hebrew-fonts.tex", needed: (p) => rightToLeftScripts(p).hebrew },
+  { file: "arabic-fonts.tex", needed: (p) => rightToLeftScripts(p).arabic },
+];
+
+/**
  * Le document avec une police Unicode s'il imprime une écriture au-delà de Latin-1 (cyrillique, grec,
- * chinois, coréen…) : le préambule (T1 + Latin Modern) n'en a pas les glyphes, ils sortaient blancs ou étaient
- * effacés en amont. Seul tectonic (XeTeX) sait charger ces polices ; un document en Latin-1 ne change
- * pas (empreintes des PDF existants, CS-202 compris).
+ * chinois, coréen, hébreu, arabe…) : le préambule (T1 + Latin Modern) n'en a pas les glyphes, ils
+ * sortaient blancs ou étaient effacés en amont. L'hébreu et l'arabe sont en plus balisés pour se lire
+ * de droite à gauche (lib/tex-bidi). Seul tectonic (XeTeX) sait charger ces polices ; un document en
+ * Latin-1 ne change pas (empreintes des PDF existants, CS-202 compris).
  */
 export function withUnicodeFonts(tex: string): string {
   if (FONTSPEC.test(tex) || !BEGIN_DOCUMENT.test(tex)) return tex;
   const printed = tex.replace(/(^|[^\\])%.*$/gm, "$1"); // les commentaires ne s'impriment pas
   if (!/[^\x00-\xFF]/u.test(printed)) return tex;
-  const hangul = HANGUL.test(printed);
+  const blocks = FONT_BLOCKS.filter((b) => b.needed(printed)).map((b) => fontBlock(b.file));
+  // Le préambule aussi : en-tête et pied de page (nom du cours, cf. layoutChrome) y sont définis,
+  // et ne s'impriment qu'au fil des pages, une fois les macros des blocs chargées.
   const rtl = rightToLeftScripts(printed);
-  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) || hangul ? ["cjk-fonts.tex"] : []), ...(hangul ? ["hangul-fonts.tex"] : []),
-    ...(rtl.hebrew ? ["hebrew-fonts.tex"] : []), ...(rtl.arabic ? ["arabic-fonts.tex"] : [])].map(fontBlock);
-  const at = BEGIN_DOCUMENT.exec(tex)!.index;
-  const body = rtl.hebrew || rtl.arabic ? markRightToLeft(tex.slice(at)) : tex.slice(at);
-  return `${tex.slice(0, at)}${blocks.join("")}${body}`;
+  const marked = rtl.hebrew || rtl.arabic ? markRightToLeft(tex) : tex;
+  const at = BEGIN_DOCUMENT.exec(marked)!.index;
+  return `${marked.slice(0, at)}${blocks.join("")}${marked.slice(at)}`;
 }
 
 const fontBlock = (f: string) => fs.readFileSync(path.join(LATEX_DIR, f), "utf8");
 
 /** Le source sans les polices ni le balisage bidi de `withUnicodeFonts` : pdflatex ne les lit pas (il imprime ces lettres en blanc). */
 export function withoutUnicodeFonts(tex: string): string {
-  return unmarkRightToLeft(["arabic-fonts.tex", "hebrew-fonts.tex", "hangul-fonts.tex", "cjk-fonts.tex", "unicode-fonts.tex"].map(fontBlock).reduce((t, b) => t.split(b).join(""), tex));
+  return unmarkRightToLeft([...FONT_BLOCKS].reverse().map((b) => fontBlock(b.file)).reduce((t, b) => t.split(b).join(""), tex));
 }
 
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */

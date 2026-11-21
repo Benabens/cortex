@@ -1,8 +1,4 @@
-% Arabe : chargé par lib/exam-latex après unicode-fonts.tex quand le source en contient.
-% lib/tex-bidi balise chaque passage : \CortexRL pour le sens de lecture (TeX--XeT de XeTeX),
-% \CortexAr pour la police (Amiri, paquet amiri du bundle ; Script=Arabic lie les lettres).
-\TeXXeTstate=1
-\providecommand\CortexRL[1]{\beginR#1\endR}
-\providecommand\CortexLR[1]{\beginL#1\endL}
+% Arabe : chargé par lib/exam-latex après rtl.tex quand le source en contient. \CortexAr, posé par
+% lib/tex-bidi, l'imprime en Amiri (paquet amiri du bundle ; Script=Arabic lie les lettres).
 \newfontfamily\CortexArabic{Amiri-Regular.ttf}[Script=Arabic, BoldFont=Amiri-Bold.ttf, ItalicFont=Amiri-Slanted.ttf, BoldItalicFont=Amiri-BoldSlanted.ttf]
 \newcommand\CortexAr[1]{{\CortexArabic#1}}
