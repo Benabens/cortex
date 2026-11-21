@@ -11,6 +11,7 @@ import { examLayout, examPdf, type ExamLayout } from "@/lib/exam-layout";
 import { epflLongDate } from "@/lib/exam-layout-epfl";
 import { courseTemplate, courseWords, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
+import { markRightToLeft, rightToLeftScripts, unmarkRightToLeft } from "@/lib/tex-bidi";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
@@ -371,15 +372,19 @@ export function withUnicodeFonts(tex: string): string {
   const printed = tex.replace(/(^|[^\\])%.*$/gm, "$1"); // les commentaires ne s'impriment pas
   if (!/[^\x00-\xFF]/u.test(printed)) return tex;
   const hangul = HANGUL.test(printed);
-  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) || hangul ? ["cjk-fonts.tex"] : []), ...(hangul ? ["hangul-fonts.tex"] : [])].map(fontBlock);
-  return tex.replace(BEGIN_DOCUMENT, () => `${blocks.join("")}\\begin{document}`);
+  const rtl = rightToLeftScripts(printed);
+  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) || hangul ? ["cjk-fonts.tex"] : []), ...(hangul ? ["hangul-fonts.tex"] : []),
+    ...(rtl.hebrew ? ["hebrew-fonts.tex"] : []), ...(rtl.arabic ? ["arabic-fonts.tex"] : [])].map(fontBlock);
+  const at = BEGIN_DOCUMENT.exec(tex)!.index;
+  const body = rtl.hebrew || rtl.arabic ? markRightToLeft(tex.slice(at)) : tex.slice(at);
+  return `${tex.slice(0, at)}${blocks.join("")}${body}`;
 }
 
 const fontBlock = (f: string) => fs.readFileSync(path.join(LATEX_DIR, f), "utf8");
 
-/** Le source sans les polices de `withUnicodeFonts` : pdflatex ne les lit pas (il imprime ces lettres en blanc). */
+/** Le source sans les polices ni le balisage bidi de `withUnicodeFonts` : pdflatex ne les lit pas (il imprime ces lettres en blanc). */
 export function withoutUnicodeFonts(tex: string): string {
-  return ["hangul-fonts.tex", "cjk-fonts.tex", "unicode-fonts.tex"].map(fontBlock).reduce((t, b) => t.split(b).join(""), tex);
+  return unmarkRightToLeft(["arabic-fonts.tex", "hebrew-fonts.tex", "hangul-fonts.tex", "cjk-fonts.tex", "unicode-fonts.tex"].map(fontBlock).reduce((t, b) => t.split(b).join(""), tex));
 }
 
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */

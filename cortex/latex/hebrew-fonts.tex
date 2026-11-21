@@ -1,0 +1,8 @@
+% Hébreu : chargé par lib/exam-latex après unicode-fonts.tex quand le source en contient.
+% lib/tex-bidi balise chaque passage : \CortexRL pour le sens de lecture (TeX--XeT de XeTeX),
+% \CortexHe pour la police (FreeSerif, paquet gnu-freefont du bundle : CMU n'a pas l'hébreu).
+\TeXXeTstate=1
+\providecommand\CortexRL[1]{\beginR#1\endR}
+\providecommand\CortexLR[1]{\beginL#1\endL}
+\newfontfamily\CortexHebrew{FreeSerif.otf}[Script=Hebrew, BoldFont=FreeSerifBold.otf, ItalicFont=FreeSerifItalic.otf, BoldItalicFont=FreeSerifBoldItalic.otf]
+\newcommand\CortexHe[1]{{\CortexHebrew#1}}
