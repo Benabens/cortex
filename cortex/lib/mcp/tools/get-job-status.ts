@@ -6,6 +6,7 @@ import { getBlockExam } from "@/lib/blocks";
 import { sectionLabel } from "@/lib/section-label";
 import { getQcmExam } from "@/lib/qcm";
 import { drillOfJob } from "@/lib/drill-job";
+import { checkOfJob } from "@/lib/check-job";
 import { redactMessage } from "@/lib/observability";
 import { ingestProblems } from "@/lib/ingest-report";
 import { ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
@@ -51,6 +52,15 @@ const output = z.object({
     hints: z.array(z.string()).describe("Five hints, from vague to the decisive step: reveal them one at a time."),
     solution: z.string(),
   }).nullable().optional().describe("Present when a practice-question job (generate_drill) is done."),
+  check: z.object({
+    verdict: z.enum(["correct", "partial", "wrong"]),
+    score: z.object({ earned: z.number(), total: z.number() }),
+    feedback: z.string(),
+    criteria: z.array(z.object({
+      label: z.string(), points: z.number(), achieved: z.boolean(), essential: z.boolean(), justification: z.string(),
+    })).describe("Grading rubric applied criterion by criterion."),
+    correct_solution: z.string(),
+  }).nullable().optional().describe("Present when a grading job (check_answer) is done."),
   active: jobOut.nullable().describe("Without job_id: the generation currently running, if any."),
   recent: z.array(jobOut).describe("Without job_id: the latest generations."),
 });
@@ -153,12 +163,12 @@ function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jo
 }
 
 /**
- * Job en cours, aides comprises : activeJob() sans type écarte le drill (bandeau de l'app), mais un
+ * Job en cours, aides comprises : activeJob() sans type écarte le drill et la correction (bandeau de l'app), mais un
  * drill qui s'écrit EST en cours pour l'assistant — sans lui, « No generation is running » invitait à
  * le relancer.
  */
 async function runningJob(): Promise<Job | null> {
-  return (await activeJob()) ?? (await activeJob("drill"));
+  return (await activeJob()) ?? (await activeJob("drill")) ?? (await activeJob("check"));
 }
 
 /**
@@ -187,16 +197,16 @@ export default defineTool({
   name: "get_job_status",
   title: "Track a generation",
   description:
-    "Returns the status, progress and current step of a long-running job started by generate_mock_exam (typically 10-35 minutes, longer for a large exam), generate_drill (1-3 minutes) or prepare_course. " +
+    "Returns the status, progress and current step of a long-running job started by generate_mock_exam (typically 10-35 minutes, longer for a large exam), generate_drill (1-3 minutes), check_answer (under 2 minutes) or prepare_course. " +
     "When a mock exam (written or multiple-choice) is done, it also returns its questions, the solutions when include_solutions is true, and a link to the exam in Cortex. " +
-    "When a practice question is done, it returns the question, its five hints and its worked solution. " +
+    "When a practice question is done, it returns the question, its five hints and its worked solution; when a grading is done, its verdict, rubric, score, feedback and a correct solution. " +
     "Without job_id, it returns the generation currently running and the latest ones. Job ids are numbered per course: pass the course the job was started in. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "getJobStatus",
   input: z.object({
     course: courseArg,
-    job_id: z.number().int().positive().optional().describe("The job_id returned by generate_mock_exam, generate_drill or prepare_course."),
+    job_id: z.number().int().positive().optional().describe("The job_id returned by generate_mock_exam, generate_drill, check_answer or prepare_course."),
     include_solutions: z.boolean().optional().describe("Include the worked solutions of a finished mock exam (default false, so that the student can try first)."),
   }),
   output,
@@ -248,12 +258,22 @@ export default defineTool({
         hints: (d.hints ?? []).slice(0, 5).map((h) => clip(htmlToText(h), 1500)),
         solution: clip(htmlToText(d.solution_html), 8000),
       } : null;
-      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining }, exam, drill };
+      // Correction terminée (check_answer) : la même vue que check_answer rendait avant d'être un job.
+      const r = await checkOfJob(job);
+      const check = r ? {
+        verdict: r.verdict,
+        score: r.score,
+        feedback: clip(r.feedback, 4000),
+        criteria: r.criteria.slice(0, 5).map((k) => ({ ...k, label: clip(k.label, 300), justification: clip(k.justification, 800) })),
+        correct_solution: clip(r.correct_solution, 6000),
+      } : null;
+      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining }, exam, drill, check };
     });
   },
   summarize: (o) => {
     if (!o.job) return o.active ? `Generation job ${o.active.job_id} is running (${o.active.progress_pct}%).` : "No generation is running.";
     const j = o.job;
+    if (j.status === "done" && o.check) return `The grading (job ${j.job_id}) is ready: ${o.check.verdict}, ${o.check.score.earned}/${o.check.score.total}.`;
     if (j.status === "done" && o.drill) return `The practice question (job ${j.job_id}) is ready. Offer the hints one at a time before showing the worked solution.`;
     if (j.status === "done") return `Generation job ${j.job_id} is complete.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}${(j.type === "ingest" || j.type === "prepare") && j.step ? ` ${j.step}` : ""}`;
     if (j.status === "error" || j.status === "canceled") return `Generation job ${j.job_id} ${j.status === "error" ? "failed" : "was canceled"}.`;

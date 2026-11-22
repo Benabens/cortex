@@ -20,8 +20,14 @@ import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-erro
  * Le worker (scripts/run-job.ts) écrit ici après chaque étape → survit au reload.
  */
 export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done" | "error" | "canceled";
-/** « drill » : une aide (0,3 crédit) lancée par le connecteur, exécutée en job pour ne pas faire attendre le client (lib/drill-job). */
-export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill";
+/**
+ * « drill » et « check » : des aides (0,3 crédit) lancées par le connecteur, exécutées en job pour ne
+ * pas faire attendre le client (lib/drill-job, lib/check-job).
+ */
+export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill" | "check";
+
+/** Aides du connecteur exécutées en job : file à part, sans fichiers du cours, jamais relancées par « réessayer ». */
+export const ASSIST_JOB_TYPES: readonly JobType[] = ["drill", "check"];
 export type Job = {
   id: number;
   type: JobType;
@@ -558,7 +564,7 @@ export async function retryJob(id: number, course?: string): Promise<Job | null>
   const old = await getJob(id);
   if (!old) return null;
   // Un drill se redemande par le connecteur, avec un nouveau devis (son tarif est celui d'une aide).
-  if (old.type === "drill") return old;
+  if (ASSIST_JOB_TYPES.includes(old.type)) return old;
   const { id: newId, existing } = await createJobExclusive(old.type, old.target ?? undefined);
   if (!existing) await startWorker(newId, course);
   return await getJob(newId);
@@ -925,7 +931,7 @@ function orderedUnits(target: string | null): number | null {
 export async function activeJob(type?: JobType): Promise<Job | null> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  const where = type ? `AND type = '${type}'` : `AND type <> 'drill'`;
+  const where = type ? `AND type = '${type}'` : `AND type NOT IN (${ASSIST_JOB_TYPES.map((t) => `'${t}'`).join(",")})`;
   const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`);
   return r ? rowToJob(r) : null;
 }

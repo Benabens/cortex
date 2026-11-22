@@ -53,7 +53,7 @@ export function maxGlobalAssistJobs(): number | null {
 const POOLS: QueuePool[] = ["gen", "ingest", "assist"];
 const capOf = (pool: QueuePool) => (pool === "ingest" ? maxGlobalIngestJobs() : pool === "assist" ? maxGlobalAssistJobs() : maxGlobalJobs());
 /** File du type de job : l'import et l'aide ont chacun la leur, les générations partagent l'autre. */
-export const poolOfJobType = (type: string): QueuePool => (type === "ingest" ? "ingest" : type === "drill" ? "assist" : "gen");
+export const poolOfJobType = (type: string): QueuePool => (type === "ingest" ? "ingest" : type === "drill" || type === "check" ? "assist" : "gen");
 /** Aucune des deux files n'a de plafond : rien n'est écrit (dev sans garde-fous). */
 const queueOff = () => POOLS.every((p) => capOf(p) === null);
 /** Places d'une file qu'un même compte tient à la fois (null : pas de borne, MAX_ACTIVE_JOBS borne déjà les générations). */

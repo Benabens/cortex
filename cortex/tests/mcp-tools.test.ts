@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { finishDrillJob } from "./helpers/drill-job";
+import { finishCheckJob } from "./helpers/check-job";
 import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
@@ -54,6 +55,11 @@ function fakeLlm(req: http.IncomingMessage, res: http.ServerResponse) {
   req.on("data", (c) => { body += c; });
   req.on("end", () => {
     llmCalls++;
+    if (body.includes("REPONSE-ILLISIBLE")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ choices: [{ message: { content: "pas du JSON" } }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
+      return;
+    }
     const drill = body.includes("INDICES");
     const content = drill
       ? { concept: "valeurs propres", statement_html: "<p>Diagonalise A.</p>", hints: ["h1", "h2", "h3", "h4", "h5"], solution_html: "<p>Polynôme caractéristique.</p>" }
@@ -528,7 +534,7 @@ test("quota d'assistance du jour atteint : refusé dès le devis, aucun débit",
   const t1 = (q1.structuredContent as { confirmation: { confirmation_token: string } }).confirmation.confirmation_token;
   const ok = await call(client, "check_answer", { statement: "Calcule det(A).", answer: "det(A) = 6", confirmation_token: t1 });
   assert.equal(ok.isError, undefined, text(ok));
-  assert.equal((ok.structuredContent as { result: { verdict: string } }).result.verdict, "partial");
+  assert.ok((await finishCheckJob(CAROL, ok.structuredContent)).ok);
   process.env.DAILY_ASSIST_QUOTA = "1";
   try {
     const before = await balance(CAROL);
@@ -540,6 +546,61 @@ test("quota d'assistance du jour atteint : refusé dès le devis, aucun débit",
   } finally {
     process.env.DAILY_ASSIST_QUOTA = "unlimited";
   }
+  await client.close();
+});
+
+test("check_answer : rend un job (jamais un appel au modèle dans la requête), get_job_status rend la correction ; 0,3 crédit", async () => {
+  const { access } = await tokenFor(ALICE);
+  const { client } = await connect(access);
+  const before = await balance(ALICE);
+  const args = { statement: "Calcule les valeurs propres de A.", answer: "λ = 2" };
+  const quote = await call(client, "check_answer", args);
+  const token = (quote.structuredContent as { confirmation: { confirmation_token: string } }).confirmation.confirmation_token;
+  const calls = llmCalls;
+  const started = await call(client, "check_answer", { ...args, confirmation_token: token });
+  assert.equal(started.isError, undefined, text(started));
+  const sc = started.structuredContent as { status: string; result: unknown; job: { job_id: number; track_with: string } };
+  assert.equal(sc.status, "started");
+  assert.equal(sc.result, null);
+  assert.match(sc.job.track_with, /get_job_status with course=".+" and job_id=\d+/);
+  assert.equal(llmCalls, calls, "la requête MCP n'attend pas le modèle");
+  assert.equal(await balance(ALICE), before - 30, "réservé au lancement");
+
+  // Pendant qu'elle s'écrit : une autre correction est refusée avant tout devis, rien débité.
+  const other = await call(client, "check_answer", { statement: "Autre question.", answer: "Autre réponse." });
+  assert.equal(errorCode(other), "conflict", text(other));
+  assert.match(text(other), new RegExp(`job ${sc.job.job_id}`));
+  assert.equal(await balance(ALICE), before - 30);
+
+  assert.ok((await finishCheckJob(ALICE, sc)).ok);
+  const status = await call(client, "get_job_status", { job_id: sc.job.job_id });
+  const done = status.structuredContent as { job: { type: string; status: string }; check: { verdict: string; score: { earned: number; total: number }; criteria: unknown[]; correct_solution: string } };
+  assert.equal(done.job.type, "check");
+  assert.equal(done.job.status, "done");
+  assert.equal(done.check.verdict, "partial");
+  assert.deepEqual(done.check.score, { earned: 2, total: 4 });
+  assert.equal(done.check.criteria.length, 2);
+  assert.equal(done.check.correct_solution, "λ = 2 et λ = 3");
+  assert.match(text(status), /grading .* is ready: partial, 2\/4/);
+  assert.equal(await balance(ALICE), before - 30);
+  await client.close();
+});
+
+test("check_answer : réponse illisible du modèle → job en erreur, 0,3 crédit rendu", async () => {
+  const { access } = await tokenFor(ALICE);
+  const { client } = await connect(access);
+  const before = await balance(ALICE);
+  const args = { statement: "REPONSE-ILLISIBLE : que vaut 1+1 ?", answer: "2" };
+  const quote = await call(client, "check_answer", args);
+  const token = (quote.structuredContent as { confirmation: { confirmation_token: string } }).confirmation.confirmation_token;
+  const started = await call(client, "check_answer", { ...args, confirmation_token: token });
+  assert.equal(started.isError, undefined, text(started));
+  assert.equal(await balance(ALICE), before - 30);
+  assert.equal((await finishCheckJob(ALICE, started.structuredContent)).ok, false);
+  const jobId = (started.structuredContent as { job: { job_id: number } }).job.job_id;
+  const status = await call(client, "get_job_status", { job_id: jobId });
+  assert.equal((status.structuredContent as { job: { status: string } }).job.status, "error");
+  assert.equal(await balance(ALICE), before, "réponse inutilisable : rendu");
   await client.close();
 });
 
