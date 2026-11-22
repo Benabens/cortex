@@ -3,7 +3,7 @@ import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages, courseRefPdfs } from "@/lib/course-vision";
 import { surveyAnnalePdfs } from "@/lib/exam-layout-survey";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
-import { ANSWER_MODES, EXAM_KINDS, type AnswerMode, type ExamKind, type StoredProfile } from "@/lib/exam-format";
+import { ANSWER_MODES, EXAM_KINDS, cleanProfile, type AnswerMode, type ExamKind, type StoredProfile } from "@/lib/exam-format";
 
 /**
  * DÉTECTION DE FORMAT (générique, par matière). Le moteur ne hardcode RIEN : il LIT le
@@ -135,7 +135,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
-  const profile = extractJson<FormatProfile>(await completeText({ prompt, model: "opus", timeoutMs: 300_000 }));
+  const profile = cleanProfile(extractJson<FormatProfile>(await completeText({ prompt, model: "opus", timeoutMs: 300_000 })));
   // Mise en page de l'annale (garde, en-tête, numérotation, options…), relevée une fois ici, sans
   // appel au modèle, tant que ses PDF sont là : lib/exam-layout-survey.
   step("Relevé de la mise en page de l'annale…", 85);
@@ -341,5 +341,5 @@ export async function getFormatProfile(): Promise<FormatProfile | null> {
   await ensureFormatSchema();
   const r = await q.get<{ json: string }>(`SELECT json FROM format_profile ORDER BY id DESC LIMIT 1`);
   if (!r) return null;
-  try { return JSON.parse(r.json) as FormatProfile; } catch { return null; }
+  try { return cleanProfile(JSON.parse(r.json) as FormatProfile); } catch { return null; }
 }

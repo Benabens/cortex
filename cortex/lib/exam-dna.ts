@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
-import { completeText, extractJson } from "@/lib/llm";
+import { completeJson, completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { pickEnonces, renderExamPages } from "@/lib/exam-index";
 import {
@@ -169,16 +169,16 @@ export async function classifyMolds(step: Step = () => {}): Promise<{ classified
       JSON.stringify(CLASSIFY_SCHEMA, null, 2),
     ].join("\n");
     let raw: RawClassified[] = [];
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const parsed = extractJson<{ classified?: RawClassified[] }>(
-          await completeText({ prompt, model: "opus", timeoutMs: 300_000 })
-        );
-        raw = parsed?.classified ?? [];
-        if (raw.length) break;
-      } catch (e) {
-        step(`Moules : lot ${i / BATCH + 1} échoué${attempt < 2 ? ", réessai" : ", ignoré (repris au prochain run)"} (${(e as Error).message.slice(0, 40)})`, Math.round((i / rows.length) * 100));
-      }
+    // Réponse illisible ou vide : redemandée AVEC l'erreur (completeJson). Fournisseur en panne :
+    // ses propres relances suffisent ; ce lot en ajoutait une seconde série, à l'identique.
+    try {
+      const parsed = await completeJson<{ classified?: RawClassified[] }>(
+        { prompt, model: "opus", timeoutMs: 300_000 },
+        { attempts: 2, check: (v) => (Array.isArray(v?.classified) && v.classified.length ? null : "« classified » manque ou est vide : classe CHACUN des ids") },
+      );
+      raw = parsed.classified ?? [];
+    } catch (e) {
+      step(`Moules : lot ${i / BATCH + 1} échoué, ignoré (repris au prochain run) (${(e as Error).message.slice(0, 40)})`, Math.round((i / rows.length) * 100));
     }
     const ids = new Set(batch.map((b) => b.id));
     await q.tx(async () => {
@@ -270,23 +270,23 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
     const dirs = Array.from(new Set(pages.map((pg) => path.dirname(path.resolve(pg.rel)))));
     let figs: { page: number; kind: string; shows: string }[] = [];
     let ok = false;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const parsed = extractJson<{ figures?: RawFig[] }>(
-          await completeText({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs })
-        );
-        figs = (parsed?.figures ?? [])
-          .map((f) => ({
-            page: Math.max(1, Math.round(Number(f.page) || 1)),
-            kind: normalizeFigureKind(f.kind) ?? "",
-            shows: (f.shows ?? "").replace(/\s+/g, " ").trim().slice(0, 180),
-          }))
-          .filter((f) => f.kind);
-        ok = true;
-        break;
-      } catch (e) {
-        step(`Figures : ${exam.title} échoué${attempt < 2 ? ", réessai" : ", repris au prochain run"} (${(e as Error).message.slice(0, 40)})`, pct);
-      }
+    // Réponse illisible : redemandée avec l'erreur (completeJson). Fournisseur en panne : pas de
+    // seconde série de relances à l'identique (jusqu'à deux fois trois appels de 10 min par annale).
+    try {
+      const parsed = await completeJson<{ figures?: RawFig[] }>(
+        { prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs },
+        { attempts: 2, check: (v) => (Array.isArray(v?.figures) ? null : "« figures » (tableau, vide si aucune figure) manque") },
+      );
+      figs = (parsed.figures ?? [])
+        .map((f) => ({
+          page: Math.max(1, Math.round(Number(f.page) || 1)),
+          kind: normalizeFigureKind(f.kind) ?? "",
+          shows: (f.shows ?? "").replace(/\s+/g, " ").trim().slice(0, 180),
+        }))
+        .filter((f) => f.kind);
+      ok = true;
+    } catch (e) {
+      step(`Figures : ${exam.title} échoué, repris au prochain run (${(e as Error).message.slice(0, 40)})`, pct);
     }
     if (!ok) continue; // pas marqué scanné → ré-entrant
     dna.figures.scanned[exam.title] = { pages: pages.length, figures: figs };
