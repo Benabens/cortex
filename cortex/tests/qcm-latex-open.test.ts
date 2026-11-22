@@ -183,3 +183,19 @@ test("J × #54 — le corrigé recompilé ne ressort pas une explication à note
   assert.ok(!/clé corrigée à la vérif/.test(tex), "note périmée absente du corrigé");
   assert.match(tex, /Explication retirée/);
 });
+
+test("repli en texte simple d'une ouverte : ses formules restent composées, et lisibles si elles ne compilent pas (22/11)", async () => {
+  const { plainOpenTex } = await import("../lib/qcm-latex");
+  const { withFormulasAsText } = await import("../lib/tex-rich");
+  const src = String.raw`\textbf{Soit} $\frac{a}{b}$ et \[x_{t+1} = 2x_t\], puis \begin{equation*}\sum_i w_i = 1\end{equation*} avec y_{n} et 5 \$ de frais \undefinedmacro{x}.`;
+  const out = plainOpenTex(src);
+  for (const math of [String.raw`$\frac{a}{b}$`, String.raw`$\displaystyle x_{t+1} = 2x_t$`, String.raw`$\displaystyle \sum_i w_i = 1$`, "$y_{n}$"]) assert.ok(out.includes(math), `${math} absent : ${out}`);
+  assert.match(out, /Soit/);
+  assert.match(out, /5 \\\$ de frais/);
+  assert.doesNotMatch(out, /undefinedmacro|textbf/);
+  // second repli (formules en texte) : le source de la formule s'imprime, rien n'est effacé
+  const asText = await withFormulasAsText(async () => plainOpenTex(src));
+  assert.doesNotMatch(asText, /(?<!\\)\$/, asText);
+  assert.ok(asText.includes(String.raw`\textbackslash{}frac\{a\}\{b\}`), asText);
+  assert.ok(asText.includes(String.raw`x\_\{t+1\} = 2x\_t`), asText);
+});

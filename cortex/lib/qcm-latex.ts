@@ -4,7 +4,7 @@ import { examDurationMin } from "@/lib/exam-format";
 import { examLayout, examPdf, type ExamLayout, type ExamPdf } from "@/lib/exam-layout";
 import { choicesTex, openHeadTex, qcmHeadTex } from "@/lib/exam-layout-tex";
 import { esc } from "@/lib/tex-escape";
-import { formulasOrText, markdownListsTex, texText } from "@/lib/tex-rich";
+import { formulaOrText, formulasOrText, markdownListsTex, texText, wrapBareFormulasTex } from "@/lib/tex-rich";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
@@ -160,21 +160,43 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   return examDocument([cover, firstPart, secondPart], dateLabel, pdf);
 }
 
-/**
- * LaTeX libre d'une question ouverte → texte simple échappé (repli quand il casse la
- * compilation) : figures TikZ remplacées par une mention, environnements et commandes
- * retirés, leur texte gardé, paragraphes conservés.
- */
-export function plainOpenTex(tex: string): string {
-  const text = (tex ?? "")
-    .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, " [figure : voir l'examen dans l'app] ")
+/** Maths d'un LaTeX libre : environnements d'équation, display, puis en ligne (hors « \$ »). */
+const OPEN_MATH = /\\begin\{(equation|align|gather|multline)(\*?)\}([\s\S]*?)\\end\{\1\2\}|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<!\\)\$((?:\\.|[^$\\])+?)\$/g;
+
+/** Texte hors maths d'un LaTeX libre : environnements et commandes retirés, leur texte gardé. */
+function plainText(tex: string): string {
+  return esc(tex
     .replace(/\\(?:begin|end)\{[^}]*\}(?:\[[^\]]*\])?(?:\{[^}]*\})?/g, " ")
     .replace(/\\\\(?:\[[^\]]*\])?/g, "\n")
     .replace(/\\[a-zA-Z@]+\*?(?:\[[^\]]*\])?/g, " ")
     .replace(/\\([%$&#_{}])/g, "$1")
     .replace(/[{}]/g, "")
-    .replace(/[ \t]+/g, " ");
-  return text.split(/\n\s*\n/).map((p) => esc(p.trim())).filter(Boolean).join("\n\n");
+    .replace(/[ \t]+/g, " "));
+}
+
+/**
+ * LaTeX libre d'une question ouverte → texte simple échappé (repli quand il casse la
+ * compilation) : figures TikZ remplacées par une mention, environnements et commandes
+ * retirés, leur texte gardé, paragraphes conservés. Les formules, délimitées ou sans
+ * délimiteurs (lib/tex-rich), restent composées si elles sont sûres, sinon leur source
+ * s'imprime : jamais effacées (signalé le 22/11/2026).
+ */
+export function plainOpenTex(tex: string): string {
+  const text = plainWithFormulas((tex ?? "").replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, " [figure : voir l'examen dans l'app] "), true);
+  return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).join("\n\n");
+}
+
+/** Maths composées, texte hors maths en texte simple ; `bare` : ses formules sans délimiteurs d'abord mises entre $…$. */
+function plainWithFormulas(src: string, bare: boolean): string {
+  let out = "";
+  let last = 0;
+  const rest = (t: string) => (bare ? plainWithFormulas(wrapBareFormulasTex(t), false) : plainText(t));
+  for (const m of src.matchAll(OPEN_MATH)) {
+    const display = m[3] ?? m[4] ?? m[5];
+    out += rest(src.slice(last, m.index)) + formulaOrText(display ?? m[6] ?? m[7], display !== undefined, m[0]);
+    last = m.index + m[0].length;
+  }
+  return out + rest(src.slice(last));
 }
 
 /**
@@ -188,7 +210,9 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `qcm-${examId}`;
   copyExamLogo(examPdf(await examLayout()).logo);
-  const plain: QcmExamData = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
+  // rendu à chaque compilation : au second repli, les formules du texte simple passent aussi en texte
+  const plain = (): QcmExamData => ({ ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) });
+  const asIs = () => data;
   const write = async (d: QcmExamData, solutions: boolean): Promise<string> => {
     const tex = await renderQcmExamTex(d, dateLabel, solutions);
     assertTexSafe(tex);
@@ -200,8 +224,8 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
 
   // Chaque étape retente d'abord avec les formules du texte en texte (lib/tex-rich) : une formule
   // qui ne compile pas ne doit pas faire passer les questions ouvertes en texte simple.
-  const compile = async (d: QcmExamData, solutions: boolean) => {
-    const r = await formulasOrText(async () => compileExamPdf(await write(d, solutions)));
+  const compile = async (d: () => QcmExamData, solutions: boolean) => {
+    const r = await formulasOrText(async () => compileExamPdf(await write(d(), solutions)));
     if (r.asText) formulasAsText = true;
     return r.value;
   };
@@ -209,7 +233,7 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
   let pdf: string;
   let warning: string | undefined;
   try {
-    pdf = await compile(data, false);
+    pdf = await compile(asIs, false);
   } catch (e) {
     if (!data.open.length) return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: (e as Error).message };
     try {
@@ -222,7 +246,7 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
   // Corrigé : même source que l'énoncé, puis le même repli s'il ne compile pas (examen 2 de
   // CS-290 : « Énoncé » sans « Corrigé »).
   try {
-    await compile(warning ? plain : data, true);
+    await compile(warning ? plain : asIs, true);
   } catch (e) {
     try {
       if (warning || !data.open.length) throw e;

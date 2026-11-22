@@ -333,6 +333,18 @@ export async function formulasOrText<T>(build: () => Promise<T>): Promise<{ valu
   }
 }
 
+/**
+ * Une formule déjà isolée (`content`, sans ses délimiteurs) → `$…$` si `mathTex` la juge sûre,
+ * sinon son source `source` échappé, lisible ; en texte aussi sous `withFormulasAsText`.
+ */
+export function formulaOrText(content: string, display: boolean, source: string): string {
+  const tex = plainMath.getStore() ? null : mathTex(content);
+  if (tex === null) return esc(source);
+  const seen = composed.getStore();
+  if (seen) seen.n++;
+  return `$${display ? `\\displaystyle ${tex.trim()}` : tex}$`;
+}
+
 /** Maths déjà délimitées et code en ligne d'un source LaTeX : rien à y mettre entre dollars. */
 const TEX_PROTECTED = /\$\$[\s\S]*?\$\$|(?<!\\)\$(?:\\.|[^$\\])*\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\\(?:texttt|url|path|label|ref|eqref|cite|includegraphics)\s*(?:\[[^\]]*\])?\{[^{}]*\}|\\verb(\S)[\s\S]*?\1/g;
 

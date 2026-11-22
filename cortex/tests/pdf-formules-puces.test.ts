@@ -102,3 +102,22 @@ test("question composée : scénario, sous-questions, options, réponse et barè
     for (const item of ["hypothèse un", "hypothèse deux", "cas 1", "cas 2", "choix un", "choix deux"]) assert.ok(lines.some((l) => new RegExp(`^•\\s*${item}$`).test(l)), `${file} : « ${item} » n'est pas une puce`);
   }
 });
+
+test("question ouverte au LaTeX cassé : le repli en texte simple garde ses formules composées", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (toolsMissing(t, texAvailable)) return;
+  const { runWithCourse } = await import("../db/client");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const { examsDir } = await import("../lib/paths");
+  const items = [{ topic: "Gradient", type: "scq" as const, stem: "Quel pas ?", options: ["petit", "grand"], correct: [0], misconceptions: ["", ""], explanation: "Le petit.", verified: 1 as const }];
+  const open = [{ concept: "Pas", points: 10, statement_tex: String.raw`Avec \undefinedmacro{pas} et $x_{t+1} = 2x_t$, montrez que \[\sum_i w_i \le 1\].`, solution_tex: String.raw`On a $x_t \to 0$.` }];
+  const { out, dir } = await runWithCourse(course, async () => ({ out: await buildQcmArtifact(4413, { items, open: open as never }, "2026-11-22"), dir: examsDir() }));
+  assert.equal(out.texError, undefined, out.texError);
+  assert.match(out.texWarning ?? "", /texte simple/);
+  for (const file of ["qcm-4413.pdf", "qcm-4413-corrige.pdf"]) {
+    const lines = pdfLines(path.join(dir, file));
+    assertComposed(lines, file);
+    assert.ok(lines.some((l) => l.includes("montrez que")), `${file} : énoncé perdu`);
+    assert.ok(lines.some((l) => /∑/.test(l)), `${file} : la somme a été effacée`);
+  }
+});
