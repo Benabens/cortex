@@ -233,6 +233,43 @@ function optionCountRule(options: number): string {
   return `  - NOMBRE D'OPTIONS : EXACTEMENT ${options} options par question, comme dans les annales${options === 2 ? " (vrai/faux : une affirmation à juger, options « Vrai » et « Faux » dans la langue de l'examen)" : ""} ; jamais plus, jamais moins.`;
 }
 
+/**
+ * Le sujet (rang dans `topics`) de chaque QCM d'une réponse. Le modèle répond « dans l'ordre », mais
+ * une question qu'il saute décalait toutes les suivantes : avec A, B, C demandés et A, C rendus, la
+ * question sur C recevait la notion de B, et B, jamais posé, n'était pas redemandé. Le fait recopié
+ * (fact_id), sinon le sujet recopié (topic), désigne le rang. Deux questions qui désignent le même
+ * rang (un même sujet recopié partout) : les désignations ne disent rien, la position décide pour
+ * toutes. Sans désignation : sa position si elle est libre, sinon le premier rang resté libre.
+ */
+export function slotsOf(raws: unknown[], topics: { label: string }[], facts: ({ id: string } | null)[]): number[] {
+  const label = (t: string) => normalize(t).replace(/\s+/g, " ").trim();
+  const labels = topics.map((t) => label(t.label));
+  const designated = raws.map((raw) => {
+    const r = raw as { fact_id?: unknown; topic?: unknown } | null;
+    const fid = typeof r?.fact_id === "string" ? r.fact_id.trim() : "";
+    const byFact = fid ? facts.findIndex((f) => f?.id === fid) : -1;
+    if (byFact >= 0) return byFact;
+    const t = typeof r?.topic === "string" ? label(r.topic) : "";
+    if (!t) return -1;
+    const exact = labels.indexOf(t);
+    if (exact >= 0) return exact;
+    // « 2) Arbres binaires — FAIT À TESTER … » recopié en entier : le plus long libellé qu'il contient.
+    const within = labels.map((l, k) => ({ l, k })).filter(({ l }) => l.length >= 4 && t.includes(l)).sort((x, y) => y.l.length - x.l.length)[0];
+    return within?.k ?? -1;
+  });
+  const named = designated.filter((k) => k >= 0);
+  const reliable = new Set(named).size === named.length;
+  const used = new Set<number>(reliable ? named : []);
+  return raws.map((_, i) => {
+    if (reliable && designated[i] >= 0) return designated[i];
+    if (i < topics.length && !used.has(i)) { used.add(i); return i; }
+    const free = topics.findIndex((_, j) => !used.has(j));
+    if (free < 0) return i;
+    used.add(free);
+    return free;
+  });
+}
+
 /** Un QCM exploitable : énoncé, au moins deux options texte, clé(s) valide(s). Sinon écarté (et comblé). */
 function wellFormed(raw: unknown): boolean {
   const it = raw as Partial<QcmItem> | null;
@@ -1018,9 +1055,15 @@ export async function generateQcmBatch(
   const items: QcmItem[] = [];
   // Jamais plus que demandé au lot ; un item mal formé est écarté (le comblement le remplace).
   const raws = r.items.slice(0, n);
-  for (let i = 0; i < raws.length; i++) {
-    const raw = raws[i];
+  const slots = slotsOf(raws, focus ? [] : topics.slice(0, n), slotFacts);
+  for (let k = 0; k < raws.length; k++) {
+    const raw = raws[k];
+    // Le sujet de la question, pas sa place dans la réponse (une question sautée décalait les suivantes).
+    const i = slots[k];
     if (!wellFormed(raw)) continue;
+    // Une clé répétée ([0, 0]) n'est qu'une bonne réponse : comptée deux fois, elle écartait la
+    // question d'un examen à réponse unique, et rendait une clé [1, 1] contestée par le correcteur.
+    raw.correct = [...new Set(raw.correct)];
     const type = typeInMode(raw.correct, raw.type, mode);
     if (!type) {
       step(`QCM à plusieurs bonnes réponses écarté : l'examen est à réponse unique`, 30);
