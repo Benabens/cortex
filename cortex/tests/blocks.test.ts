@@ -563,3 +563,80 @@ test("revue : retirer une sous-question décalerait un renvoi « (c) » → la q
   assert.ok(!filtering.parts.some((p) => /answer to \(c\)|ethical theories/i.test(p.prompt)), filtering.parts.map((p) => p.prompt).join(" | "));
   assert.ok(steps.some((s) => /refaite : elle reprenait la question/.test(s)), steps.join("\n"));
 });
+
+test("C × total du format (22/11 : 6 questions sur 7, 42 pts au lieu de 50) : une question tombée, ses points vont aux autres, barème des sous-questions inclus", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "keyword filtering of posts"]), totalPoints: 10 };
+  script = {
+    // Clé fausse à chaque version : la question 2 tombe.
+    "Question 2": [block("B", [{ ...scq("B"), correct: 1 }, short("B"), code("[1, 2]")])],
+    // 1 + 2 (critères 1 + 1) + 2 = 5 points sur les 10 du format.
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.deepEqual([r.count, r.requested], [1, 2]);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  const [b] = exam.blocks;
+  assert.equal(b.points, 10, "le total livré est celui du format");
+  assert.deepEqual(b.parts.map((p) => p.points), [2, 4, 4], "proportionnel : 1-2-2 devient 2-4-4");
+  const sq = b.parts.find((p) => p.kind === "short")!;
+  assert.deepEqual(sq.criteria!.map((c) => c.points), [2, 2], "les critères de la réponse courte suivent son barème");
+});
+
+test("C × total du format : examen complet dont la somme s'écarte du format → somme exacte, points entiers, aucun à zéro", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "keyword filtering of posts"]), totalPoints: 12 };
+  script = {
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+    "keyword": [block("B", [scq("B"), short("B"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.deepEqual([r.count, r.requested], [2, 2]);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  assert.equal(exam.blocks.reduce((s, x) => s + x.points, 0), 12);
+  for (const x of exam.blocks) {
+    assert.equal(x.parts.reduce((s, p) => s + p.points, 0), x.points, "points de la question = somme de ses sous-questions");
+    for (const p of x.parts) {
+      assert.ok(Number.isInteger(p.points) && p.points >= 1, `sous-question à ${p.points} pt`);
+      if (p.kind === "short") assert.equal(p.criteria!.reduce((s, c) => s + c.points, 0), p.points);
+    }
+  }
+  const { gradeBlocks } = await import("../lib/blocks");
+  const g = (await runWithCourse(id, () => gradeBlocks(r.id, {})))!;
+  assert.equal(g.total + g.pending, 12, "la correction compte sur le même total (corrigé automatiquement + en attente)");
+});
+
+test("C × extraits (banc rs-composite 22/11, Q4/Q5/Q7 « hors cours ») : chaque notion de la section est cherchée dans le cours, même loin dans un support déjà cité", async () => {
+  const id = await compositeCourse(1);
+  // Un support long : l'en-tête (notebook, code pandas) reprend le nom de la section, la théorie
+  // demandée par sa description n'arrive qu'après 900 caractères.
+  const notebook = Array.from({ length: 14 }, (_, i) => `Cell ${i}: df.sort_values("likes").head(${i + 2}) prints the ${i + 2} least liked memes of the Memeverse feed.`).join(" ");
+  const theory = "Malinformation is genuine content shared out of context to cause harm, unlike disinformation (false and deliberate).";
+  const title = "Safety 2 - content recommendation";
+  const text = `${title}. Notebook Memeverse recommendation: ${notebook} Theory. ${theory}`;
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  await runWithCourse(id, async () => {
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", title, `note/${title}`, null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", title, text);
+    await indexItemForSearch(iid, sid, title, text);
+  });
+  const plan = {
+    blockCount: 1, partsMin: 3, partsMax: 4, totalPoints: null,
+    sections: [{ name: "Q4 — Safety 2: content recommendation", description: "Pandas code reading (sort_values, head), malinformation versus disinformation" }],
+  };
+  script = { "Safety 2": [block("Q4", [scq("Q4"), short("Q4"), code("[1, 2]")])] };
+  const { generateBlockExam } = await import("../lib/blocks");
+  prompts.length = 0;
+  judged.length = 0;
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.equal(r.count, 1);
+  const asked = prompts.find((p) => /^THÈME : Q4/m.test(p))!;
+  assert.match(asked, /Malinformation is genuine content/, "le générateur voit la définition demandée par la section");
+  assert.ok(judged.some((p) => /Malinformation is genuine content/.test(p)), "le juge voit la même définition (sinon : « hors cours »)");
+});
