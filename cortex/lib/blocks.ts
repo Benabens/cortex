@@ -16,6 +16,7 @@ import { PhaseProgress, phaseLine } from "@/lib/progress";
 import { runPython } from "@/lib/sandbox-exec";
 import { normalize, tokenize } from "@/lib/text";
 import { sectionLabel } from "@/lib/section-label";
+import { findOverlaps, type Overlap } from "@/lib/block-overlap";
 import path from "node:path";
 import { storage } from "@/lib/storage";
 
@@ -60,6 +61,9 @@ export type BlockPart = {
 };
 
 export type ExamBlock = { title: string; section: string | null; scenario: string; parts: BlockPart[]; points: number; verified: number | null };
+
+/** Contexte commun des demandes ; `others` : les sujets des AUTRES questions de l'examen, à ne pas reprendre. */
+type BlockCtx = { system: string; previous: string[]; focus?: string; others?: string[] };
 
 /** Ce qu'un bloc couvre : une section de l'annale modèle, ou une notion du cours. */
 type BlockSlot = { theme: string; section: string | null; query: string[]; notions: string[] };
@@ -316,6 +320,16 @@ const baremeText = (k: PartKind, def: string, points: PartShape["points"]) => {
 const isPython = (language: string | undefined) => !language || /^(?:python\d?|py)$/.test(language);
 const codeName = (language: string) => ({ c: "C", "c++": "C++", cpp: "C++", "c#": "C#", csharp: "C#", java: "Java", javascript: "JavaScript", js: "JavaScript", typescript: "TypeScript", ocaml: "OCaml", scala: "Scala", rust: "Rust", go: "Go", r: "R", matlab: "MATLAB", sql: "SQL", haskell: "Haskell" } as Record<string, string>)[language] ?? language;
 
+/**
+ * Deux options, c'est un VRAI/FAUX. Prod, 22/11/2026 : la détection relevait 2 options sur le
+ * vrai/faux d'une seule question de l'annale, et tous les choix uniques de l'examen sortaient en
+ * A/B, trop faciles. Un vrai/faux reste dans la section qui le décrit ; ailleurs, et quand aucune
+ * section n'en décrit un (le nombre relevé peut venir d'une seule question), 4 options plausibles.
+ */
+const TRUE_FALSE = /vrai\s*(?:\/|ou|-)\s*faux|true\s*(?:\/|or|-)\s*false|richtig\s*(?:\/|oder)\s*falsch|verdadero\s*(?:\/|o)\s*falso|vero\s*(?:\/|o)\s*falso|\bT\/F\b/i;
+const choiceOptions = (plan: BlockPlan) => (plan.options && plan.options >= 3 ? plan.options : 4);
+const isTrueFalseSlot = (slot: BlockSlot) => TRUE_FALSE.test(slot.theme);
+
 function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
   const c = getCourse(currentCourse());
   const language = languageName(examLanguageFor(currentCourse()))[1];
@@ -328,7 +342,7 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
     plan.kinds
       ? `TYPES DE SOUS-QUESTIONS (ceux de l'annale, aucun autre${plan.kinds.length > 1 ? " ; mêle-les : au moins deux d'entre eux" : ""}) :`
       : `TYPES DE SOUS-QUESTIONS (mêle-les : au moins un choix unique et au moins une réponse courte ; une lecture de code quand le thème s'y prête) :`,
-    allows("scq") && `  - "scq" — choix unique : exactement ${plan.options ?? 4} options, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
+    allows("scq") && `  - "scq" — choix unique : exactement ${choiceOptions(plan)} options${plan.sections.some((x) => TRUE_FALSE.test(`${x.name} ${x.description}`)) ? " (sauf consigne VRAI/FAUX dans la demande d'une question)" : ""}, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
     allows("short") && `  - "short" — réponse courte (1 à 3 phrases) : "answer" = la réponse modèle, conforme au cours ; "criteria" = 1 à 3 critères OBSERVABLES dans une copie (ce que la réponse doit nommer ou justifier), chacun avec ses points entiers, leur somme = "points".`,
     allows("code_output") && `  - "code_output" — lecture de code : "code" = un extrait ${python ? "Python" : codeName(plan.codeLanguage!)} AUTONOME et court (bibliothèque standard${python ? " ; pandas seulement si le cours l'emploie" : ""} ; ni fichier, ni réseau, ni hasard, ni horloge), "prompt" demande ce qu'il affiche, "answer" = sa sortie EXACTE, ligne pour ligne. Jamais d'écriture de code.`,
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
@@ -341,20 +355,26 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
   ].filter(Boolean).join("\n");
 }
 
-async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: { system: string; previous: string[]; focus?: string }, guidance: string | null, passages: { src: string; text: string }[]): Promise<ExamBlock> {
+async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: BlockCtx, guidance: string | null, passages: { src: string; text: string }[]): Promise<ExamBlock> {
+  const allows = (k: PartKind) => !plan.kinds || plan.kinds.includes(k);
+  const trueFalse = allows("scq") && isTrueFalseSlot(slot);
+  const shape: PartShape = { ...plan, options: trueFalse ? 2 : plan.options ? choiceOptions(plan) : undefined };
   const prompt = [
     `QUESTION ${i + 1}/${n}`,
     `THÈME : ${sanitizeCorpus(slot.theme).replace(/\s+/g, " ").slice(0, 400)}`,
     slot.notions.length ? `Notions du cours à mobiliser si elles s'y prêtent : ${slot.notions.map((x) => sanitizeCorpus(x).slice(0, 100)).join(" ; ")}.` : "",
     ctx.focus ? `Accent demandé par l'étudiant (un thème, pas une forme) : « ${sanitizeCorpus(ctx.focus).slice(0, 200)} ».` : "",
     ctx.previous.length ? `Déjà posées dans les examens précédents de ce cours (ne les reprends pas) :\n${ctx.previous.slice(0, 12).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}` : "",
+    // Prod, 22/11/2026 : construites en parallèle, les questions ne se voyaient pas et se recouvraient.
+    ctx.others?.length ? `AUTRES QUESTIONS DE CET EXAMEN — leurs sujets ne se reprennent ni dans ton scénario ni dans une sous-question :\n${ctx.others.map((x) => `  · ${sanitizeCorpus(x).replace(/\s+/g, " ").slice(0, 160)}`).join("\n")}` : "",
+    trueFalse ? `VRAI/FAUX : chaque "scq" de cette question est une affirmation à juger, exactement 2 options (vrai, faux, dans la langue de l'examen)${allows("short") ? `, suivie d'une sous-question "short" qui demande de justifier` : ""}.` : "",
     guidance ? `VERSION PRÉCÉDENTE REJETÉE — corrige ceci : ${guidance}` : "",
     passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)].join("\n") : "Aucun extrait du cours n'a été retrouvé pour ce thème : reste sur les notions du programme, sans en inventer.",
     `${plan.partsMin} à ${plan.partsMax} sous-questions. Réponds avec l'objet JSON {"title","scenario","parts":[…]} décrit plus haut.`,
   ].filter(Boolean).join("\n\n");
   const raw = await completeJson<{ title?: string; scenario?: string; parts?: Partial<BlockPart>[] }>(
     { system: ctx.system, prompt, model: "opus", timeoutMs: 300_000, json: { schema: BLOCK_SCHEMA } },
-    { check: (v) => blockIssue(v, plan.partsMin, plan.partsMax, plan) },
+    { check: (v) => blockIssue(v, plan.partsMin, plan.partsMax, shape) },
   );
   const parts = (raw.parts ?? []).map(cleanPart).map(shuffleOptions);
   return { title: sectionLabel(text(raw.title)) ?? sectionLabel(slot.section) ?? "", section: slot.section, scenario: String(raw.scenario ?? "").trim(), parts, points: parts.reduce((s, p) => s + p.points, 0), verified: null };
@@ -445,9 +465,9 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
 /** Phase des blocs dans l'avancement : une unité par version d'un bloc (lib/progress). */
 const BLOCKS_PHASE = "Questions composées";
 
-async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: { system: string; previous: string[]; focus?: string }, step: StepCb, work: PhaseProgress): Promise<{ block: ExamBlock | null; why: string }> {
+async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: BlockCtx, step: StepCb, work: PhaseProgress, firstGuidance: string | null = null): Promise<{ block: ExamBlock | null; why: string }> {
   const passages = await coursePassages(slot.query, 3, 900).catch(() => []);
-  let guidance: string | null = null;
+  let guidance: string | null = firstGuidance;
   let why = "";
   // Une version finie compte une unité ; en décider une de plus en AJOUTE une (le temps restant remonte alors).
   const retry = (attempt: number) => {
@@ -487,6 +507,52 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
   return { block: null, why };
 }
 
+/**
+ * NON-RECOUVREMENT (lib/block-overlap, sans appel au modèle) : une sous-question qui reprend le
+ * sujet d'une autre question est retirée, si sa question garde assez de sous-questions ; sinon,
+ * ou quand deux questions entières se recouvrent, la plus tardive est refaite une fois (seul cas
+ * qui coûte), avec les sujets des autres à éviter. Refaite sans succès, elle reste telle quelle.
+ * Les numéros des messages sont ceux de l'examen livré.
+ */
+/** Lettres de sous-questions citées dans un énoncé (« your answer to (c) », « partie b »), en indices. */
+function lettersCited(prompt: string): number[] {
+  return [...prompt.matchAll(/\(([a-h])\)|\b(?:part|partie|sous-question)\s+\(?([a-h])\)?(?!\p{L})/giu)].map((m) => (m[1] ?? m[2]).toLowerCase().charCodeAt(0) - 97);
+}
+
+async function separateBlocks(built: Map<number, ExamBlock>, slotAt: Map<number, BlockSlot>, n: number, plan: BlockPlan, ctx: BlockCtx, step: StepCb, work: PhaseProgress): Promise<void> {
+  const order = [...built.keys()].sort((a, b) => a - b);
+  const current = () => order.map((i) => built.get(i)!);
+  const found = findOverlaps(current());
+  const redo = new Map<number, Overlap>();
+  for (const x of new Set(found.map((o) => o.block))) {
+    const mine = found.filter((o) => o.block === x);
+    const whole = mine.find((o) => o.part < 0);
+    const b = built.get(order[x])!;
+    const keep = b.parts.filter((_, k) => !mine.some((o) => o.part === k));
+    // Les sous-questions restantes sont renumérotées : un renvoi à une lettre au-delà du premier
+    // retrait (ou à la sous-question retirée) viserait la mauvaise. Alors on refait la question.
+    const first = Math.min(...mine.map((o) => o.part));
+    const shifted = keep.some((p) => lettersCited(p.prompt).some((k) => k >= first));
+    if (whole || keep.length < plan.partsMin || shifted) {
+      redo.set(x, whole ?? mine[0]);
+      continue;
+    }
+    built.set(order[x], { ...b, parts: keep, points: keep.reduce((t, p) => t + p.points, 0) });
+    for (const o of mine) step(`Question composée ${x + 1} : sous-question (${LETTER[o.part].toLowerCase()}) retirée, elle reprenait la question ${o.other + 1} (${o.terms.join(", ")})`, 0);
+  }
+  for (const [x, o] of redo) {
+    const i = order[x];
+    const other = built.get(order[o.other])!.title;
+    work.add(BLOCKS_PHASE);
+    step(`Question composée ${x + 1} refaite : elle reprenait la question ${o.other + 1} (${o.terms.join(", ")})`, 0);
+    const others = order.filter((j) => j !== i).map((j) => built.get(j)!.title);
+    const r = await buildBlock(slotAt.get(i)!, i, n, plan, { ...ctx, others }, step, work, `elle reprenait le sujet d'une autre question de l'examen (« ${other.slice(0, 120)} ») : prends un autre sujet de ce thème.`);
+    const still = r.block ? findOverlaps(order.map((j) => (j === i ? r.block! : built.get(j)!))).some((v) => v.block === x || v.other === x) : true;
+    if (r.block && !still) built.set(i, r.block);
+    else step(`⚠ Question composée ${x + 1} gardée telle quelle : sa nouvelle version ${r.block ? "recouvre encore une autre question" : "n'a pas passé la vérification"}`, 0);
+  }
+}
+
 /** Durées des phases sans historique (lib/jobs phaseHistory sinon), mêmes noms que les lignes « ⏱ ». */
 const DEFAULT_PHASE_MS: Record<string, number> = { [BLOCKS_PHASE]: 8 * 60_000, PDF: 30_000 };
 
@@ -517,9 +583,15 @@ export async function generateBlockExam(
   const built = new Map<number, ExamBlock>();
   const failed: { i: number; why: string }[] = [];
   const tBlocks = Date.now();
+  const slotAt = new Map<number, BlockSlot>();
+  const subjectOf = (s: BlockSlot) => (s.notions.length ? `${s.theme} (notions : ${s.notions.slice(0, 2).join(", ")})` : s.theme);
+  const othersOf = (i: number) => slots.filter((_, j) => j !== i).map(subjectOf);
   await runPool(slots.map((s, i) => ({ s, i })), blockConcurrency(), async ({ s, i }) => {
-    const r = await buildBlock(s, i, n, plan, ctx, step, work);
-    if (r.block) built.set(i, r.block);
+    const r = await buildBlock(s, i, n, plan, { ...ctx, others: othersOf(i) }, step, work);
+    if (r.block) {
+      built.set(i, r.block);
+      slotAt.set(i, s);
+    }
     else failed.push({ i, why: r.why });
   });
   // Réserves, une à une jusqu'à un bloc qui passe : d'abord celles de la même section (annale
@@ -533,13 +605,15 @@ export async function generateBlockExam(
       const [spare] = spares.splice(at, 1);
       work.add(BLOCKS_PHASE); // une reprise : réessai ajouté
       step(`Question composée ${f.i + 1} : reprise sur ${spare.theme.slice(0, 80)}…`, 0);
-      const r = await buildBlock(spare, f.i, n, plan, ctx, step, work);
+      const r = await buildBlock(spare, f.i, n, plan, { ...ctx, others: othersOf(f.i) }, step, work);
       if (r.block) {
         built.set(f.i, r.block);
+        slotAt.set(f.i, spare);
         break;
       }
     }
   }
+  await separateBlocks(built, slotAt, n, plan, ctx, step, work);
   const blocks = [...built.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
   if (!blocks.length) throw new Error(`Aucune question composée n'a passé la vérification${failed[0]?.why ? ` (${failed[0].why.slice(0, 200)})` : ""}.`);
   if (blocks.length < n) step(`⚠ ${blocks.length}/${n} questions composées livrées : ${n - blocks.length} rejetée(s) après ${ATTEMPTS} versions.`, 0);
