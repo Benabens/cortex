@@ -381,7 +381,8 @@ test("C × section de forme (prod 22/11 : « vrai/faux justifiés » perdue) : e
   // La 2ᵉ section décrit une FORME, aucun mot commun avec les notions : sans notion, ni reprise, elle tombait.
   const plan = sectionPlan(["ethical theories and stakeholders", "True or false statements, each one justified", "feedback loops of a recommender"]);
   script = {
-    "centrée sur": [block("spare", [scq("S"), short("S"), code("[1, 2]")])],
+    // Section de vrai/faux : sa reprise est un vrai/faux (2 options).
+    "centrée sur": [block("spare", [{ ...scq("S"), options: ["Right: True", "False"], correct: 0 }, short("S"), code("[1, 2]")])],
     // Clé fausse : le juge la conteste, avec ou sans extraits du cours.
     "True or false": [block("TF", [{ ...scq("TF"), correct: 1 }, short("TF"), code("[1, 2]")])],
     "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
@@ -430,4 +431,76 @@ test("C × numérotation : le nom d'une section qui n'est qu'un numéro de l'ann
   assert.equal(sectionLabel("Blending of wines"), "Blending of wines");
   assert.equal(sectionLabel("Questions about yeast"), "Questions about yeast");
   assert.equal(sectionLabel(null), null);
+});
+
+test("C × non-recouvrement (prod 22/11) : chaque question connaît les sujets des autres, une sous-question qui en reprend une est retirée", async () => {
+  const id = await compositeCourse(3);
+  const titled = (title: string, parts: Part[]) => ({ ...block(title, parts), title });
+  script = {
+    "Ethical theories": [titled("Ethical theories of platforms", [scq("A"), short("A"), code("[1, 2]")])],
+    // (d) refait la question sur les théories éthiques : retirée, (a)-(c) suffisent (3 sous-questions au moins).
+    "Keyword filtering": [titled("Keyword filtering of posts", [scq("B"), short("B"), code("[1, 2]"), { ...short("B2"), prompt: "Which ethical theories justify the platform's choice?" }])],
+    "Feedback loops": [titled("Feedback loops in feeds", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  prompts.length = 0;
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  const filtering = exam.blocks.find((b) => /Keyword/.test(b.title))!;
+  assert.equal(filtering.parts.length, 3, filtering.parts.map((p) => p.prompt).join(" | "));
+  assert.ok(!filtering.parts.some((p) => /ethical theories/i.test(p.prompt)));
+  assert.equal(filtering.points, filtering.parts.reduce((s, p) => s + p.points, 0), "les points suivent");
+  assert.ok(steps.some((s) => /sous-question \(d\) retirée[^\n]*question/.test(s)), steps.join("\n"));
+  // Prévention, sans appel de plus : chaque demande nomme les sujets des AUTRES questions.
+  const asks = prompts.filter((p) => /^QUESTION \d\/3/m.test(p));
+  assert.ok(asks.length >= 3 && asks.every((p) => /AUTRES QUESTIONS DE CET EXAMEN/.test(p)), "prévention absente");
+  const first = asks.find((p) => /THÈME : Ethical theories/.test(p))!;
+  const others = first.slice(first.indexOf("AUTRES QUESTIONS")).split("\n\n")[0];
+  assert.match(others, /Keyword filtering/);
+  assert.doesNotMatch(others, /Ethical theories/, "pas sa propre question");
+});
+
+test("C × non-recouvrement : deux questions entières sur le même sujet → la plus tardive est refaite une fois", async () => {
+  const id = await compositeCourse(3);
+  const titled = (title: string, tag: string) => ({ ...block(tag, [scq(tag), short(tag), code("[1, 2]")]), title });
+  script = {
+    "Ethical theories": [titled("Moral luck dilemmas", "A"), titled("Ethical theories of platforms", "A2")],
+    "Keyword filtering": [titled("Keyword filtering of posts", "B")],
+    "Feedback loops": [titled("Moral luck dilemmas", "C"), titled("Ranking fairness audits", "C2")],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  const titles = (await runWithCourse(id, () => getBlockExam(r.id, false)))!.blocks.map((b) => b.title);
+  assert.equal(titles.filter((t) => /Moral luck/.test(t)).length, 1, titles.join(" | "));
+  assert.ok(steps.some((s) => /refaite : elle reprenait la question/.test(s)), steps.join("\n"));
+});
+
+test("C × options (prod 22/11) : 2 options relevées sur un vrai/faux de l'annale → vrai/faux dans sa section seulement, 4 options ailleurs", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "True/false statements, each one justified"]), options: 2 };
+  const tf: Part = { ...scq("TF"), prompt: "True or false: a filter never blocks legitimate posts.", options: ["False", "Right: True"], correct: 1 };
+  script = {
+    "True/false": [block("TF", [tf, short("TF"), code("[1, 2]")])],
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  prompts.length = 0;
+  const r = await runWithCourse(id, () => generateBlockExam(plan, { onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.count, r.requested], [2, 2], steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  const counts = exam.blocks.map((b) => b.parts.filter((p) => p.kind === "scq").map((p) => p.options.length));
+  assert.deepEqual(counts, [[4], [2]]);
+  const ask = (n: number) => prompts.find((p) => new RegExp(`^THÈME : Question ${n}`, "m").test(p))!;
+  assert.match(ask(1), /exactement 4 options/);
+  assert.match(ask(2), /VRAI\/FAUX/);
 });
