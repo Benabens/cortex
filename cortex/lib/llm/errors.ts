@@ -8,7 +8,7 @@ import type { UserError } from "@/lib/i18n/user-error";
 export const OWN_LLM_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS"]);
 
 /** Le fournisseur a refusé ou n'a pas répondu, après les réessais espacés (rien n'a été traité). */
-export const PROVIDER_DOWN_CODES = new Set(["OVERLOADED", "RATE_LIMIT", "UPSTREAM", "NETWORK"]);
+export const PROVIDER_DOWN_CODES = new Set(["OVERLOADED", "RATE_LIMIT", "UPSTREAM", "NETWORK", "STREAM_INTERRUPTED"]);
 
 /** Échecs où relancer une génération ne servirait à rien : garde, plafond, configuration, annulation. */
 export const HARD_STOP_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS", "AUTH", "UNSUPPORTED", "ABORTED"]);
