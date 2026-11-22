@@ -553,6 +553,48 @@ async function separateBlocks(built: Map<number, ExamBlock>, slotAt: Map<number,
   }
 }
 
+/**
+ * `total` réparti au prorata de `weights` en entiers (plus forts restes, à égalité l'ordre donné),
+ * chacun au moins à son plancher ; somme exacte. null si les planchers dépassent déjà le total.
+ */
+function apportion(weights: number[], floors: number[], total: number): number[] | null {
+  const spare = total - floors.reduce((s, f) => s + f, 0);
+  if (spare < 0) return null;
+  const sum = weights.reduce((s, w) => s + w, 0);
+  // Au-delà des planchers, chacun reçoit sa part de ce qui reste au-dessus du plancher.
+  const extra = weights.map((w, i) => Math.max(0, w * (total / (sum || 1)) - floors[i]));
+  const scale = extra.reduce((s, e) => s + e, 0);
+  const exact = extra.map((e) => (scale ? (e * spare) / scale : spare / weights.length));
+  const out = exact.map((e, i) => floors[i] + Math.floor(e));
+  const order = exact.map((e, i) => ({ i, frac: e - Math.floor(e) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let k = 0, rest = total - out.reduce((s, x) => s + x, 0); rest > 0; k = (k + 1) % out.length, rest--) out[order[k].i]++;
+  return out;
+}
+
+/**
+ * TOTAL DU FORMAT (22/11 : 6 questions sur 7 livrées, 42 pts au lieu des 50 de l'annale) : le total
+ * lu dans l'annale est un contrat. Une question tombée, une sous-question retirée ou des points par
+ * type qui ne tombent pas pile changent la somme ; on ramène alors les sous-questions au total, au
+ * prorata de leurs points (entiers, au moins 1 point, critères d'une réponse courte compris), sans
+ * appel au modèle : une question de secours de plus aurait déjà été tentée par les réserves.
+ * Total non entier ou impossible à tenir (plus de sous-questions que de points) : rien ne change.
+ */
+export function fitToTotal(blocks: ExamBlock[], total: number | null): ExamBlock[] {
+  const parts = blocks.flatMap((b) => b.parts);
+  if (!total || !Number.isInteger(total) || !parts.length || parts.reduce((s, p) => s + p.points, 0) === total) return blocks;
+  const pts = apportion(parts.map((p) => p.points), parts.map((p) => (p.kind === "short" ? Math.max(1, p.criteria.length) : 1)), total);
+  if (!pts) return blocks;
+  let k = 0;
+  return blocks.map((b) => {
+    const fitted = b.parts.map((p) => {
+      const points = pts[k++];
+      const crit = p.kind === "short" && p.criteria.length ? apportion(p.criteria.map((c) => c.points), p.criteria.map(() => 1), points) : null;
+      return { ...p, points, ...(crit ? { criteria: p.criteria.map((c, j) => ({ ...c, points: crit[j] })) } : {}) };
+    });
+    return { ...b, parts: fitted, points: fitted.reduce((s, p) => s + p.points, 0) };
+  });
+}
+
 /** Durées des phases sans historique (lib/jobs phaseHistory sinon), mêmes noms que les lignes « ⏱ ». */
 const DEFAULT_PHASE_MS: Record<string, number> = { [BLOCKS_PHASE]: 8 * 60_000, PDF: 30_000 };
 
@@ -614,7 +656,7 @@ export async function generateBlockExam(
     }
   }
   await separateBlocks(built, slotAt, n, plan, ctx, step, work);
-  const blocks = [...built.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
+  const blocks = fitToTotal([...built.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b), plan.totalPoints);
   if (!blocks.length) throw new Error(`Aucune question composée n'a passé la vérification${failed[0]?.why ? ` (${failed[0].why.slice(0, 200)})` : ""}.`);
   if (blocks.length < n) step(`⚠ ${blocks.length}/${n} questions composées livrées : ${n - blocks.length} rejetée(s) après ${ATTEMPTS} versions.`, 0);
   step(phaseLine(BLOCKS_PHASE, Date.now() - tBlocks), 0);

@@ -563,3 +563,49 @@ test("revue : retirer une sous-question décalerait un renvoi « (c) » → la q
   assert.ok(!filtering.parts.some((p) => /answer to \(c\)|ethical theories/i.test(p.prompt)), filtering.parts.map((p) => p.prompt).join(" | "));
   assert.ok(steps.some((s) => /refaite : elle reprenait la question/.test(s)), steps.join("\n"));
 });
+
+test("C × total du format (22/11 : 6 questions sur 7, 42 pts au lieu de 50) : une question tombée, ses points vont aux autres, barème des sous-questions inclus", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "keyword filtering of posts"]), totalPoints: 10 };
+  script = {
+    // Clé fausse à chaque version : la question 2 tombe.
+    "Question 2": [block("B", [{ ...scq("B"), correct: 1 }, short("B"), code("[1, 2]")])],
+    // 1 + 2 (critères 1 + 1) + 2 = 5 points sur les 10 du format.
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.deepEqual([r.count, r.requested], [1, 2]);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  const [b] = exam.blocks;
+  assert.equal(b.points, 10, "le total livré est celui du format");
+  assert.deepEqual(b.parts.map((p) => p.points), [2, 4, 4], "proportionnel : 1-2-2 devient 2-4-4");
+  const sq = b.parts.find((p) => p.kind === "short")!;
+  assert.deepEqual(sq.criteria!.map((c) => c.points), [2, 2], "les critères de la réponse courte suivent son barème");
+});
+
+test("C × total du format : examen complet dont la somme s'écarte du format → somme exacte, points entiers, aucun à zéro", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "keyword filtering of posts"]), totalPoints: 12 };
+  script = {
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+    "keyword": [block("B", [scq("B"), short("B"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.deepEqual([r.count, r.requested], [2, 2]);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  assert.equal(exam.blocks.reduce((s, x) => s + x.points, 0), 12);
+  for (const x of exam.blocks) {
+    assert.equal(x.parts.reduce((s, p) => s + p.points, 0), x.points, "points de la question = somme de ses sous-questions");
+    for (const p of x.parts) {
+      assert.ok(Number.isInteger(p.points) && p.points >= 1, `sous-question à ${p.points} pt`);
+      if (p.kind === "short") assert.equal(p.criteria!.reduce((s, c) => s + c.points, 0), p.points);
+    }
+  }
+  const { gradeBlocks } = await import("../lib/blocks");
+  const g = (await runWithCourse(id, () => gradeBlocks(r.id, {})))!;
+  assert.equal(g.total + g.pending, 12, "la correction compte sur le même total (corrigé automatiquement + en attente)");
+});
