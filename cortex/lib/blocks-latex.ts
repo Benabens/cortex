@@ -6,6 +6,7 @@ import { blockHeadTex } from "@/lib/exam-layout-tex";
 import { examsDir } from "@/lib/paths";
 import { examDocument } from "@/lib/qcm-latex";
 import { esc } from "@/lib/tex-escape";
+import { formulasOrText, texText } from "@/lib/tex-rich";
 import { sectionLabel } from "@/lib/section-label";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
@@ -16,7 +17,8 @@ import path from "node:path";
  * (même préambule, même garde) : par question, le scénario puis ses sous-questions (a),
  * (b)… avec leurs points, cases à cocher pour le choix unique, cadre de code et lignes de
  * réponse. Corrigé : bonne option, sortie exacte du code, réponse modèle et barème.
- * Tout le texte vient du modèle et passe par `esc` (jamais de LaTeX libre).
+ * Tout le texte vient du modèle et passe par `esc` (jamais de LaTeX libre), sauf ses formules
+ * sûres et ses listes Markdown (lib/tex-rich).
  */
 const LETTER = "ABCDEFGH".split("");
 const BOX = String.raw`\ding{113}`;
@@ -46,28 +48,28 @@ function richTex(s: string): string {
 }
 
 function paragraphs(s: string): string {
-  return s.split(/\n\s*\n/).map((p) => esc(p.trim()).replace(/\n/g, String.raw`\\ `)).filter(Boolean).map((p) => String.raw`\noindent ${p}\par\smallskip`).join("\n");
+  return s.split(/\n\s*\n/).map((p) => texText(p.trim(), String.raw`\\ `)).filter(Boolean).map((p) => String.raw`\noindent ${p}\par\smallskip`).join("\n");
 }
 
 function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): string {
   const { pts } = L;
-  const head = String.raw`\par\medskip\needspace{4\baselineskip}\noindent\textbf{(${LETTER[i].toLowerCase()})}\quad{\footnotesize[${pts(p.points)}]}\quad ${esc(p.prompt)}\par\smallskip`;
+  const head = String.raw`\par\medskip\needspace{4\baselineskip}\noindent\textbf{(${LETTER[i].toLowerCase()})}\quad{\footnotesize[${pts(p.points)}]}\quad ${texText(p.prompt)}\par\smallskip`;
   const body: string[] = [];
   if (p.kind === "scq") {
-    body.push(...p.options.map((o, k) => String.raw`\noindent\hspace*{1em}${withKey && k === p.correct ? TICK : BOX}~\textbf{${LETTER[k]}.}~${esc(o)}\par\smallskip`));
+    body.push(...p.options.map((o, k) => String.raw`\noindent\hspace*{1em}${withKey && k === p.correct ? TICK : BOX}~\textbf{${LETTER[k]}.}~${texText(o)}\par\smallskip`));
   } else if (p.kind === "code_output") {
     body.push(codeTex(p.code));
     body.push(withKey ? String.raw`\noindent{\color{${L.color}}\textbf{${L.output}}}` + "\n" + codeTex(p.answer) : String.raw`\noindent ${L.output}\rulelines{3}`);
   } else {
     body.push(withKey
       ? [
-          String.raw`\noindent{\color{${L.color}}\textbf{${L.modelAnswer}}} ${esc(p.answer)}\par\smallskip`,
+          String.raw`\noindent{\color{${L.color}}\textbf{${L.modelAnswer}}} ${texText(p.answer)}\par\smallskip`,
           String.raw`\noindent{\footnotesize\textbf{${L.grading}}}\par`,
-          ...p.criteria.map((c) => String.raw`\noindent\hspace*{1em}{\footnotesize --- ${esc(c.label)} (${pts(c.points)})}\par`),
+          ...p.criteria.map((c) => String.raw`\noindent\hspace*{1em}{\footnotesize --- ${texText(c.label)} (${pts(c.points)})}\par`),
         ].join("\n")
       : String.raw`\rulelines{4}`);
   }
-  if (withKey && p.explanation) body.push(String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${esc(p.explanation)}}\par`);
+  if (withKey && p.explanation) body.push(String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${texText(p.explanation)}}\par`);
   return [head, ...body].join("\n");
 }
 
@@ -108,17 +110,21 @@ export async function buildBlocksArtifact(examId: number, blocks: ExamBlock[], d
     fs.writeFileSync(path.join(examsDir(), `${name}.tex`), tex);
     return name;
   };
+  const asText = "formules imprimées en texte (elles ne compilaient pas)";
   let pdf: string;
+  const warnings: string[] = [];
   try {
-    pdf = await compileExamPdf(await write(false));
+    const r = await formulasOrText(async () => compileExamPdf(await write(false)));
+    pdf = r.value;
+    if (r.asText) warnings.push(`énoncé : ${asText}`);
   } catch (e) {
     return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: (e as Error).message };
   }
   try {
-    await compileExamPdf(await write(true));
+    if ((await formulasOrText(async () => compileExamPdf(await write(true)))).asText) warnings.push(`corrigé : ${asText}`);
   } catch (e) {
     console.error(`[blocks] corrigé #${examId} non compilé :`, (e as Error).message);
-    return { file: pdf, texWarning: `corrigé non compilé : ${(e as Error).message.slice(0, 200)}` };
+    warnings.push(`corrigé non compilé : ${(e as Error).message.slice(0, 200)}`);
   }
-  return { file: pdf };
+  return warnings.length ? { file: pdf, texWarning: warnings.join(" ; ") } : { file: pdf };
 }

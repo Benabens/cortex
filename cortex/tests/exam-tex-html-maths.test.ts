@@ -54,3 +54,13 @@ test("le code reste du code (pas de symboles injectés)", () => {
 if a <= b: x = "\alpha"
 \end{lstlisting}`), "a_b et if a <= b: x = \"\\alpha\"");
 });
+
+test("formule hors maths et puces Markdown : composées comme dans le PDF (signalé le 22/11/2026)", () => {
+  const html = texToHtml(String.raw`Montrez que x_{t+1} converge vers \frac{a}{b} :` + "\n- premier point\n- second point\n1. étape");
+  assert.match(html, /<em>x<sub>t\+1<\/sub><\/em>/);
+  assert.match(html, /<em>a\/b<\/em>/);
+  assert.match(html, /<ul>\s*<li>premier point\s*<li>second point\s*<\/ul>/);
+  assert.match(html, /<ol>\s*<li>étape\s*<\/ol>/);
+  // un mot en snake_case reste un mot
+  assert.equal(shown("le fichier snake_case.py"), "le fichier snake_case.py");
+});
