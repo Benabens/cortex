@@ -62,7 +62,7 @@ export default defineTool({
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    if (o.job) return `${o.status === "started" ? "Course preparation started" : "Course preparation is already running"} for ${o.course.label} (job ${o.job.job_id}). Track it with get_job_status.`;
+    if (o.job) return `${o.status === "started" ? "Course preparation started" : "Course preparation is already running"} for ${o.course.label} (job ${o.job.job_id}). Track it with get_job_status (course="${o.course.id}", job_id=${o.job.job_id}).`;
     return "Course preparation.";
   },
 });

@@ -15,6 +15,9 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
   serie: "Exercise sets",
   exercise: "Exercises",
   cheatsheet: "Cheat sheets",
+  note: "Notes",
+  exam_info: "Exam instructions",
+  sample_questions: "Official sample questions",
 };
 
 const output = z.object({

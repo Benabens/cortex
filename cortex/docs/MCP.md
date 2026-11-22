@@ -79,8 +79,14 @@ l'app appellent déjà. La seule extraction (`lib/generation.ts`) remplace le co
 
 Noms et descriptions en anglais (lus par le modèle) ; les réponses gardent la langue des contenus.
 Suivi d'un job (`get_job_status`) : l'erreur et l'étape sont en anglais quand le worker a rangé leur forme sans langue (code d'erreur, fin d'examen, reprise, file d'attente) ; sinon la phrase française d'origine, que le modèle reformule pour l'étudiant (`localizeJob`, repli « raw »).
-Tous les outils prennent un `course` facultatif : identifiant, code (« COMP 201 ») ou nom du cours ;
-absent, le seul cours du compte est pris, sinon l'outil liste les cours et demande lequel.
+Tous les outils prennent un `course` facultatif : identifiant, code (« COMP 201 »), nom du cours ou un
+morceau de son nom ou de son code (« enjeux mondiaux »), accents, casse et ponctuation ignorés ; absent, le
+seul cours du compte est pris, sinon l'outil liste les cours et demande lequel. Plusieurs cours au même rang
+(« CS 2 ») : l'outil les liste au lieu d'en prendre un ; introuvable : l'erreur liste les cours du compte.
+`create_course` refuse un code déjà pris à la ponctuation près (« CS 250 » = « CS-250 »).
+Les `job_id` sont numérotés **par cours** : la consigne de suivi des outils payants (`track_with`) nomme le
+cours, et `get_job_status(job_id)` sans cours cherche le job dans chaque cours du compte (un seul l'a : pris ;
+plusieurs : liste des candidats avec type et date). Sans `job_id`, un drill qui s'écrit compte comme en cours.
 
 Annotations (16/11/2026) : **les quatre indications sont explicites sur chaque outil** (`annotations`
 de `ToolDef`, obligatoire ; le registre refuse de démarrer sans elles). Les annuaires l'exigent

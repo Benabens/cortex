@@ -3,7 +3,7 @@ import { creditCost } from "@/lib/billing/credits";
 import { startDrillJob } from "@/lib/drill-job";
 import { AssistRefused } from "@/lib/billing/reserve";
 import { errorText } from "@/lib/i18n/user-error";
-import { activeJob, ReservationRefused } from "@/lib/jobs";
+import { activeJob, getJob, ReservationRefused, type Job } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
 import { FIELD_LIMITS } from "@/lib/field-limits";
@@ -42,6 +42,14 @@ async function defaultConcept(): Promise<string | null> {
   try { return (await dueConcepts(1))[0] ?? null; } catch { return null; }
 }
 
+/** Notion d'un job drill (sa cible JSON), ou null. */
+function conceptOfJob(job: Pick<Job, "target">): string | null {
+  try {
+    const c = (JSON.parse(job.target ?? "{}") as { concept?: unknown }).concept;
+    return typeof c === "string" && c.trim() ? c.trim() : null;
+  } catch { return null; }
+}
+
 export default defineTool({
   name: "generate_drill",
   title: "Generate a practice question",
@@ -64,10 +72,12 @@ export default defineTool({
       const concept = args.concept?.trim() || (await defaultConcept());
       if (!concept) throw new ToolError("invalid_input", "This course has no tracked weak point or concept due for review. Specify the concept to practise with “concept”.");
       const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, declined: null, drill: null, job: null };
-      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "1-3", track_with: `get_job_status with job_id=${jobId}` });
+      // Le cours dans la consigne de suivi : les job_id sont numérotés par cours.
+      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "1-3", track_with: `get_job_status with course="${c.id}" and job_id=${jobId}` });
       // Un drill déjà en cours dans ce cours est rendu tel quel : rien à confirmer, rien de débité.
+      // Sa notion à lui, pas celle demandée : l'assistant ne doit pas annoncer un exercice sur un autre sujet.
       const running = await activeJob("drill");
-      if (running) return { ...base, status: "already_running" as const, job: track(running.id) };
+      if (running) return { ...base, concept: clip(conceptOfJob(running) ?? concept, FIELD_LIMITS.concept), status: "already_running" as const, job: track(running.id) };
       const decision = await ctx.confirm(
         { bucket: "assist", kind: "drill", costCenti: creditCost("assist"), summary: `Generate one practice question with five hints and a worked solution on “${clip(concept, 80)}” for ${courseLabel(c)}.` },
         { course: c.id, concept },
@@ -86,8 +96,10 @@ export default defineTool({
         // Réservé et peut-être en file : relancer sans regarder lancerait (et débiterait) deux fois.
         throw new ToolError("internal", "Starting the practice question failed on the server. It may have been queued: check with get_job_status (without job_id) before trying again.");
       }
+      const raced = started.existing ? await getJob(started.jobId).catch(() => null) : null;
       return {
         ...base,
+        concept: raced ? clip(conceptOfJob(raced) ?? concept, FIELD_LIMITS.concept) : base.concept,
         status: started.existing ? "already_running" as const : "started" as const,
         job: track(started.jobId),
       };
@@ -96,7 +108,7 @@ export default defineTool({
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    if (o.job) return `${o.status === "started" ? "The practice question is being written" : "A practice question is already being written"} (job ${o.job.job_id}, usually 1–3 min). Read it with get_job_status (job_id=${o.job.job_id}), checking every 30 seconds or so.`;
+    if (o.job) return `${o.status === "started" ? "The practice question is being written" : "A practice question is already being written in this course (only one at a time; its concept is in the data)"} (job ${o.job.job_id}, usually 1–3 min). Read it with get_job_status (course="${o.course.id}", job_id=${o.job.job_id}), checking every 30 seconds or so.`;
     return "Practice question.";
   },
 });
