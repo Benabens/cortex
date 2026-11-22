@@ -69,15 +69,15 @@
     "monitoring_envelope_unreadable": "enveloppe illisible",
     "monitoring_project_unknown": "projet inconnu",
     "connected_app_not_found": "Application introuvable.",
-    "job_not_found": "job introuvable",
+    "job_not_found": "Tâche introuvable.",
     "exam_invalid": "Examen invalide.",
     "qcm_exam_not_found": "Examen QCM introuvable.",
     "id_missing": "id manquant",
     "topic_missing": "topic manquant",
     "metrics_token_required": "métriques protégées (METRICS_TOKEN requis)",
-    "mock_not_found": "Mock introuvable.",
+    "mock_not_found": "Examen blanc introuvable.",
     "exam_not_found": "Examen introuvable.",
-    "mock_not_found_or_empty": "Mock introuvable ou vide.",
+    "mock_not_found_or_empty": "Examen blanc introuvable ou vide.",
     "generation_type_unknown": "Type de génération inconnu.",
     "composition_too_long": "Composition trop longue.",
     "upload_content_length_required": "Content-Length requis pour un envoi de fichier.",
@@ -147,7 +147,7 @@
     "file_not_pdf": "Ce fichier n’est pas un PDF.",
     "conversation_too_short": "Colle une discussion (au moins quelques échanges).",
     "weakness_mining_failed": "Analyse de la discussion impossible : {detail}",
-    "weakness_not_found": "faiblesse introuvable",
+    "weakness_not_found": "Faiblesse introuvable.",
     "weakness_analysis_failed": "Analyse de la faiblesse impossible : {detail}",
     "llm_model_unknown": "Modèle inconnu : choisis opus, sonnet ou haiku.",
     "qcm_composition_empty": "Composition vide : choisis au moins 1 QCM ou 1 question ouverte.",
@@ -1294,7 +1294,7 @@
     "title": "Programme",
     "emptyDescription": "Les notions qui tombent aux finals, extraites des annales.",
     "emptyTitle": "Aucune notion analysée pour ce cours",
-    "emptyHint": "Importe les annales, puis lance « Ré-analyser les annales » : Cortex lit chaque final et en extrait les notions qui tombent, avec les liens vers l’examen et le cours.",
+    "emptyHint": "Importe les annales depuis Sources, puis lance « Préparer le cours » : Cortex lit chaque final et en extrait les notions qui tombent, avec les liens vers l’examen et le cours.",
     "addPastExams": "Ajouter des annales",
     "finalYear": "Final {year}",
     "finalFallback": "Final",
@@ -1512,7 +1512,9 @@
     "correcting": "Correction…",
     "correct": "Corriger mon examen",
     "answered": "{answered}/{total} répondues",
-    "back": "← retour aux examens"
+    "back": "← retour aux examens",
+    "notFoundHint": "Il a peut-être été supprimé, ou il appartient à un autre cours.",
+    "backToExams": "Retour aux examens"
   },
   "blockExam": {
     "kindScq": "Choix unique",
@@ -1646,7 +1648,8 @@
     "unreadHint": "Les autres fichiers du cours ont été lus normalement.",
     "removeFromCourse": "Retirer du cours",
     "refusedItem": "<name>{fileName}</name> : {reason}",
-    "debitedSuffix": " : {debited}"
+    "debitedSuffix": " : {debited}",
+    "loadingCourse": "Chargement du cours…"
   },
   "sourceViewer": {
     "found": "⟵ Cortex · trouvé ici",

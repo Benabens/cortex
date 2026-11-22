@@ -86,6 +86,8 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
   const [graded, setGraded] = useState<Graded | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // 404 : l'examen n'existe pas (ou plus) dans ce cours ; « Réessayer » ne pourrait rien y changer.
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     if (!courseId) return;
@@ -97,6 +99,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
         const d = await response.json();
         if (!response.ok && !d.error) d.error = t("loadingFailed");
         if (stop) return;
+        setMissing(response.status === 404);
         if (d.error) setErr(d.error);
         else if (d.kind === "blocks") setBlocks(d);
         else setExam(d);
@@ -165,15 +168,22 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
           style={{ color: "var(--red-ink)" }}
         >
           {err}
-          <button
-            className="btn btn-ghost mt-3"
-            onClick={() => {
-              setErr(null);
-              setRetry((value) => value + 1);
-            }}
-          >
-            {t("retry")}
-          </button>
+          {missing ? (
+            <>
+              <p className="mt-2" style={{ color: "var(--ink-2)" }}>{t("notFoundHint")}</p>
+              <a href={`/examens${qs}`} className="btn btn-ghost mt-3">{t("backToExams")}</a>
+            </>
+          ) : (
+            <button
+              className="btn btn-ghost mt-3"
+              onClick={() => {
+                setErr(null);
+                setRetry((value) => value + 1);
+              }}
+            >
+              {t("retry")}
+            </button>
+          )}
         </div>
       </div>
     );

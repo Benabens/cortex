@@ -224,8 +224,11 @@ export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; o
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60 text-ink-3">
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[0.88rem] text-ink-1" title={f.title}>
+                  {/* Le titre garde 16rem avant que les actions ne passent dessous : sans ça, cinq
+                      boutons le réduisaient à « Final Exam 2024-202… » et l'annale ne se distinguait plus
+                      de son corrigé. */}
+                  <div className="min-w-0 flex-1 basis-64">
+                    <div className="line-clamp-2 break-words text-[0.88rem] text-ink-1" title={f.title}>
                       {f.title}
                       {f.year ? <span className="ml-1.5 text-ink-3">· {f.year}</span> : null}
                     </div>
@@ -238,7 +241,7 @@ export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; o
 
                   {/* Ouvrir (voir) + Référence + emplacement RÉSERVÉ pour la poubelle → aucun décalage.
                       Sur mobile, le bloc passe sous le titre au lieu de l'écraser. */}
-                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
+                  <div className="ml-auto flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
                     {href && <SeeLink href={href} label={f.title} />}
                     <button
                       type="button"
@@ -300,8 +303,11 @@ export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; o
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60 text-ink-3">
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[0.88rem] text-ink-1" title={s.title}>
+                  {/* Le titre garde 16rem avant que les actions ne passent dessous : sans ça, cinq
+                      boutons le réduisaient à « Final Exam 2024-202… » et l'annale ne se distinguait plus
+                      de son corrigé. */}
+                  <div className="min-w-0 flex-1 basis-64">
+                    <div className="line-clamp-2 break-words text-[0.88rem] text-ink-1" title={s.title}>
                       {s.title}
                       {s.year ? <span className="ml-1.5 text-ink-3">· {s.year}</span> : null}
                     </div>
@@ -311,7 +317,7 @@ export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; o
                       {!s.href && !onComputer.has(s.path) && <TextOnlyBadge />}
                     </div>
                   </div>
-                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
+                  <div className="ml-auto flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
                     {s.href && <SeeLink href={s.href} label={s.title} />}
                     <button
                       type="button"
