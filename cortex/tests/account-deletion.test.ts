@@ -198,6 +198,22 @@ test("route : refuse sans session (401) et ne supprime QUE le compte de la sessi
   await authRun(`UPDATE subscriptions SET status = 'canceled' WHERE user_id = ?`, "elena");
   const rDelete = await POST(mk({ "x-cortex-user": "elena", origin: "http://localhost", "accept-language": "fr" }, { confirm: "DELETE" }));
   assert.equal(rDelete.status, 200, "DELETE accepté même pour une requête française");
+
+  // Derrière le proxy de prod (Railway) : l'URL interne n'a pas l'hôte public,
+  // mais l'Origin publique (AUTH_URL / x-forwarded-host) doit être acceptée.
+  await seedUser("fanny", "fanny@example.com", "ml");
+  await authRun(`UPDATE subscriptions SET status = 'canceled' WHERE user_id = ?`, "fanny");
+  const prevAuthUrl = process.env.AUTH_URL;
+  process.env.AUTH_URL = "https://app.cortexexam.com";
+  try {
+    const rProxy = await POST(mk({ "x-cortex-user": "fanny", origin: "https://app.cortexexam.com" }, { confirm: "SUPPRIMER" }));
+    assert.equal(rProxy.status, 200, "Origin publique derrière le proxy → acceptée");
+    await seedUser("gus", "gus@example.com", "ml");
+    const rCross = await POST(mk({ "x-cortex-user": "gus", origin: "https://evil.example" }, { confirm: "SUPPRIMER" }));
+    assert.equal(rCross.status, 403, "Origin étrangère → toujours refusée");
+  } finally {
+    if (prevAuthUrl === undefined) delete process.env.AUTH_URL; else process.env.AUTH_URL = prevAuthUrl;
+  }
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "elena"))!.n, 0);
 
   // Corps démesuré (Content-Length menteur) → 413 par la garde commune, rien supprimé.
