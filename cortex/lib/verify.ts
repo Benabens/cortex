@@ -2,6 +2,7 @@ import { currentCourse } from "@/db/client";
 import { EXAM_OUTPUT_MAX_TOKENS, completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
+import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
 import { examsDir } from "@/lib/paths";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
@@ -83,6 +84,7 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     ``,
     `- "ok" : énoncé bien posé, corrigé proposé correct et complet, ET difficulté/richesse/piège au niveau de la vraie page de référence.`,
     `- "wrong" : corrigé proposé FAUX ou incomplet → fournis corrected_solution_tex : le BON corrigé COMPLET en LaTeX, toutes les sous-questions réécrites en entier (il remplace le corrigé proposé tel quel).`,
+    `  ${LATEX_FORMULA_RULE}`,
     `- "ambiguous" : énoncé mal posé / non résoluble / ambigu / incohérent avec son barème.`,
     `too_easy=true si, COMPARÉ à la vraie page : pas de vrai piège, nombres ronds, faible charge de calcul/bookkeeping, pas de cas-limite/frontière, ou simple snippet déconnecté au lieu d'un artefact creusé. Dans issue, dis QUOI ajouter.`,
     `violates_exclusion=true si l'énoncé porte sur un sujet EXCLU par les directives.`,

@@ -5,6 +5,7 @@ import { coursePassages } from "@/lib/course-grounding";
 import { courseLanguage, type Language } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { FORMULA_RULE } from "@/lib/tex-rich";
 
 export type CheckResult = {
   verdict: "correct" | "partial" | "wrong";
@@ -232,6 +233,7 @@ export async function checkSolution(input: { statement: string; answer?: string;
     `   - "wrong" : aucun point ou au moins un critère essentiel manque.`,
     `4) feedback : explication CIBLÉE et actionnable de l'erreur (OÙ et POURQUOI ça coince, ce qu'il faut revoir). Pas de blabla.`,
     `5) correct_solution : la bonne solution, concise mais complète.`,
+    FORMULA_RULE,
     `LANGUE : feedback, correct_solution et le texte des critères (label, justification) sont écrits dans la langue de la réponse de l'étudiant, sinon en ${languageName(language)[1]} (la langue de l'examen) si la réponse ne permet pas d'en juger (formules seules, image illisible).`,
     `Juge avec les DÉFINITIONS DU COURS${passages.length ? " (extraits ci-dessous)" : ""}, jamais avec celles d'une autre source : une réponse conforme au cours est juste, même si une autre source la formule autrement.`,
     ...(passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)] : []),

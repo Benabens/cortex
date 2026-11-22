@@ -17,6 +17,15 @@ import { esc, mathSymbolTex } from "@/lib/tex-escape";
  *    du texte : une formule mal formée ne doit jamais faire échouer tout le PDF.
  */
 
+/**
+ * CONSIGNE DES PROMPTS dont le texte passe par ce module (QCM, questions composées, corrections) :
+ * la forme qu'il reconnaît à coup sûr. Sans elle, le modèle écrivait « x_{t+1} = 2x_t » en texte nu.
+ */
+export const FORMULA_RULE = String.raw`FORMULES : chaque formule mathématique, même un simple indice ou exposant, s'écrit entre $…$ collés à la formule ($x_{t+1} = 2x_t$, jamais $ x $), ou entre \[…\] quand elle est détachée ; jamais en texte nu (x_{t+1}, x^2 ou \frac{a}{b} hors des dollars). Le code et les noms de fichiers restent entre accents graves, sans dollars.`;
+
+/** Même consigne pour un LaTeX libre (questions ouvertes, corrigés d'examen écrit). */
+export const LATEX_FORMULA_RULE = String.raw`Toute formule, même un simple indice ou exposant (x_{t+1}, x^2), est entre $...$ ou \[ ... \] : écrite hors des maths, elle casse la compilation.`;
+
 /** Actif : formules en texte échappé (cf. withFormulasAsText). */
 const plainMath = new AsyncLocalStorage<true>();
 /** Formules composées pendant un rendu (cf. formulasOrText). */
