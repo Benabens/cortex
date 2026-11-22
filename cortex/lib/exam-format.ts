@@ -30,7 +30,7 @@ export const EXAM_KINDS = ["qcm", "exercises", "mixed", "composite", "essay", "o
 export type ExamKind = (typeof EXAM_KINDS)[number];
 
 /** Langues d'un cours ou d'un examen (mêmes codes que la fiche du cours). */
-export const LANGUAGES = ["fr", "en", "de", "it", "es", "pt", "nl"] as const;
+export const LANGUAGES = ["fr", "en", "de", "it", "es", "pt", "nl", "ko", "he", "ar"] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 /**
@@ -257,8 +257,12 @@ export function annalesAnswerMode(p: Pick<FormatProfile, "question_types">): Ans
 
 // ───────────────────────────── langue des annales ─────────────────────────────
 
+/** Langues à alphabet latin : seules celles-ci se distinguent par mots-outils (STOPWORDS). */
+const LATIN_LANGUAGES = ["fr", "en", "de", "it", "es", "pt", "nl"] as const;
+type LatinLanguage = (typeof LATIN_LANGUAGES)[number];
+
 /** Mots-outils discriminants par langue (les plus fréquents, peu partagés). */
-const STOPWORDS: Record<Language, string[]> = {
+const STOPWORDS: Record<LatinLanguage, string[]> = {
   fr: ["le", "la", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces", "leurs"],
   en: ["the", "and", "of", "to", "is", "in", "that", "for", "are", "with", "this", "be", "on", "as", "by", "which", "an", "it", "what", "each"],
   de: ["der", "die", "das", "und", "ist", "nicht", "mit", "sich", "den", "ein", "eine", "zu", "von", "auf", "für", "dem", "wird"],
@@ -271,14 +275,30 @@ const STOPWORDS: Record<Language, string[]> = {
 };
 
 /**
- * Langue dominante d'un texte, par comptage de mots-outils. null si le texte
- * est trop court ou trop mêlé pour trancher : on ne devine pas.
+ * Coréen, hébreu, arabe : des écritures propres, sans ambiguïté avec aucune autre langue du
+ * domaine — un mot-outil latin ne les distinguerait pas, leur seule écriture suffit.
+ */
+const SCRIPT_LANGUAGES: { lang: "ko" | "he" | "ar"; script: RegExp }[] = [
+  { lang: "ko", script: /\p{Script=Hangul}/u },
+  { lang: "he", script: /\p{Script=Hebrew}/u },
+  { lang: "ar", script: /\p{Script=Arabic}/u },
+];
+
+/** Majorité franche : un texte mêlé (citations, code) ne bascule pas sur une poignée de mots. */
+const SCRIPT_MAJORITY = 0.6;
+
+/**
+ * Langue dominante d'un texte : son écriture (coréen, hébreu, arabe), sinon ses mots-outils latins.
+ * null si le texte est trop court ou trop mêlé pour trancher : on ne devine pas.
  */
 export function detectLanguage(text: string): Language | null {
   const words = text.toLowerCase().normalize("NFC").match(/[\p{L}]+/gu) ?? [];
   if (words.length < 20) return null;
-  const counts = new Map<Language, number>();
-  for (const lang of LANGUAGES) {
+  for (const { lang, script } of SCRIPT_LANGUAGES) {
+    if (words.filter((w) => script.test(w)).length >= words.length * SCRIPT_MAJORITY) return lang;
+  }
+  const counts = new Map<LatinLanguage, number>();
+  for (const lang of LATIN_LANGUAGES) {
     const set = new Set(STOPWORDS[lang]);
     counts.set(lang, words.reduce((n, w) => n + (set.has(w) ? 1 : 0), 0));
   }

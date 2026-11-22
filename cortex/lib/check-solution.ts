@@ -2,7 +2,7 @@ import { currentCourse } from "@/db/client";
 import { completeJson, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 import { coursePassages } from "@/lib/course-grounding";
-import { courseLanguage } from "@/lib/exam-format";
+import { courseLanguage, type Language } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
@@ -33,7 +33,7 @@ function isLegacyResult(value: unknown): value is LegacyCheckResult {
 }
 
 /** Barème de compatibilité, dans la langue de l'examen (repli : anglais). */
-const FALLBACK_WORDS: Record<string, { approach: string; approachYes: string; approachNo: string; answer: string; answerYes: string; answerNo: string }> = {
+const FALLBACK_WORDS: Record<Language, { approach: string; approachYes: string; approachNo: string; answer: string; answerYes: string; answerNo: string }> = {
   fr: {
     approach: "La démarche répond au problème posé", approachYes: "La démarche utile est présente dans la réponse.", approachNo: "La démarche essentielle manque ou ne permet pas de conclure.",
     answer: "La réponse est juste et complète", answerYes: "Le résultat et sa justification sont complets.", answerNo: "Le résultat ou sa justification reste incomplet ou incorrect.",
@@ -62,11 +62,23 @@ const FALLBACK_WORDS: Record<string, { approach: string; approachYes: string; ap
     approach: "De aanpak beantwoordt het gestelde probleem", approachYes: "Het antwoord bevat de juiste aanpak.", approachNo: "De essentiële aanpak ontbreekt of leidt niet tot een conclusie.",
     answer: "Het antwoord is juist en volledig", answerYes: "Het resultaat en de motivering zijn volledig.", answerNo: "Het resultaat of de motivering is onvolledig of onjuist.",
   },
+  ko: {
+    approach: "풀이 과정이 문제에 답하고 있다", approachYes: "답안에 적절한 풀이 과정이 포함되어 있습니다.", approachNo: "핵심적인 풀이 과정이 없거나 결론에 이르지 못합니다.",
+    answer: "답이 정확하고 완전하다", answerYes: "결과와 그 근거가 완전합니다.", answerNo: "결과 또는 그 근거가 불완전하거나 틀립니다.",
+  },
+  he: {
+    approach: "דרך הפתרון עונה על השאלה", approachYes: "התשובה מכילה את דרך הפתרון הנכונה.", approachNo: "דרך הפתרון החיונית חסרה או שאינה מובילה למסקנה.",
+    answer: "התשובה נכונה ומלאה", answerYes: "התוצאה וההנמקה שלה מלאות.", answerNo: "התוצאה או ההנמקה שלה חסרות או שגויות.",
+  },
+  ar: {
+    approach: "تستجيب طريقة الحل للمشكلة المطروحة", approachYes: "تحتوي الإجابة على طريقة الحل المناسبة.", approachNo: "طريقة الحل الأساسية غائبة أو لا تؤدي إلى نتيجة.",
+    answer: "الإجابة صحيحة وكاملة", answerYes: "النتيجة وتبريرها كاملان.", answerNo: "النتيجة أو تبريرها غير كامل أو غير صحيح.",
+  },
 };
 
 function fallbackResult(result: LegacyCheckResult, language: string): CheckResult {
   const achieved = result.verdict === "correct" ? 2 : result.verdict === "partial" ? 1 : 0;
-  const w = FALLBACK_WORDS[language] ?? FALLBACK_WORDS.en;
+  const w = FALLBACK_WORDS[language as Language] ?? FALLBACK_WORDS.en;
   const criteria: CheckCriterion[] = [
     {
       label: w.approach,

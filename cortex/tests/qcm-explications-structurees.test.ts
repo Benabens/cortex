@@ -466,3 +466,16 @@ test("options au même début : chacune est citée à partir de ce qui la distin
   assert.match(lines[1], /^B \(faux\) — « …selon ses seuls risques commerciaux » : a$/);
   assert.match(lines[2], /^C \(faux\) — « …hors de tout contexte d'usage » : b$/);
 });
+
+test("les mots « juste »/« faux » de l'explication couvrent toutes les langues d'examen, l'anglais sinon", async () => {
+  const { rationaleFromModel, assembleExplanation } = await import("../lib/qcm-rationale");
+  const { LANGUAGES } = await import("../lib/exam-format");
+  const options = ["Option juste.", "Option fausse."];
+  const r = rationaleFromModel({ key: "k", distractors: [{ option_index: 1, why_wrong: "a" }] }, 2, [0], "en")!;
+  const english = assembleExplanation(r, options, [0], "en").split("\n")[0];
+  for (const l of LANGUAGES.filter((x) => x !== "en")) {
+    const line = assembleExplanation(r, options, [0], l).split("\n")[0];
+    assert.notEqual(line, english, l);
+  }
+  assert.equal(assembleExplanation(r, options, [0], "xx").split("\n")[0], english);
+});
