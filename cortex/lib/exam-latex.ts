@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertTexSafe } from "@/lib/tex-guard";
+import { TEX_SYMBOLS, texMathSymbols } from "@/lib/tex-symbols";
 import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
@@ -493,6 +494,9 @@ function tailLog(base: string): string {
 
 // ---------------- Repli HTML LISIBLE (quand la compilation LaTeX échoue) ----------------
 
+/** Accent LaTeX du texte → accent combinant (forme NFC ensuite). */
+const TEX_ACCENTS: Record<string, string> = { "'": "\u0301", "`": "\u0300", "^": "\u0302", '"': "\u0308", "~": "\u0303", "=": "\u0304", ".": "\u0307" };
+
 const escHtml = (s: string) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Remplace \cmd{...} (accolades ÉQUILIBRÉES, contenu nestable) par wrap(contenu). */
@@ -632,9 +636,21 @@ function renderTex(tex: string, level: number): string {
   t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
   t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) : réponds sur papier</div>`));
   t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
+  t = t.replace(/\\([{}])/g, (_, b: string) => keep(b)); // accolades d'ensemble \{1, 2\} : gardées à l'écran
+  // Maths hors ligne ramenées à $…$ : $$…$$, \[…\], \(…\) et equation/align (sans les & d'alignement).
+  // « \\[2pt] » (saut de ligne) n'ouvre pas de maths.
+  t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|displaymath|math)(\*?)\}([\s\S]*?)\\end\{\1\2\}/g, (_, _e, _s, m: string) => `$${m.replace(/(?<!\\)&/g, " ")}$`);
+  t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m: string) => `$${m}$`);
+  t = t.replace(/(?<!\\)\\\[([\s\S]+?)\\\]/g, (_, m: string) => `$${m}$`);
+  t = t.replace(/(?<!\\)\\\(([\s\S]+?)\\\)/g, (_, m: string) => `$${m}$`);
 
   // échappe le texte courant
   t = escHtml(t);
+  // accents et guillemets du texte LaTeX (\'e, \^o, \c{c}, ``…'', \og … \fg) : sinon la barre oblique restait à l'écran
+  t = t.replace(/\\(['`^"~=.])\s*(?:\{([a-zA-Z])\}|([a-zA-Z]))/g, (_, a: string, x?: string, y?: string) => `${x ?? y}${TEX_ACCENTS[a]}`.normalize("NFC"));
+  t = t.replace(/\\c\s*\{([cCsStT])\}/g, (_, l: string) => `${l}\u0327`.normalize("NFC"));
+  t = t.replace(/``([\s\S]*?)''/g, "“$1”");
+  t = t.replace(/\\og\b(?:\{\})?\s*/g, "« ").replace(/\s*\\fg\b(?:\{\})?/g, " »");
   // ligatures LaTeX des tirets (« --- » → —, « -- » → –), sinon « --- » s'affiche tel quel ;
   // jamais dans les maths ni dans le code (\texttt{i--}, \verb|--x| restent tels quels, comme dans le PDF)
   t = t.replace(/(\$\$[\s\S]*?\$\$|\$[^$]*\$|\\texttt\{[^{}]*\}|\\verb(\S)[\s\S]*?\2)|---|--/g, (m, verbatim) => verbatim ?? (m === "---" ? "—" : "–"));
@@ -653,18 +669,13 @@ function renderTex(tex: string, level: number): string {
   t = t.replace(/\\cn\{(\d)\}/g, (_, d) => CIRCLED[+d] ?? `(${d})`);
 
   // math inline : $...$ → italique + exposants/indices/symboles basiques
+  // (relations, flèches, grec, fonctions, fractions : lib/tex-symbols ; une macro inconnue n'efface plus le symbole)
   t = t.replace(/\$([^$]+)\$/g, (_, m: string) =>
-    `<em>${m
+    `<em>${texMathSymbols(m)
       .replace(/\^\{([^}]*)\}/g, "<sup>$1</sup>")
       .replace(/_\{([^}]*)\}/g, "<sub>$1</sub>")
-      .replace(/\^(\w)/g, "<sup>$1</sup>")
-      .replace(/_(\w)/g, "<sub>$1</sub>")
-      .replace(/\\(ldots|dots|cdots)/g, "…")
-      .replace(/\\infty/g, "∞")
-      .replace(/\\times/g, "×")
-      .replace(/\\(rightarrow|to)\b/g, "→")
-      .replace(/\\le\b/g, "≤")
-      .replace(/\\ge\b/g, "≥")
+      .replace(/\^([\p{L}\p{N}])/gu, "<sup>$1</sup>")
+      .replace(/_([\p{L}\p{N}])/gu, "<sub>$1</sub>")
       .replace(/\\,/g, " ")}</em>`
   );
 
@@ -673,6 +684,8 @@ function renderTex(tex: string, level: number): string {
   t = t.replace(/\\begin\{enumerate\}(\[[^\]]*\])?/g, "<ol>").replace(/\\end\{enumerate\}/g, "</ol>");
   t = t.replace(/\\item\s*/g, "<li>");
   t = t.replace(/\\begin\{center\}/g, '<div class="center">').replace(/\\end\{center\}/g, "</div>");
+  // autre environnement (quote, minipage{…}, cases…) : son contenu reste, son nom ne fuit pas à l'écran
+  t = t.replace(/\\begin\{[a-zA-Z]+\*?\}(?:\[[^\]]*\])?(?:\{[^{}]*\})?/g, " ").replace(/\\end\{[a-zA-Z]+\*?\}/g, " ");
 
   // nettoyage final
   t = t.replace(/\\(hline|cline\{[^}]*\}|hfill|noindent|par\b|smallskip|medskip|bigskip|clearpage|newpage|centering|raggedright)/g, " ");
@@ -683,6 +696,8 @@ function renderTex(tex: string, level: number): string {
   t = t.replace(/\\&amp;/g, "&amp;").replace(/\\([%#_])/g, "$1").replace(/\\textbackslash\{?\}?/g, "\\");
   t = t.replace(/~/g, " ");
   t = t.replace(/\\ldots/g, "…");
+  // symboles écrits hors maths (\to, \ldots, \S…)
+  t = t.replace(/\\([a-zA-Z]+)(?![a-zA-Z])/g, (whole, name: string) => TEX_SYMBOLS[name] ?? whole);
   // macro inconnue : garde l'argument, puis retire les commandes nues et accolades restantes
   for (let pass = 0; pass < 2; pass++) t = t.replace(/\\[a-zA-Z]+\*?\{([^{}]*)\}/g, "$1");
   t = t.replace(/\\[a-zA-Z]+\*?/g, "");
