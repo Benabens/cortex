@@ -8,6 +8,7 @@ import { requestIp } from "@/lib/client-ip";
 import { inviteAllows } from "@/lib/invite";
 import { MAGIC_LINK_REFUSAL_CODE, takeMagicLinkSend } from "@/lib/magic-link-limits";
 import { log } from "@/lib/metrics";
+import { trackLoopsEvent, upsertLoopsContact } from "@/lib/loops";
 import { redactMessage } from "@/lib/observability-scrub";
 import { REVIEW_PROVIDER_ID, reviewLoginActive } from "@/lib/review-login";
 
@@ -40,6 +41,17 @@ function toAdapterUser(r: UserRow): AdapterUser {
   };
 }
 
+/** Langue déduite de l'en-tête Accept-Language (best-effort, pour le contact Loops : l'inscription n'a pas encore de `locale` en base). */
+async function signupLanguage(): Promise<string | undefined> {
+  try {
+    const { headers } = await import("next/headers");
+    const al = (await headers()).get("accept-language") ?? "";
+    return al.split(",")[0]?.split(";")[0]?.split("-")[0]?.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function getUserById(id: string): Promise<AdapterUser | null> {
   const r = await authGet<UserRow>(`SELECT * FROM users WHERE id = ?`, id);
   return r ? toAdapterUser(r) : null;
@@ -56,7 +68,13 @@ function cortexAdapter(): Adapter {
         id, user.email ?? null, user.name ?? null, user.image ?? null,
         user.emailVerified ? user.emailVerified.toISOString() : null
       );
-      return (await getUserById(id))!;
+      const created = (await getUserById(id))!;
+      if (created.email) {
+        const language = await signupLanguage();
+        void upsertLoopsContact({ email: created.email, firstName: created.name ?? undefined, language, userId: created.id }).catch(() => {});
+        void trackLoopsEvent({ email: created.email, userId: created.id }, "signup").catch(() => {});
+      }
+      return created;
     },
     getUser: getUserById,
     async getUserByEmail(email) {

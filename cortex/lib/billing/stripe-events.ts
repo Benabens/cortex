@@ -2,6 +2,7 @@ import type Stripe from "stripe";
 import { authGet, authRun, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
+import { trackLoopsEvent } from "@/lib/loops";
 import {
   DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer, withdrawSubscriptionInTx,
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, toCenti,
@@ -474,6 +475,7 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
       return { ok: true, action: "pack-credited-then-reversed", credited, reversed, ...(!whole && amount ? { receipt: s.id } : {}) };
     }
   }
+  if (credited) void trackLoopsEvent({ userId }, "purchase", { kind: "pack", plan: plan ?? null }).catch(() => {});
   return { ok: true, action: "pack-credited", credited, ...(credited && amount ? { receipt: s.id } : {}) };
 }
 
@@ -546,6 +548,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
       granted ? monthly : 0, periodEnd, nowStr(),
     );
   }
+  if (granted && Number(amountPaid ?? 0) > 0) void trackLoopsEvent({ userId }, "purchase", { kind: "subscription", plan: plan ?? null }).catch(() => {});
   return { ok: true, action: granted ? "subscription-granted" : "invoice-older-period", ...receipt };
 }
 

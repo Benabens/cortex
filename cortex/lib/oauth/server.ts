@@ -1,5 +1,6 @@
 import { authAll, authGet, authRun, authTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
+import { trackLoopsEvent } from "@/lib/loops";
 import { findClient, redirectUriMatches, type MetadataFetcher, type OAuthClient } from "./clients";
 import {
   ACCESS_TOKEN_TTL_S, AUTH_CODE_TTL_S, CONSENT_TTL_S, REFRESH_TOKEN_TTL_S, SCOPE_GENERATE, SCOPE_READ, SCOPE_WRITE, SUPPORTED_SCOPES,
@@ -181,6 +182,7 @@ async function upsertGrant(userId: string, client: OAuthClient, redirectUri: str
     `INSERT INTO oauth_grants (id, user_id, client_id, client_name, client_host, scope, resource, created_at) VALUES (?,?,?,?,?,?,?,?)`,
     id, userId, client.clientId, client.name, host, scope, resource, nowStr(),
   );
+  void trackLoopsEvent({ userId }, "mcp_connected", { client: client.name }).catch(() => {});
   return id;
 }
 
