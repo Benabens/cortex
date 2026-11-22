@@ -306,7 +306,14 @@ export function optionHead(option: string, options: string[]): string | null {
  */
 export function duplicateOptionIndices(options: string[], correct: number[]): number[] {
   const heads = options.map((o) => optionHead(o, options));
-  const flat = options.map((o) => normalize(o).replace(/[^\p{L}\p{N}]+/gu, " ").trim());
+  // Ponctuation de phrase et délimiteurs ($, `) ignorés ; les opérateurs comptent : « $x^2$ » et
+  // « $x_2$ », « x > 0 » et « x < 0 », « -1 » et « 1 », « a == b » et « a != b » sont des
+  // distracteurs distincts (erreur de signe, exposant, comparaison), pas des doublons.
+  const flat = options.map((o) => normalize(o)
+    .replace(/[^\p{L}\p{N}+\-−±*/×÷^_=<>≤≥≠!&|~%()[\]{}]+/gu, " ")
+    // « x > 0 » et « x>0 » restent le même libellé.
+    .replace(/\s*([+\-−±*/×÷^_=<>≤≥≠!&|~%()[\]{}])\s*/g, "$1")
+    .trim());
   const out = new Set<number>();
   for (let i = 0; i < options.length; i++) {
     for (let j = i + 1; j < options.length; j++) {
