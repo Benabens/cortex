@@ -131,6 +131,15 @@ ENV HOME=/home/cortex \
 # un examen imprime une écriture au-delà de Latin-1 ; elles sont alors en cache, hors ligne.
 # poppler-data (étape runtime) donne à poppler les tables CJK (Adobe-GB1…) : sans elles, pdftotext
 # et pdftoppm ne lisent pas le chinois d'un PDF, généré (Fandol) ou déposé.
+# 10pt et 12pt : lib/exam-preamble (shapePreamble) pose cette taille quand l'annale relevée n'est
+# pas en 11pt. Banc hors ligne du 22/11 : en plus de size10.clo/size12.clo (classes LaTeX de base),
+# un examen SANS police Unicode (donc sans fontspec, qui route tout \rmfamily vers une police OTF
+# et contourne cette dépendance) a aussi besoin des polices Latin Modern classiques (TFM) aux
+# graisses/tailles que \small et le gras du bandeau d'en-tête/pied (preamble.tex) calculent à ces
+# tailles de document — absentes même après le préchauffage du bloc RTL/CJK ci-dessous, qui lui
+# ne les redemande jamais puisqu'il charge toujours unicode-fonts.tex. Repris sur warm.tex (seul
+# document encore purement « classique ») : ni le second document ni le bloc suivant ne couvrent
+# ce cas, chacun exerçant une résolution de police différente.
 COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/unicode-fonts.tex cortex/latex/cjk-fonts.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm/
 USER cortex
 RUN set -eux; \
@@ -139,6 +148,11 @@ RUN set -eux; \
     printf '\n\\usepackage{multicol}\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> warm.tex; \
     /usr/local/bin/tectonic --chatter minimal warm.tex \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
+    for SZ in 10 12; do \
+      sed "s/\\\\documentclass\[11pt/\\\\documentclass[${SZ}pt/" warm.tex > warm-${SZ}pt.tex; \
+      /usr/local/bin/tectonic --chatter minimal warm-${SZ}pt.tex \
+        || echo "AVERTISSEMENT: warm-up tectonic ${SZ}pt incomplet (bundle téléchargé au 1er examen concerné)"; \
+    done; \
     cat preamble.tex figures.tex generic.tex unicode-fonts.tex cjk-fonts.tex > warm-unicode.tex; \
     printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nЖα中 \\textbf{Жα中} \\textit{Жα} \\textbf{\\textit{Жα}} \\textsf{Жα中 \\textbf{Жα中} \\textit{Жα} \\textbf{\\textit{Жα}}} \\texttt{Жα中 \\textbf{Жα} \\textit{Жα} \\textbf{\\textit{Жα}}}\n\\end{document}\n' >> warm-unicode.tex; \
     /usr/local/bin/tectonic --chatter minimal warm-unicode.tex \
@@ -151,6 +165,14 @@ USER root
 # chaque style, pour compiler hors ligne. Couche à part : +26 Mo de cache tectonic (mesure du 21/11).
 # \cn{1} et une formule : énumérateurs entourés (pifont, uzdr.pfb) de tout QCM et polices math
 # (lm-mathit.enc…), absents des documents ci-dessus.
+# 10pt et 12pt (lib/exam-preamble shapePreamble) : repris ici aussi, car un examen avec une
+# écriture non latine route \rmfamily via fontspec (OTF, déjà en cache, aucune taille à part) —
+# chemin de résolution de police différent de celui testé dans le bloc précédent. Les deux
+# préchauffages sont nécessaires, pas redondants (banc hors ligne du 22/11).
+# Surcoût mesuré (banc à froid, les deux blocs) : +24 fichiers, ~854 Ko — size10.clo/size12.clo
+# (classes de base) et, pour \small/gras de l'en-tête et du pied à ces tailles, les polices Latin
+# Modern classiques (TFM/PFB) aux graisses manquantes ; négligeable au regard des +26 Mo déjà
+# occupés par ce seul bloc RTL/CJK/hangul.
 COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/unicode-fonts.tex cortex/latex/cjk-fonts.tex cortex/latex/hangul-fonts.tex cortex/latex/rtl.tex cortex/latex/hebrew-fonts.tex cortex/latex/arabic-fonts.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm-rtl/
 USER cortex
 RUN set -eux; \
@@ -159,6 +181,11 @@ RUN set -eux; \
     printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\n한 \\textbf{한} \\textsf{한 \\textbf{한}} \\texttt{한}\n\\CortexRL{\\CortexHe{א \\textbf{א} \\textit{א} \\textbf{\\textit{א}}} \\CortexLR{1}} \\CortexRL{\\CortexAr{ب \\textbf{ب} \\textit{ب} \\textbf{\\textit{ب}}}} \\cn{1}\n$f(x)=x_i^2+\\sum_{k} \\int_0^1 \\sqrt{t}\\,dt \\in \\mathbb{R}$\n\\end{document}\n' >> warm-rtl.tex; \
     /usr/local/bin/tectonic --chatter minimal warm-rtl.tex \
       || echo "AVERTISSEMENT: warm-up des polices coréennes, hébraïques et arabes incomplet (téléchargées au 1er examen concerné)"; \
+    for SZ in 10 12; do \
+      sed "s/\\\\documentclass\[11pt/\\\\documentclass[${SZ}pt/" warm-rtl.tex > warm-rtl-${SZ}pt.tex; \
+      /usr/local/bin/tectonic --chatter minimal warm-rtl-${SZ}pt.tex \
+        || echo "AVERTISSEMENT: warm-up ${SZ}pt (coréen, hébreu, arabe) incomplet (téléchargé au 1er examen concerné)"; \
+    done; \
     cd /; rm -rf /tmp/tectonic-warm-rtl
 USER root
 
