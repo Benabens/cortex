@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { currentCourse, enterCourse, ensureFts } from "../db/client";
-import { indexItemForSearch } from "../lib/search";
+import { indexItemForSearch, rebuildVocab } from "../lib/search";
 import { dbDriverName, q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded, getCourse } from "../lib/courses";
 import { readablePages } from "../lib/ocr";
@@ -20,7 +20,6 @@ import { importFolder } from "../lib/import-folder";
 import { readAllRefs, writeRef } from "../lib/sources";
 import { examKind, examYear } from "../lib/exam-names";
 import { sourceTypeForFolder } from "../lib/course-source";
-import { tokenize } from "../lib/text";
 import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
 import { htmlPageText } from "../lib/html-text";
 import { splitChapters, splitPages } from "../lib/chapters";
@@ -397,27 +396,6 @@ async function ingestPdfs(): Promise<number> {
   return total;
 }
 
-// ---------- Vocabulaire : termes distincts + fréquence documentaire ----------
-async function buildVocab(): Promise<number> {
-  await q.ensureTable("vocab");
-  await q.run("DELETE FROM vocab");
-  const df = new Map<string, number>();
-  const rows = await q.all<{ text: string }>("SELECT text FROM items");
-  for (const { text } of rows) {
-    const seen = new Set<string>();
-    for (const t of tokenize(text, 3)) {
-      if (t.length > 24 || /^\d+$/.test(t)) continue; // pas les très longs / purs nombres
-      seen.add(t);
-    }
-    for (const t of seen) df.set(t, (df.get(t) ?? 0) + 1);
-  }
-  await q.tx(async () => {
-    for (const [term, n] of df)
-      await q.run("INSERT INTO vocab (term, df) VALUES (?,?) ON CONFLICT(term) DO UPDATE SET df = excluded.df", term, n);
-  });
-  return df.size;
-}
-
 // ---------- Ingestion GÉNÉRIQUE (cours ≠ cs-202) : tout le contenu de data/<id>/content ----------
 /**
  * Dossier de catégorie du contenu (import, dépôt par catégorie, connecteur) → type d'ingestion.
@@ -602,7 +580,7 @@ async function main() {
   }
 
   // Vocabulaire (pour la recherche tolérante aux fautes)
-  console.log("• vocabulaire  :", await buildVocab(), "termes");
+  console.log("• vocabulaire  :", await rebuildVocab(), "termes");
 
   // Compte gratuit : les originaux lus partent du serveur (les annales PDF après la préparation).
   if (COURSE !== DEFAULT_COURSE) {
