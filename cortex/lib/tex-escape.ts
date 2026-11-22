@@ -48,6 +48,19 @@ const UMATH: [RegExp, string][] = [
   [/€/g, "\\texteuro{}"], [/[\u2009\u202F]/g, "\\,"], [/„/g, ",,"],
 ];
 
+/**
+ * Un symbole Unicode de la table → sa commande en mode mathématique (« ≤ » → \le), pour une
+ * formule (lib/tex-rich) ; null s'il n'en a pas (« ² » s'écrit en texte, « œ » est une lettre).
+ */
+export function mathSymbolTex(ch: string): string | null {
+  for (const [re, rep] of UMATH) {
+    re.lastIndex = 0;
+    const m = /^\\ensuremath\{(.+)\}$/.exec(rep);
+    if (m && re.test(ch)) return m[1];
+  }
+  return null;
+}
+
 /** Lettres sans décomposition en lettre + accent. */
 const LETTERS: Record<string, string> = { "Ł": "\\L{}", "ł": "\\l{}", "Đ": "\\DJ{}", "đ": "\\dj{}", "ı": "\\i{}", "Ŋ": "\\NG{}", "ŋ": "\\ng{}", "ẞ": "\\SS{}" };
 /** Accent combinant (forme NFD) → commande d'accent LaTeX du codage T1. */
