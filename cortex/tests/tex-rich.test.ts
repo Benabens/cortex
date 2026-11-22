@@ -89,3 +89,11 @@ test("une compilation qui échoue avec des formules est retentée avec les formu
   // sans formule composée, rien à retenter : l'erreur remonte telle quelle
   await assert.rejects(formulasOrText(async () => { texInline("sans formule"); throw new Error("autre"); }), /autre/);
 });
+
+test("un chemin, une URL, une adresse ou du code entre accents graves ne deviennent jamais des maths (revue du 22/11)", () => {
+  for (const s of ["github.com/u/x_y", "/tmp/a_1/log", "a_b@epfl.ch", String.raw`C:\Users\pi\doc`, "`$x$` et `x_t`", "voir `\\frac{a}{b}`"]) {
+    assert.ok(!/(?<!\\)\$/.test(texInline(s)), `${s} → ${texInline(s)}`);
+  }
+  // deux commandes collées restent une formule
+  assert.equal(texInline(String.raw`soit \eta\nabla f`), String.raw`soit $\eta\nabla$ f`);
+});

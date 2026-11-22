@@ -161,13 +161,16 @@ function scriptsEnd(s: string, j: number): number {
 /**
  * FORMULE SANS DÉLIMITEURS, reconnue seulement quand elle ne peut pas être autre chose :
  *  - une lettre seule suivie d'un indice ou d'un exposant : « x_{t+1} », « a_n », « x^2 » ; la
- *    lettre ne suit ni une lettre, ni un chiffre, ni « _ », « . » ou « \ » (« snake_case »,
- *    « max_iter », « __init__ » restent du texte) et rien d'un mot ne suit (« a_b.py », « x_tt ») ;
+ *    lettre ne suit ni une lettre, ni un chiffre, ni « _ . \ / @ : » (« snake_case », « max_iter »,
+ *    « __init__ », « /tmp/a_1 », « github.com/u/x_y » restent du texte) et rien d'un mot, d'une
+ *    adresse ou d'un chemin ne suit (« a_b.py », « x_tt », « a_b@epfl.ch ») ;
  *  - une commande mathématique connue (MATH_COMMANDS) avec ses arguments et ses indices :
- *    « \frac{a}{b} », « \sum_i », « \nabla » ; « \n » ou « \temp » ne le sont pas.
- * Deux formules que séparent seulement des espaces et des opérateurs n'en font qu'une.
+ *    « \frac{a}{b} », « \sum_i », « \nabla » ; « \n » ou « \temp » ne le sont pas, ni une commande
+ *    collée à un mot ou suivie d'une autre inconnue (« C:\Users\pi\doc » est un chemin).
+ * Deux formules que séparent seulement des espaces et des opérateurs n'en font qu'une. Le code entre
+ * accents graves n'est jamais lu comme une formule, délimitée ou non.
  */
-const BARE_START = /(?<![\p{L}\p{N}_.\\])[A-Za-z](?=[_^])|\\[a-zA-Z]+/gu;
+const BARE_START = /(?<![\p{L}\p{N}_.\\/@:])[A-Za-z](?=[_^])|(?<![:/@])\\[a-zA-Z]+/gu;
 const BARE_GAP = /^[ =+\-*/<>]*$/;
 
 function bareAtoms(s: string): { start: number; end: number }[] {
@@ -188,10 +191,16 @@ function bareAtoms(s: string): { start: number; end: number }[] {
       end = scriptsEnd(s, start + 1);
       if (end === start + 1) continue;
     }
-    if (/^(?:[\p{L}\p{N}_]|\.[\p{L}\p{N}])/u.test(s.slice(end))) continue;
-    if (mathTex(s.slice(start, end)) === null) continue;
     const prev = atoms[atoms.length - 1];
-    if (prev && BARE_GAP.test(s.slice(prev.end, start))) prev.end = end;
+    // une commande collée à un mot n'est une formule qu'à la suite d'une autre (« \eta\nabla »)
+    if (m[0][0] === "\\" && /[\p{L}\p{N}]/u.test(s[start - 1] ?? "") && prev?.end !== start) continue;
+    const after = s.slice(end);
+    if (/^(?:[\p{L}\p{N}_@]|\.[\p{L}\p{N}]|\/[\p{L}\p{N}])/u.test(after)) continue;
+    const next = /^\\([a-zA-Z]+)/.exec(after);
+    if (next && MATH_COMMANDS[next[1]] === undefined) continue;
+    if (mathTex(s.slice(start, end)) === null) continue;
+    // fusion revalidée : la formule entière doit rester sûre, sinon les deux restent séparées
+    if (prev && BARE_GAP.test(s.slice(prev.end, start)) && mathTex(s.slice(prev.start, end)) !== null) prev.end = end;
     else atoms.push({ start, end });
   }
   return atoms;
@@ -199,21 +208,18 @@ function bareAtoms(s: string): { start: number; end: number }[] {
 
 type Segment = { math: string } | { text: string };
 
-/** Le texte hors délimiteurs, avec ses formules sans délimiteurs ; le code entre accents graves reste du texte. */
+/** Le texte hors délimiteurs, avec ses formules sans délimiteurs. */
 function bareSegments(s: string): Segment[] {
   const out: Segment[] = [];
-  for (const [k, piece] of s.split(/(`[^`\n]+`)/).entries()) {
-    if (k % 2) { out.push({ text: piece }); continue; }
-    let last = 0;
-    for (const a of bareAtoms(piece)) {
-      const tex = mathTex(piece.slice(a.start, a.end));
-      if (tex === null) continue;
-      if (a.start > last) out.push({ text: piece.slice(last, a.start) });
-      out.push({ math: tex });
-      last = a.end;
-    }
-    if (last < piece.length) out.push({ text: piece.slice(last) });
+  let last = 0;
+  for (const a of bareAtoms(s)) {
+    const tex = mathTex(s.slice(a.start, a.end));
+    if (tex === null) continue;
+    if (a.start > last) out.push({ text: s.slice(last, a.start) });
+    out.push({ math: tex });
+    last = a.end;
   }
+  if (last < s.length) out.push({ text: s.slice(last) });
   return out;
 }
 
@@ -221,6 +227,10 @@ function bareSegments(s: string): Segment[] {
 const DELIMITED = /\$\$([^$]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?\S)\$(?!\d)/g;
 
 function segments(s: string): Segment[] {
+  return s.split(/(`[^`\n]+`)/).flatMap((piece, k) => (k % 2 ? [{ text: piece }] : formulaSegments(piece)));
+}
+
+function formulaSegments(s: string): Segment[] {
   const out: Segment[] = [];
   let last = 0;
   for (const m of s.matchAll(DELIMITED)) {
@@ -249,6 +259,20 @@ export function texInline(s: string): string {
 /** Puce Markdown (« - », « * », « • ») ou numéro (« 1. », « 2) ») en début de ligne, suivis d'une espace. */
 const ITEM = /^\s*(?:([-*•])|(\d{1,2})[.)])\s+(\S.*)$/;
 
+type MdList = { env: "itemize" | "enumerate"; start: number; items: string[] };
+
+/** Élément de liste Markdown d'une ligne : son environnement, son numéro, son texte ; null sinon. */
+function listItem(line: string): { env: MdList["env"]; start: number; text: string } | null {
+  const m = ITEM.exec(line);
+  return m ? { env: m[1] ? "itemize" : "enumerate", start: m[2] ? Number(m[2]) : 1, text: m[3] } : null;
+}
+
+/** La liste en LaTeX, une ligne par élément ; une numérotation qui ne part pas de 1 est gardée. */
+function listTex(l: MdList): string {
+  const opts = l.env === "enumerate" && l.start !== 1 ? `nosep,start=${l.start}` : "nosep";
+  return [`\\begin{${l.env}}[${opts}]`, ...l.items.map((i) => `\\item ${i}`), `\\end{${l.env}}`].join("\n");
+}
+
 /**
  * Texte de plusieurs lignes (énoncé, corrigé, scénario) → LaTeX : formules comme `texInline`,
  * lignes de puces ou de numéros consécutives en `itemize` / `enumerate` (le modèle écrit ses
@@ -257,24 +281,23 @@ const ITEM = /^\s*(?:([-*•])|(\d{1,2})[.)])\s+(\S.*)$/;
  */
 export function texText(s: string, br = "\n"): string {
   const out: string[] = [];
-  let list = null as { env: "itemize" | "enumerate"; items: string[]; start: number } | null;
+  let list = null as MdList | null;
   let sep = "";
   const close = () => {
     if (!list) return;
-    out.push(`${sep}\\begin{${list.env}}[nosep${list.env === "enumerate" && list.start !== 1 ? `,start=${list.start}` : ""}]\n${list.items.map((i) => `\\item ${i}`).join("\n")}\n\\end{${list.env}}`);
+    out.push(`${sep}${listTex(list)}`);
     list = null;
     sep = "\n";
   };
   for (const line of (s ?? "").replace(/\s+$/, "").split("\n")) {
-    const m = ITEM.exec(line);
-    if (m) {
-      const env = m[1] ? "itemize" : "enumerate";
-      if (list?.env !== env) {
+    const item = listItem(line);
+    if (item) {
+      if (list?.env !== item.env) {
         close();
-        list = { env, items: [], start: m[2] ? Number(m[2]) : 1 };
+        list = { env: item.env, start: item.start, items: [] };
         sep = out.length ? "\n" : "";
       }
-      list!.items.push(texInline(m[3]));
+      list!.items.push(texInline(item.text));
       continue;
     }
     close();
@@ -371,21 +394,19 @@ function texLines(tex: string): { line: string; free: boolean }[] {
  */
 export function markdownListsTex(tex: string): string {
   const out: string[] = [];
-  let list = null as { env: "itemize" | "enumerate"; items: string[]; start: number } | null;
+  let list = null as MdList | null;
   const close = () => {
-    if (!list) return;
-    out.push(`\\begin{${list.env}}[nosep${list.env === "enumerate" && list.start !== 1 ? `,start=${list.start}` : ""}]`, ...list.items.map((i) => `\\item ${i}`), `\\end{${list.env}}`);
+    if (list) out.push(listTex(list));
     list = null;
   };
   for (const { line, free } of texLines(tex)) {
-    const m = free ? ITEM.exec(line) : null;
-    if (m) {
-      const env = m[1] ? "itemize" : "enumerate";
-      if (list?.env !== env) {
+    const item = free ? listItem(line) : null;
+    if (item) {
+      if (list?.env !== item.env) {
         close();
-        list = { env, items: [], start: m[2] ? Number(m[2]) : 1 };
+        list = { env: item.env, start: item.start, items: [] };
       }
-      list!.items.push(m[3]);
+      list!.items.push(item.text);
       continue;
     }
     close();
