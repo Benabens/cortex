@@ -38,7 +38,6 @@
  * la sauvegarde : le jour UTC est réclamé dans `app_meta`, une seule instance
  * fait le passage. Active seulement avec la facturation (BILLING_ENABLED=1).
  */
-import { emailEsc, emailFrame, emailLink, emailP } from "@/lib/email-frame";
 import type Stripe from "stripe";
 import { randomUUID } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
@@ -168,7 +167,7 @@ const longDate = (x: Day, locale: string) =>
   new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(x.y, x.m - 1, x.d, 12)));
 const money = (amount: number, currency: string, locale: string) =>
   new Intl.NumberFormat(locale, { style: "currency", currency, minimumFractionDigits: Number.isInteger(amount) ? 0 : 2, maximumFractionDigits: 2 }).format(amount);
-const esc = emailEsc;
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export type ReminderMail = { subject: string; text: string; html: string };
 
@@ -215,9 +214,12 @@ export function renewalReminderEmail(o: {
     effect, byMail, keep, `${why}${cgv}`, "L'équipe Cortex", english,
   ].join("\n\n");
 
-  const p = emailP;
-  const link = emailLink;
-  const html = emailFrame("fr", p("Bonjour,") + p(esc(intro)) + p(esc(tacit))
+  const p = (body: string, style = "") => `<p style="margin:0 0 14px;${style}">${body}</p>`;
+  const link = (href: string, label: string) => `<a href="${esc(href)}" style="color:#c4b5fd">${esc(label)}</a>`;
+  const html = `<!doctype html><html lang="fr"><body style="margin:0;padding:24px 12px;background:#0d0b14;color:#e7e5ef;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55">`
+    + `<div style="max-width:560px;margin:0 auto;padding:28px;background:#15121f;border:1px solid #2b2640;border-radius:12px">`
+    + p("cortex.", "font-size:19px;font-weight:600;color:#ffffff")
+    + p("Bonjour,") + p(esc(intro)) + p(esc(tacit))
     + `<div style="margin:20px 0;padding:16px 18px;border:2px solid #f5b544;border-radius:10px;background:#1c1830">`
     + `<div style="color:#f5b544;font-size:14px">${esc(boxLabel)}</div>`
     + `<div style="margin-top:4px;color:#ffffff;font-size:21px;font-weight:700">${esc(fr.last)}</div></div>`
@@ -228,7 +230,8 @@ export function renewalReminderEmail(o: {
     + p(esc(keep))
     + p(`${esc(why)}${o.termsUrl ? ` (${link(o.termsUrl, "lire les CGV")})` : ""}.`, "color:#a9a4bd;font-size:13px")
     + p("L'équipe Cortex")
-    + `<p lang="en" style="margin:18px 0 0;padding-top:14px;border-top:1px solid #2b2640;color:#a9a4bd;font-size:13px">${esc(english)}</p>`);
+    + `<p lang="en" style="margin:18px 0 0;padding-top:14px;border-top:1px solid #2b2640;color:#a9a4bd;font-size:13px">${esc(english)}</p>`
+    + `</div></body></html>`;
   return { subject, text, html };
 }
 
@@ -252,12 +255,14 @@ function renewalReminderEmailEnglish(o: { renewsAt: string; amount: number; curr
   const binding = "The French version is legally binding.";
   const rule = "+" + "-".repeat(62) + "+";
   const text = ["Hello,", intro, tacit, `${rule}\n  ${boxLabel.toUpperCase()}: ${deadline}\n${rule}`, `${how}\n\n1. ${step1}: ${o.accountUrl}\n2. ${step2}`, effect, byMail, keep, `${why}${o.termsUrl ? `: ${o.termsUrl}` : ""}`, "The Cortex team", binding].join("\n\n");
-  const p = emailP;
-  const link = emailLink;
-  const html = emailFrame("en", p("Hello,") + p(esc(intro)) + p(esc(tacit)) + `<div style="margin:20px 0;padding:16px 18px;border:2px solid #f5b544;border-radius:10px;background:#1c1830"><div style="color:#f5b544;font-size:14px">${esc(boxLabel)}</div><div style="margin-top:4px;color:#ffffff;font-size:21px;font-weight:700">${esc(deadline)}</div></div>`
+  const p = (body: string, style = "") => `<p style="margin:0 0 14px;${style}">${body}</p>`;
+  const link = (href: string, label: string) => `<a href="${esc(href)}" style="color:#c4b5fd">${esc(label)}</a>`;
+  const html = `<!doctype html><html lang="en"><body style="margin:0;padding:24px 12px;background:#0d0b14;color:#e7e5ef;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55">`
+    + `<div style="max-width:560px;margin:0 auto;padding:28px;background:#15121f;border:1px solid #2b2640;border-radius:12px">` + p("cortex.", "font-size:19px;font-weight:600;color:#ffffff")
+    + p("Hello,") + p(esc(intro)) + p(esc(tacit)) + `<div style="margin:20px 0;padding:16px 18px;border:2px solid #f5b544;border-radius:10px;background:#1c1830"><div style="color:#f5b544;font-size:14px">${esc(boxLabel)}</div><div style="margin-top:4px;color:#ffffff;font-size:21px;font-weight:700">${esc(deadline)}</div></div>`
     + p(esc(how)) + `<ol style="margin:0 0 14px;padding-left:22px"><li style="margin-bottom:6px">${link(o.accountUrl, step1)}</li><li>${esc(step2)}</li></ol>` + p(esc(effect))
     + p(`You can also write to ${link(`mailto:${o.contact}`, o.contact)}: we will record your cancellation.`) + p(esc(keep))
-    + p(`${esc(why)}${o.termsUrl ? ` (${link(o.termsUrl, "read the terms")})` : ""}.`, "color:#a9a4bd;font-size:13px") + p("The Cortex team") + p(binding, "color:#a9a4bd;font-size:13px"));
+    + p(`${esc(why)}${o.termsUrl ? ` (${link(o.termsUrl, "read the terms")})` : ""}.`, "color:#a9a4bd;font-size:13px") + p("The Cortex team") + p(binding, "color:#a9a4bd;font-size:13px") + `</div></body></html>`;
   return { subject, text, html };
 }
 

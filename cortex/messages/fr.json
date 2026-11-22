@@ -305,11 +305,12 @@
   },
   "magicLink": {
     "subject": "Connexion à Cortex",
-    "intro": "Clique sur le bouton pour te connecter à Cortex.",
+    "intro": "Cliquez sur le bouton pour vous connecter : pas de mot de passe à retenir.",
     "button": "Se connecter",
-    "ignore": "Si tu n’es pas à l’origine de cette demande, ignore ce message.",
+    "ignore": "Vous n’êtes pas à l’origine de cette demande ? Ignorez ce message : sans clic sur le lien, personne ne se connecte.",
     "validity": "Ce lien est valable 24 heures et ne sert qu’une fois.",
-    "fallback": "Le bouton ne s’affiche pas ? Copie ce lien dans ton navigateur :"
+    "fallback": "Le bouton ne s’affiche pas ? Copiez ce lien dans votre navigateur :",
+    "title": "Connexion à Cortex"
   },
   "common": {
     "retry": "Réessayer",
