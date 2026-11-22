@@ -323,15 +323,12 @@ const codeName = (language: string) => ({ c: "C", "c++": "C++", cpp: "C++", "c#"
 /**
  * Deux options, c'est un VRAI/FAUX. Prod, 22/11/2026 : la détection relevait 2 options sur le
  * vrai/faux d'une seule question de l'annale, et tous les choix uniques de l'examen sortaient en
- * A/B, trop faciles. Un vrai/faux reste dans la section qui le décrit (ou partout, si l'annale n'a
- * que des choix binaires sans section pour les situer) ; ailleurs, 4 options plausibles.
+ * A/B, trop faciles. Un vrai/faux reste dans la section qui le décrit ; ailleurs, et quand aucune
+ * section n'en décrit un (le nombre relevé peut venir d'une seule question), 4 options plausibles.
  */
 const TRUE_FALSE = /vrai\s*(?:\/|ou|-)\s*faux|true\s*(?:\/|or|-)\s*false|richtig\s*(?:\/|oder)\s*falsch|verdadero\s*(?:\/|o)\s*falso|vero\s*(?:\/|o)\s*falso|\bT\/F\b/i;
 const choiceOptions = (plan: BlockPlan) => (plan.options && plan.options >= 3 ? plan.options : 4);
-function isTrueFalseSlot(plan: BlockPlan, slot: BlockSlot): boolean {
-  if (TRUE_FALSE.test(slot.theme)) return true;
-  return plan.options === 2 && !plan.sections.some((s) => TRUE_FALSE.test(`${s.name} ${s.description}`));
-}
+const isTrueFalseSlot = (slot: BlockSlot) => TRUE_FALSE.test(slot.theme);
 
 function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
   const c = getCourse(currentCourse());
@@ -345,7 +342,7 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
     plan.kinds
       ? `TYPES DE SOUS-QUESTIONS (ceux de l'annale, aucun autre${plan.kinds.length > 1 ? " ; mêle-les : au moins deux d'entre eux" : ""}) :`
       : `TYPES DE SOUS-QUESTIONS (mêle-les : au moins un choix unique et au moins une réponse courte ; une lecture de code quand le thème s'y prête) :`,
-    allows("scq") && `  - "scq" — choix unique : exactement ${choiceOptions(plan)} options${plan.options === 2 ? " (sauf consigne VRAI/FAUX dans la demande d'une question)" : ""}, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
+    allows("scq") && `  - "scq" — choix unique : exactement ${choiceOptions(plan)} options${plan.sections.some((x) => TRUE_FALSE.test(`${x.name} ${x.description}`)) ? " (sauf consigne VRAI/FAUX dans la demande d'une question)" : ""}, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
     allows("short") && `  - "short" — réponse courte (1 à 3 phrases) : "answer" = la réponse modèle, conforme au cours ; "criteria" = 1 à 3 critères OBSERVABLES dans une copie (ce que la réponse doit nommer ou justifier), chacun avec ses points entiers, leur somme = "points".`,
     allows("code_output") && `  - "code_output" — lecture de code : "code" = un extrait ${python ? "Python" : codeName(plan.codeLanguage!)} AUTONOME et court (bibliothèque standard${python ? " ; pandas seulement si le cours l'emploie" : ""} ; ni fichier, ni réseau, ni hasard, ni horloge), "prompt" demande ce qu'il affiche, "answer" = sa sortie EXACTE, ligne pour ligne. Jamais d'écriture de code.`,
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
@@ -359,7 +356,8 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
 }
 
 async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: BlockCtx, guidance: string | null, passages: { src: string; text: string }[]): Promise<ExamBlock> {
-  const trueFalse = (!plan.kinds || plan.kinds.includes("scq")) && isTrueFalseSlot(plan, slot);
+  const allows = (k: PartKind) => !plan.kinds || plan.kinds.includes(k);
+  const trueFalse = allows("scq") && isTrueFalseSlot(slot);
   const shape: PartShape = { ...plan, options: trueFalse ? 2 : plan.options ? choiceOptions(plan) : undefined };
   const prompt = [
     `QUESTION ${i + 1}/${n}`,
@@ -369,7 +367,7 @@ async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockP
     ctx.previous.length ? `Déjà posées dans les examens précédents de ce cours (ne les reprends pas) :\n${ctx.previous.slice(0, 12).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}` : "",
     // Prod, 22/11/2026 : construites en parallèle, les questions ne se voyaient pas et se recouvraient.
     ctx.others?.length ? `AUTRES QUESTIONS DE CET EXAMEN — leurs sujets ne se reprennent ni dans ton scénario ni dans une sous-question :\n${ctx.others.map((x) => `  · ${sanitizeCorpus(x).replace(/\s+/g, " ").slice(0, 160)}`).join("\n")}` : "",
-    trueFalse ? `VRAI/FAUX : chaque "scq" de cette question est une affirmation à juger, exactement 2 options (vrai, faux, dans la langue de l'examen), suivie d'une sous-question "short" qui demande de justifier.` : "",
+    trueFalse ? `VRAI/FAUX : chaque "scq" de cette question est une affirmation à juger, exactement 2 options (vrai, faux, dans la langue de l'examen)${allows("short") ? `, suivie d'une sous-question "short" qui demande de justifier` : ""}.` : "",
     guidance ? `VERSION PRÉCÉDENTE REJETÉE — corrige ceci : ${guidance}` : "",
     passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)].join("\n") : "Aucun extrait du cours n'a été retrouvé pour ce thème : reste sur les notions du programme, sans en inventer.",
     `${plan.partsMin} à ${plan.partsMax} sous-questions. Réponds avec l'objet JSON {"title","scenario","parts":[…]} décrit plus haut.`,
@@ -516,6 +514,11 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
  * qui coûte), avec les sujets des autres à éviter. Refaite sans succès, elle reste telle quelle.
  * Les numéros des messages sont ceux de l'examen livré.
  */
+/** Lettres de sous-questions citées dans un énoncé (« your answer to (c) », « partie b »), en indices. */
+function lettersCited(prompt: string): number[] {
+  return [...prompt.matchAll(/\(([a-h])\)|\b(?:part|partie|sous-question)\s+\(?([a-h])\)?(?!\p{L})/giu)].map((m) => (m[1] ?? m[2]).toLowerCase().charCodeAt(0) - 97);
+}
+
 async function separateBlocks(built: Map<number, ExamBlock>, slotAt: Map<number, BlockSlot>, n: number, plan: BlockPlan, ctx: BlockCtx, step: StepCb, work: PhaseProgress): Promise<void> {
   const order = [...built.keys()].sort((a, b) => a - b);
   const current = () => order.map((i) => built.get(i)!);
@@ -526,7 +529,11 @@ async function separateBlocks(built: Map<number, ExamBlock>, slotAt: Map<number,
     const whole = mine.find((o) => o.part < 0);
     const b = built.get(order[x])!;
     const keep = b.parts.filter((_, k) => !mine.some((o) => o.part === k));
-    if (whole || keep.length < plan.partsMin) {
+    // Les sous-questions restantes sont renumérotées : un renvoi à une lettre au-delà du premier
+    // retrait (ou à la sous-question retirée) viserait la mauvaise. Alors on refait la question.
+    const first = Math.min(...mine.map((o) => o.part));
+    const shifted = keep.some((p) => lettersCited(p.prompt).some((k) => k >= first));
+    if (whole || keep.length < plan.partsMin || shifted) {
       redo.set(x, whole ?? mine[0]);
       continue;
     }

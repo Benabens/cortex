@@ -77,3 +77,26 @@ test("en français aussi : « deux vins » ne nomme pas un sujet, « assemblage 
   ]);
   assert.deepEqual(found.map(({ block, part, other }) => ({ block, part, other })), [{ block: 1, part: 1, other: 0 }]);
 });
+
+test("revue : un distracteur qui nomme le sujet d'une autre question ne compte pas (les options sont des notions du cours)", () => {
+  const tasting: OverlapBlock = {
+    title: "Tasting faults in young wines",
+    scenario: "A taster samples three young red wines before bottling.",
+    parts: [
+      part("Which fault gives a vinegar smell?", ["Volatile acidity", "Stuck fermentation", "Restarting with yeast", "Cork taint"]),
+      part("Describe how to confirm the fault in the lab."),
+      part("Which bottling step reduces the risk?"),
+    ],
+  };
+  assert.deepEqual(findOverlaps([tasting, stuck, blending]), []);
+});
+
+test("revue : racines plus longues, « pressurage » ne se confond pas avec « pression »", () => {
+  const pressing: OverlapBlock = { title: "Pressurage cycles", scenario: "Une presse pneumatique reçoit 4 t de raisin.", parts: [part("Quelle durée de cycle ?"), part("Quel rendement ?"), part("Quel risque d'oxydation ?")] };
+  const sparkling: OverlapBlock = {
+    title: "Pression des vins effervescents",
+    scenario: "Un vin effervescent est mis en bouteille.",
+    parts: [part("Quelle pression atteint la bouteille ?"), part("Quels cycles de remuage ?"), part("Quel bouchon choisir ?")],
+  };
+  assert.deepEqual(findOverlaps([pressing, sparkling]), []);
+});

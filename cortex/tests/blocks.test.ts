@@ -504,3 +504,62 @@ test("C × options (prod 22/11) : 2 options relevées sur un vrai/faux de l'anna
   assert.match(ask(1), /exactement 4 options/);
   assert.match(ask(2), /VRAI\/FAUX/);
 });
+
+test("revue : 2 options relevées mais aucune section de vrai/faux → 4 options partout, aucun vrai/faux imposé", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "short answers on content moderation"]), options: 2 };
+  script = {
+    "content moderation": [block("M", [scq("M"), short("M"), code("[1, 2]")])],
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  prompts.length = 0;
+  const r = await runWithCourse(id, () => generateBlockExam(plan));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  assert.deepEqual(exam.blocks.map((b) => b.parts.filter((p) => p.kind === "scq").map((p) => p.options.length)), [[4], [4]]);
+  assert.ok(!prompts.some((p) => /VRAI\/FAUX/.test(p)), "vrai/faux imposé sans section qui en décrive un");
+});
+
+test("revue : vrai/faux d'une annale sans réponse courte → pas de justification « short » exigée", async () => {
+  const id = await compositeCourse(2);
+  const plan = { ...sectionPlan(["ethical theories and stakeholders", "True/false statements"]), options: 2, kinds: ["scq", "code_output"] as ("scq" | "code_output")[] };
+  const tf: Part = { ...scq("TF"), prompt: "True or false: a filter never blocks legitimate posts.", options: ["False", "Right: True"], correct: 1 };
+  script = {
+    "True/false": [block("TF", [tf, { ...tf, prompt: "True or false: logs are anonymous." }, code("[1, 2]")])],
+    "ethical": [block("A", [scq("A"), { ...scq("A2"), prompt: "Which stakeholder bears the risk?" }, code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam } = await import("../lib/blocks");
+  prompts.length = 0;
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateBlockExam(plan, { onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.count, r.requested], [2, 2], steps.join("\n"));
+  const tfAsk = prompts.find((p) => /^THÈME : Question 2/m.test(p))!;
+  const line = tfAsk.split("\n").find((l) => l.startsWith("VRAI/FAUX"))!;
+  assert.ok(line, "consigne vrai/faux absente");
+  assert.doesNotMatch(line, /short/);
+});
+
+test("revue : retirer une sous-question décalerait un renvoi « (c) » → la question est refaite, pas amputée", async () => {
+  const id = await compositeCourse(3);
+  const titled = (title: string, parts: Part[]) => ({ ...block(title, parts), title });
+  script = {
+    "Ethical theories": [titled("Ethical theories of platforms", [scq("A"), short("A"), code("[1, 2]")])],
+    // (b) reprend la question 1 ; (d) renvoie à (c), qui deviendrait (b) après le retrait.
+    "Keyword filtering": [
+      titled("Keyword filtering of posts", [scq("B"), { ...short("B2"), prompt: "Which ethical theories justify the platform's choice?" }, short("B"), { ...short("B3"), prompt: "Using your answer to (c), estimate the false positive rate." }]),
+      titled("Keyword filtering of posts", [scq("B4"), short("B4"), code("[1, 2]")]),
+    ],
+    "Feedback loops": [titled("Feedback loops in feeds", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  const filtering = (await runWithCourse(id, () => getBlockExam(r.id, true)))!.blocks.find((b) => /Keyword/.test(b.title))!;
+  assert.ok(!filtering.parts.some((p) => /answer to \(c\)|ethical theories/i.test(p.prompt)), filtering.parts.map((p) => p.prompt).join(" | "));
+  assert.ok(steps.some((s) => /refaite : elle reprenait la question/.test(s)), steps.join("\n"));
+});

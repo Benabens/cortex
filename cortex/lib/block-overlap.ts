@@ -24,32 +24,52 @@ const STOP = new Set([
   "una", "gli", "della", "per", "due", "tre",
 ]);
 
-/** Racines grossières : minuscules sans accents, pluriel en « s » retiré, cinq premières lettres. */
+/** Les mots : minuscules sans accents, pluriel en « s » retiré. */
 function stems(text: string): Set<string> {
   const out = new Set<string>();
   for (const raw of text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().split(/[^\p{L}]+/u)) {
     if (raw.length < 3 || STOP.has(raw)) continue;
-    const w = raw.length > 3 && raw.endsWith("s") ? raw.slice(0, -1) : raw;
-    out.add(w.slice(0, 5));
+    out.add(raw.length > 3 && raw.endsWith("s") ? raw.slice(0, -1) : raw);
   }
   return out;
 }
 
-const partText = (p: OverlapBlock["parts"][number]) => [p.prompt, ...p.options].join(" ");
+/**
+ * Même terme : égaux, ou le plus court (cinq lettres au moins) commence le plus long — « blend »
+ * et « blending », « assemblage » et « assemblages ». Pas une troncature fixe : à cinq lettres
+ * « pressurage » et « pression » se confondaient, à six « blend » et « blending » se perdaient.
+ */
+function same(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+  return s.length >= 5 && l.startsWith(s);
+}
+const within = (words: Set<string>, t: string) => words.has(t) || [...words].some((w) => same(w, t));
+
+/**
+ * Le texte d'une sous-question, SANS ses options : les distracteurs sont par consigne de vraies
+ * notions du cours, souvent le sujet d'une autre question, sans que la sous-question le traite.
+ */
+const partText = (p: OverlapBlock["parts"][number]) => p.prompt;
+/**
+ * Un sujet d'un seul terme propre suffit (« Blending two wines » → « blending », le cas de prod) :
+ * un mot cité en passant peut donc retirer une sous-question. Choix assumé : un doublon livré
+ * coûte plus qu'une sous-question retirée (gratuit) ou une question refaite.
+ */
 const atLeast = (n: number) => Math.max(1, Math.ceil(0.6 * n));
 
 /** Les recouvrements, triés par question puis sous-question. Une question recouverte en entier n'a pas de sous-question signalée. */
 export function findOverlaps(blocks: OverlapBlock[]): Overlap[] {
   const all = blocks.map((b) => new Set([...stems(b.title), ...stems(b.scenario), ...b.parts.flatMap((p) => [...stems(partText(p))])]));
   // Commun à presque tout l'examen : le vocabulaire du cours, pas un sujet.
-  const generic = (t: string) => all.filter((s) => s.has(t)).length >= Math.max(3, Math.ceil(0.75 * blocks.length));
+  const generic = (t: string) => all.filter((s) => within(s, t)).length >= Math.max(3, Math.ceil(0.75 * blocks.length));
   const subject = blocks.map((b) => new Set([...stems(b.title)].filter((t) => !generic(t))));
   const found: Overlap[] = [];
   const whole = new Set<number>();
   for (let x = 0; x < blocks.length; x++) {
     for (let y = 0; y < x; y++) {
       if (whole.has(y) || !subject[x].size || !subject[y].size) continue;
-      const shared = [...subject[x]].filter((t) => subject[y].has(t));
+      const shared = [...subject[x]].filter((t) => within(subject[y], t));
       // Les deux sujets, pas seulement le plus court : « Recommendation » ne recouvre pas « Recommendation fairness ».
       if (shared.length >= atLeast(Math.max(subject[x].size, subject[y].size))) {
         found.push({ block: x, part: -1, other: y, terms: shared });
@@ -64,8 +84,8 @@ export function findOverlaps(blocks: OverlapBlock[]): Overlap[] {
       const words = stems(partText(p));
       for (let y = 0; y < blocks.length; y++) {
         if (y === x || whole.has(y)) continue;
-        const own = [...subject[y]].filter((t) => !subject[x].has(t));
-        const hit = own.filter((t) => words.has(t));
+        const own = [...subject[y]].filter((t) => !within(subject[x], t));
+        const hit = own.filter((t) => within(words, t));
         if (own.length && hit.length >= atLeast(own.length)) {
           found.push({ block: x, part: k, other: y, terms: hit });
           break;
