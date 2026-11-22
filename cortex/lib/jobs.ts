@@ -594,11 +594,16 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   const pool = poolOfJobType(jobType);
   const admission = await admitJob(currentUser(), c, jobId, pool);
   if (!admission.admitted) {
-    const what = pool === "ingest" ? "ton import démarre" : "ta génération démarre";
-    const stepInfo: JobStepInfo = { key: "waiting", position: admission.position, ingest: pool === "ingest" };
+    const what = pool === "ingest" ? "ton import démarre" : pool === "assist" ? "ta demande démarre" : "ta génération démarre";
+    const stepInfo: JobStepInfo = { key: "waiting", position: admission.position, ingest: pool === "ingest", ...(pool === "assist" ? { assist: true } : {}), ...(admission.own ? { own: true } : {}) };
+    // Une place par compte dans les files des imports et des aides : attendre son PROPRE job n'est pas
+    // « le serveur à pleine charge » (vu en prod le 22/11 : une correction derrière un drill du compte).
+    const fr = admission.own
+      ? (pool === "ingest" ? "En file : ton autre import est en cours, celui-ci démarre juste après." : "En file : ton autre aide (exercice ou correction) s'écrit, celle-ci démarre juste après, en général d'ici 1 à 2 minutes.")
+      : `En file d'attente (position ${admission.position}) : le serveur est à pleine charge, ${what} dès qu'une place se libère.`;
     await q.run(
       `UPDATE jobs SET worker_id = '${WAITING}', current_step = ?, step_json = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id IN ('', '${DEFERRED}', '${WAITING}'))`,
-      `En file d'attente (position ${admission.position}) : le serveur est à pleine charge, ${what} dès qu'une place se libère.`,
+      fr,
       JSON.stringify(stepInfo), nowStr(), jobId,
     );
     return;

@@ -33,7 +33,8 @@ import { log } from "@/lib/metrics";
 
 export type QueuePool = "gen" | "ingest" | "assist";
 export type QueueEntry = { user: string; course: string; jobId: number };
-export type Admission = { admitted: true } | { admitted: false; position: number };
+/** `own` : le job attend la fin d'un autre job du MÊME compte (une place par compte), pas la charge du serveur. */
+export type Admission = { admitted: true } | { admitted: false; position: number; own?: true };
 
 /** Workers de génération simultanés pour toute l'instance (null = sans plafond). */
 export function maxGlobalJobs(): number | null {
@@ -127,7 +128,9 @@ export async function admitJob(user: string, course: string, jobId: number, pool
       return { admitted: true };
     }
     await tx.run(`UPDATE job_queue SET state = 'waiting', heartbeat_at = NULL WHERE ${mine}`, user, course, jobId);
-    return { admitted: false, position: at + 1 };
+    const cap1 = perUserCapOf(pool);
+    const own = cap1 !== null && free > 0 && others.filter((r) => r.user_id === user).length >= cap1;
+    return own ? { admitted: false, position: at + 1, own: true } : { admitted: false, position: at + 1 };
   });
 }
 
