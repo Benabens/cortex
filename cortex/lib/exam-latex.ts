@@ -12,6 +12,7 @@ import { examLayout, examPdf, type ExamLayout } from "@/lib/exam-layout";
 import { epflLongDate } from "@/lib/exam-layout-epfl";
 import { courseTemplate, courseWords, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
+import { markdownListsTex, wrapBareFormulas, wrapBareFormulasTex } from "@/lib/tex-rich";
 import { markRightToLeft, rightToLeftScripts, unmarkRightToLeft } from "@/lib/tex-bidi";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
@@ -102,12 +103,12 @@ function indicatorTex(t: string): string {
 }
 
 /**
- * LaTeX du modèle pour un cours HORS CS-202, avant rendu. CS-202 garde son texte tel quel
+ * LaTeX du modèle pour un cours HORS CS-202, avant rendu (puces Markdown en vraies listes compris). CS-202 garde son texte tel quel
  * (empreinte canonique byte-identique, invariant n° 1).
  */
 function courseTex(t: string, question: number): string {
   if (currentCourse() === DEFAULT_COURSE) return t;
-  return indicatorTex(renumberSubquestions(dropSectionCallouts(t), question));
+  return markdownListsTex(indicatorTex(renumberSubquestions(dropSectionCallouts(t), question)));
 }
 
 /** Construit le source .tex complet à partir d'un ExamSpec (corrigé en annexe optionnel). */
@@ -347,6 +348,21 @@ const CANCEL = /\\(?:x|b)?cancel(?:to)?\{/;
  * Le document avec le paquet cancel chargé, s'il emploie \cancel, \xcancel, \bcancel ou \cancelto sans
  * lui ; null sinon. Banc exam-cout du 17/11/2026 (cs-202-ecrit) : \xcancel{non utilisée} dans un tableau.
  */
+/**
+ * « Missing $ inserted » : une formule écrite hors des maths (« x_{t+1} converge », « \frac{a}{b} »
+ * dans une phrase). Ses formules sans délimiteurs, reconnues comme dans le texte des QCM
+ * (lib/tex-rich), passent entre $…$ sur la ligne fautive ; sinon toute la question ouverte
+ * partait en texte simple, formules effacées (signalé le 22/11/2026).
+ */
+export function repairBareFormulas(tex: string, line: number, log: string): string | null {
+  if (!/Missing \$ inserted/.test(log)) return null;
+  const lines = tex.split("\n");
+  const fixed = lines[line - 1] === undefined ? null : wrapBareFormulas(lines[line - 1]);
+  if (fixed === null) return null;
+  lines[line - 1] = fixed;
+  return lines.join("\n");
+}
+
 export function repairCancelPackage(tex: string): string | null {
   if (!CANCEL.test(tex) || /\\usepackage(\[[^\]]*\])?\{[^}]*\bcancel\b[^}]*\}/.test(tex) || !BEGIN_DOCUMENT.test(tex)) return null;
   return tex.replace(BEGIN_DOCUMENT, "\\usepackage{cancel}\n\\begin{document}");
@@ -412,16 +428,18 @@ export function failingLine(text: string): number | null {
 export async function compileExamPdf(base: string): Promise<string> {
   // Une figure générée qui ne compile pas est retirée (encadré), des macros de babel-french sont
   // remplacées, les « _ » et « % » nus de \texttt échappés, l'écriture inclusive en \cdot hors maths
-  // remise en texte, les « \n » littéraux remis en retours à la ligne, le paquet cancel chargé, puis on
+  // remise en texte, les « \n » littéraux remis en retours à la ligne, une formule hors maths mise
+  // entre dollars, le paquet cancel chargé, puis on
   // recompile (6 fois au plus : un même examen cumule plusieurs de ces défauts).
   for (let attempt = 0; ; attempt++) {
     try {
       return await compileOnce(base);
     } catch (e) {
       const texAbs = path.join(examsDir(), `${base}.tex`);
-      const line = failingLine(`${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`);
+      const log = `${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`;
+      const line = failingLine(log);
       const src = attempt < 6 && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
-      const atLine = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) ?? repairTextttUnderscores(src, line) ?? repairInclusiveCdot(src, line) ?? repairLiteralNewlines(src, line) : null;
+      const atLine = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) ?? repairTextttUnderscores(src, line) ?? repairInclusiveCdot(src, line) ?? repairLiteralNewlines(src, line) ?? repairBareFormulas(src, line, log) : null;
       // « % » nu dans \texttt (l'erreur tombe en fin de fichier) et paquet cancel manquant (l'erreur
       // est signalée dans la macro qui l'emploie) : la ligne fautive ne les désigne pas.
       const fixed = atLine ?? (src ? repairTextttPercents(src) ?? repairCancelPackage(src) : null);
@@ -635,6 +653,8 @@ function renderTex(tex: string, level: number): string {
   t = t.replace(/\\examinode\b/g, () => keep(`<div class="fig">⬚ Figure : inode v6 (addr[0..7], single/double-indirect → index → data)</div>`));
   t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
   t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) : réponds sur papier</div>`));
+  // formules hors maths et puces Markdown, comme le PDF les compose (lib/tex-rich)
+  t = markdownListsTex(wrapBareFormulasTex(t));
   t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
   t = t.replace(/\\([{}])/g, (_, b: string) => keep(b)); // accolades d'ensemble \{1, 2\} : gardées à l'écran
   // Maths hors ligne ramenées à $…$ : $$…$$, \[…\], \(…\) et equation/align (sans les & d'alignement).
