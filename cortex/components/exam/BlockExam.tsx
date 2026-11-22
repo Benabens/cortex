@@ -15,6 +15,7 @@ import type {
 import { useTranslations } from "use-intl/react";
 import { useFmt } from "@/lib/i18n/use-fmt";
 import { useCourse } from "@/lib/ux/api";
+import { sectionLabel } from "@/lib/section-label";
 
 type Graded = {
   score: number;
@@ -329,6 +330,22 @@ export function BlockExam({
       qs={qs}
 
     >
+      {exam.requested > exam.blocks.length && (
+        <div
+          role="note"
+          className="card card-pad mb-4 text-[13.5px]"
+          style={{ color: "var(--warn-ink)" }}
+        >
+          {t("incomplete", {
+            count: exam.blocks.length,
+            requested: exam.requested,
+            points: exam.blocks.reduce((s, b) => s + b.points, 0),
+            missing: exam.missing.length,
+            sections: exam.missing.join(", "),
+          })}
+        </div>
+      )}
+
       {err && (
         <div
           role="alert"
@@ -387,7 +404,7 @@ export function BlockExam({
             <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>
                 {t("question", { number: i + 1 })}
-                {b.section ? <> · <span lang={language}>{b.section}</span></> : ""}
+                {sectionLabel(b.section) ? <> · <span lang={language}>{sectionLabel(b.section)}</span></> : ""}
               </span>
               <span
                 className="text-[12.5px] font-data"
@@ -396,13 +413,15 @@ export function BlockExam({
                 {t("points", { points: b.points })}
               </span>
             </div>
+            {sectionLabel(b.title) && (
             <h2
               className="text-[16px] font-semibold mb-1"
               lang={language}
               style={{ color: "var(--ink)" }}
             >
-              {b.title}
+              {sectionLabel(b.title)}
             </h2>
+            )}
             <Rich text={b.scenario} language={language} />
             {b.parts.map(renderPart)}
           </section>

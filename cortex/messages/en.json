@@ -1526,7 +1526,8 @@
     "correcting": "Marking…",
     "correct": "Mark my exam",
     "answered": "{answered}/{total} answered (excluding short answers)",
-    "back": "← back to exams"
+    "back": "← back to exams",
+    "incomplete": "Incomplete exam: {count} of {requested} questions, {points, number} points in total. {missing, plural, =0 {One question} one {“{sections}”} other {“{sections}”}} did not pass verification after several attempts and {missing, plural, =0 {was} one {was} other {were}} left out rather than shipped wrong."
   },
   "examFrame": {
     "title": "Mock exam #{id}",

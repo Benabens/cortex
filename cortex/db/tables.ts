@@ -114,6 +114,9 @@ export const TABLES: TableSpec[] = [
       { name: "html_path", type: "text" },
       { name: "status", type: "text", nn: true, def: "'draft'" },
       { name: "verify_summary", type: "text" }, // ALTER historique (lib/exam.ts, lib/qcm.ts)
+      // Questions composées (lib/blocks) : le nombre demandé et les sections tombées, dits sur l'examen.
+      { name: "requested_count", type: "int" },
+      { name: "missing_json", type: "text" },
     ],
   },
   {
