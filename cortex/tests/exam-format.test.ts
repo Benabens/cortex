@@ -395,3 +395,33 @@ test("sans annale ni langue déclarée, la langue des supports l'emporte sur le 
   const f = await resolve(id);
   assert.equal(f.language, "es");
 });
+
+// Cours et supports FICTIFS (aucun contenu de cours réel) : coréen, hébreu, arabe — leur propre
+// écriture suffit à les distinguer, sans mot-outil latin (lib/exam-format.ts SCRIPT_LANGUAGES).
+const KOREAN = "이 가상의 강의는 정렬 알고리즘의 기초를 다룹니다. 학생들은 버블 정렬과 병합 정렬의 차이를 이해하고, 각 알고리즘의 시간 복잡도를 분석하는 방법을 배웁니다. 간단한 예제를 통해 알고리즘이 어떻게 동작하는지 살펴봅니다.";
+const HEBREW = "הקורס הדמיוני הזה עוסק ביסודות של תורת הגרפים. הסטודנטים לומדים להבדיל בין גרף מכוון לגרף לא מכוון, ובודקים כיצד למצוא את המסלול הקצר ביותר בין שני צמתים. בכל שבוע נפתרת בעיה חדשה ונבנה אלגוריתם פשוט.";
+const ARABIC = "هذا المقرر الخيالي يتناول أساسيات الشبكات الحاسوبية. يتعرف الطلاب على الفرق بين البروتوكولات المختلفة، ويتعلمون كيفية تتبع مسار البيانات بين جهازين. في كل أسبوع يُحل تمرين جديد ويُبنى نموذج مبسط.";
+
+test("langue : coréen, hébreu et arabe reconnus par leur écriture", async () => {
+  const { detectLanguage } = await import("../lib/exam-format");
+  assert.equal(detectLanguage(KOREAN), "ko");
+  assert.equal(detectLanguage(HEBREW), "he");
+  assert.equal(detectLanguage(ARABIC), "ar");
+});
+
+test("sans annale ni langue déclarée, des supports en coréen/hébreu/arabe sont détectés comme tels", async () => {
+  for (const [text, lang] of [[KOREAN, "ko"], [HEBREW, "he"], [ARABIC, "ar"]] as const) {
+    const id = await newCourse();
+    await addSource(id, "course_pdf", "Chapitre 1", text.repeat(3));
+    const f = await resolve(id);
+    assert.equal(f.language, lang);
+  }
+});
+
+test("un cours peut déclarer sa langue en coréen, hébreu ou arabe (course-create)", async () => {
+  const { buildCourseRow } = await import("../lib/course-create");
+  for (const lang of ["ko", "he", "ar"] as const) {
+    const row = buildCourseRow({ name: `Cours ${lang} ${++seq}`, language: lang }, "owner");
+    assert.equal(row.language, lang);
+  }
+});

@@ -19,6 +19,9 @@ const LANGUAGE_NAMES: Record<string, [upper: string, lower: string]> = {
   es: ["ESPAGNOL", "espagnol"],
   pt: ["PORTUGAIS", "portugais"],
   nl: ["NÉERLANDAIS", "néerlandais"],
+  ko: ["CORÉEN", "coréen"],
+  he: ["HÉBREU", "hébreu"],
+  ar: ["ARABE", "arabe"],
 };
 
 export function languageName(code: string): [upper: string, lower: string] {
