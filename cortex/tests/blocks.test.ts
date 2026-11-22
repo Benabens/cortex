@@ -609,3 +609,34 @@ test("C × total du format : examen complet dont la somme s'écarte du format �
   const g = (await runWithCourse(id, () => gradeBlocks(r.id, {})))!;
   assert.equal(g.total + g.pending, 12, "la correction compte sur le même total (corrigé automatiquement + en attente)");
 });
+
+test("C × extraits (banc rs-composite 22/11, Q4/Q5/Q7 « hors cours ») : chaque notion de la section est cherchée dans le cours, même loin dans un support déjà cité", async () => {
+  const id = await compositeCourse(1);
+  // Un support long : l'en-tête (notebook, code pandas) reprend le nom de la section, la théorie
+  // demandée par sa description n'arrive qu'après 900 caractères.
+  const notebook = Array.from({ length: 14 }, (_, i) => `Cell ${i}: df.sort_values("likes").head(${i + 2}) prints the ${i + 2} least liked memes of the Memeverse feed.`).join(" ");
+  const theory = "Malinformation is genuine content shared out of context to cause harm, unlike disinformation (false and deliberate).";
+  const title = "Safety 2 - content recommendation";
+  const text = `${title}. Notebook Memeverse recommendation: ${notebook} Theory. ${theory}`;
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  await runWithCourse(id, async () => {
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", title, `note/${title}`, null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", title, text);
+    await indexItemForSearch(iid, sid, title, text);
+  });
+  const plan = {
+    blockCount: 1, partsMin: 3, partsMax: 4, totalPoints: null,
+    sections: [{ name: "Q4 — Safety 2: content recommendation", description: "Pandas code reading (sort_values, head), malinformation versus disinformation" }],
+  };
+  script = { "Safety 2": [block("Q4", [scq("Q4"), short("Q4"), code("[1, 2]")])] };
+  const { generateBlockExam } = await import("../lib/blocks");
+  prompts.length = 0;
+  judged.length = 0;
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.equal(r.count, 1);
+  const asked = prompts.find((p) => /^THÈME : Q4/m.test(p))!;
+  assert.match(asked, /Malinformation is genuine content/, "le générateur voit la définition demandée par la section");
+  assert.ok(judged.some((p) => /Malinformation is genuine content/.test(p)), "le juge voit la même définition (sinon : « hors cours »)");
+});

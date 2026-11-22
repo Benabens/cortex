@@ -2,7 +2,7 @@ import { currentCourse } from "@/db/client";
 import { nowStr, q } from "@/db/q";
 import { examSummaryLabel } from "@/lib/exam-summary";
 import { getCourse } from "@/lib/courses";
-import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, evidencePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
 import { BLOCK_PART_KINDS, examLanguageFor, type BlockFormat, type BlockPartKind, type PartShape } from "@/lib/exam-format";
@@ -465,8 +465,25 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
 /** Phase des blocs dans l'avancement : une unité par version d'un bloc (lib/progress). */
 const BLOCKS_PHASE = "Questions composées";
 
+/**
+ * Les extraits du cours d'un emplacement : générateur et juge les lisent, le juge rejette « hors
+ * cours » toute notion qu'ils ne définissent pas. Banc rs-composite du 22/11 (Q4, Q5, Q7 de CS-290
+ * rejetées à chaque version) : une section d'annale énumère 4 ou 5 notions (« lecture de code
+ * pandas, typologie mis/dis/mal-information, biais cognitifs… »), et une seule recherche par le nom
+ * de la section ramenait l'en-tête de chaque support (la fenêtre se calait sur le premier mot
+ * trouvé, le nom du chapitre), un support déjà cité n'en donnant plus d'autre : la théorie, plus
+ * bas dans les mêmes supports, n'était jamais montrée. Une recherche par notion énumérée, puis
+ * par notion du cours à mobiliser, chacune sur sa fenêtre la plus dense, plusieurs fenêtres
+ * disjointes par support. Le nom de la section n'est plus cherché quand elle a d'autres termes.
+ */
+async function slotPassages(slot: BlockSlot): Promise<{ src: string; text: string }[]> {
+  const terms = slot.section && slot.query.length > 1 ? slot.query.slice(1) : slot.query;
+  const subjects = terms.flatMap((x) => x.split(/[,;](?![^(]*\))\s*/)).map((x) => x.trim()).filter((x) => x.length >= 3);
+  return evidencePassages([...new Set([...subjects, ...slot.notions])], { perQuery: 2, cap: 900, budget: 9_000 }).catch(() => []);
+}
+
 async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: BlockCtx, step: StepCb, work: PhaseProgress, firstGuidance: string | null = null): Promise<{ block: ExamBlock | null; why: string }> {
-  const passages = await coursePassages(slot.query, 3, 900).catch(() => []);
+  const passages = await slotPassages(slot);
   let guidance: string | null = firstGuidance;
   let why = "";
   // Une version finie compte une unité ; en décider une de plus en AJOUTE une (le temps restant remonte alors).

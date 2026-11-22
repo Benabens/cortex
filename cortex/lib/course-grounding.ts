@@ -266,7 +266,8 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
   // ce qui pouvait faire passer le meilleur passage d'un support après deux exercices voisins.
   const { rankedHits } = await import("@/lib/search");
   const out: { src: string; text: string }[] = [];
-  const windows = new Map<number, string[]>();
+  // Par support, les plages déjà montrées (dans son texte aplati, celui de densestWindow).
+  const windows = new Map<number, [number, number][]>();
   const excluded = await excludedSourceIds();
   let used = 0;
   for (const query of queries.map((x) => x.trim()).filter(Boolean)) {
@@ -282,9 +283,14 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
       if (!matter) continue;
       const text = densestWindow(matter, query, cap);
       const seen = windows.get(h.itemId) ?? [];
-      // Même fenêtre (ou presque) déjà montrée pour une autre requête : rien de neuf.
-      if (seen.some((w) => w.includes(text.slice(0, 200)) || text.includes(w.slice(0, 200)))) { k++; continue; }
-      windows.set(h.itemId, [...seen, text]);
+      // Fenêtre déjà montrée pour plus de moitié (une autre requête) : rien de neuf, et elle ne prend
+      // pas la place d'un résultat suivant. Une fenêtre qui commence dans une autre mais va plus loin
+      // est gardée : la suite d'un support (sa théorie, après l'en-tête et le notebook) était jetée
+      // comme doublon, et ses deux doublons privaient une notion de tout extrait (banc rs-composite, 22/11).
+      const from = readColumns(matter).replace(/\s+/g, " ").trim().indexOf(text);
+      const span: [number, number] = [from, from + text.length];
+      if (from < 0 || seen.some(([a, b]) => Math.min(b, span[1]) - Math.max(a, span[0]) > text.length / 2)) continue;
+      windows.set(h.itemId, [...seen, span]);
       out.push({ src: h.sourceTitle, text });
       used += text.length;
       k++;
