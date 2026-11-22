@@ -3,7 +3,7 @@ import { q } from "@/db/q";
 import { pickEnonces } from "@/lib/exam-names";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
-import { sourceHref } from "@/lib/deeplink";
+import { liveSourceHref, sourceHref } from "@/lib/deeplink";
 import { search } from "@/lib/search";
 import { MOLD_KINDS, moldTaxonomyBlock, normalizeMold, normalizeFigureKind } from "@/lib/molds";
 import { cachedPdfPages } from "@/lib/page-cache";
@@ -240,5 +240,6 @@ export async function exercisesForTopic(topicId: number): Promise<ExamExercise[]
      FROM exam_exercises WHERE topic_id = ? ORDER BY (exam_year IS NULL), exam_year, exam_page`,
     topicId,
   );
-  return rows.map((r) => ({ ...r }));
+  const course = currentCourse();
+  return rows.map((r) => ({ ...r, examHref: liveSourceHref(course, r.examHref), courseHref: liveSourceHref(course, r.courseHref) }));
 }

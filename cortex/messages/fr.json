@@ -1001,7 +1001,9 @@
     "classifiedExam": "« {title} » est rangé dans les annales : mise à jour du corpus en cours.",
     "classifiedSupport": "« {title} » est rangé dans les supports de cours : mise à jour du corpus en cours.",
     "classifyDone": "Corpus à jour.",
-    "classifyFailed": "Classement impossible : {error}"
+    "classifyFailed": "Classement impossible : {error}",
+    "textOnly": "texte seul",
+    "textOnlyTitle": "Le fichier d’origine n’est pas conservé : le texte de ce document reste dans la recherche, les examens et l’entraînement. Importe-le de nouveau pour pouvoir l’ouvrir."
   },
   "originals": {
     "localNote": "Ton fichier reste sur ton ordinateur : Cortex lit son texte (et les pages d’une annale, le temps de préparer le cours), puis le retire de ses serveurs, au plus tard sous {hours} h. Seul l’index est gardé, pour la recherche et tes examens blancs.",
@@ -1649,7 +1651,10 @@
   "sourceViewer": {
     "found": "⟵ Cortex · trouvé ici",
     "clear": "enlever surlignage",
-    "notFound": "Fichier introuvable"
+    "notFound": "Fichier introuvable",
+    "missingTitle": "Original indisponible",
+    "missingBody": "Cortex a lu et indexé ce document, mais son fichier d’origine n’est pas conservé : son texte reste dans la recherche, les examens et l’entraînement. Pour l’ouvrir ici, importe-le de nouveau depuis Sources.",
+    "back": "Retour aux sources"
   },
   "examOutput": {
     "site": "Sur le site",

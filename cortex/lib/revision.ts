@@ -2,7 +2,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { coursePaths } from "@/lib/courses";
-import { sourceHref } from "@/lib/deeplink";
+import { liveSourceHref, sourceHref } from "@/lib/deeplink";
 import { renderExamPages } from "@/lib/exam-index";
 import { generateQcmBatch, shownExplanation, verifyQcmBatch } from "@/lib/qcm";
 import path from "node:path";
@@ -195,7 +195,7 @@ export async function bankQuestions(kind?: Kind): Promise<BankQuestion[]> {
   return (await q.all<any>(
     `SELECT id, kind, topic, subtopic, statement, official_answer AS "officialAnswer", options, source_exam AS "sourceExam", exam_year AS "examYear", exam_page AS "examPage", points, lecture_rank AS "lectureRank", exam_href AS "examHref"
      FROM bank_questions ${where} ORDER BY (lecture_rank IS NULL), lecture_rank, topic, exam_year, exam_page`
-  ) as any[]).map((r) => ({ ...r }));
+  ) as any[]).map((r) => ({ ...r, examHref: liveSourceHref(currentCourse(), r.examHref) }));
 }
 
 // ─────────────────────── Parcours généré (couverture 100 % à la bonne proportion) ───────────────────────

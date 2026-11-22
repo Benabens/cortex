@@ -6,6 +6,8 @@ import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weak
 import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter } from "@/lib/course-plan";
 import { detectExamDna } from "@/lib/exam-dna";
 import { courseOrderKey } from "@/lib/course-order";
+import { liveSourceHref } from "@/lib/deeplink";
+import { currentCourse } from "@/db/client";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
 import { courseLanguageName } from "@/lib/exam-format";
@@ -625,10 +627,11 @@ async function occurrencesByTopic(): Promise<Map<number, Occurrence[]>> {
         ORDER BY (exam_year IS NULL), exam_year DESC, exam_page`
     );
   } catch { return out; }
+  const course = currentCourse();
   for (const r of rows) {
     const { topicId, ...occ } = r;
     if (!out.has(topicId)) out.set(topicId, []);
-    out.get(topicId)!.push(occ);
+    out.get(topicId)!.push({ ...occ, examHref: liveSourceHref(course, occ.examHref), courseHref: liveSourceHref(course, occ.courseHref) });
   }
   return out;
 }
@@ -672,6 +675,8 @@ async function topicExamAggregates(): Promise<Map<number, TopicExamAgg>> {
     await ensureIndexSchema();
     rows = await q.all(`SELECT topic_id AS "topicId", exam_year AS "examYear", exam_page AS "examPage", points, exam_href AS "examHref", course_href AS "courseHref" FROM exam_exercises WHERE topic_id IS NOT NULL`);
   } catch { return out; }
+  const course = currentCourse();
+  rows = rows.map((r) => ({ ...r, examHref: liveSourceHref(course, r.examHref), courseHref: liveSourceHref(course, r.courseHref) }));
   const byTopic = new Map<number, typeof rows>();
   for (const r of rows) { if (!byTopic.has(r.topicId)) byTopic.set(r.topicId, []); byTopic.get(r.topicId)!.push(r); }
   for (const [tid, exos] of byTopic) {

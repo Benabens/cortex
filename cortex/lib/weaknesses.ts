@@ -34,9 +34,9 @@ export type Weakness = {
   related: RelatedItem[];
 };
 
-/** Lien clic→source UNIFIÉ (course-aware via lib/deeplink) : cs-202 → viewer/sites ; autres → /csrc. */
-function itemHref(anchor: string, sourcePath: string, itemId: number, q: string): string {
-  return sourceHref(currentCourse(), sourcePath, anchor, { itemId, q });
+/** Lien clic→source UNIFIÉ (course-aware via lib/deeplink). */
+function itemHref(anchor: string, sourcePath: string): string {
+  return sourceHref(currentCourse(), sourcePath, anchor);
 }
 
 /** Auto-link : retrouve les items du corpus les plus proches du texte de la faiblesse (matching lâche). */
@@ -92,7 +92,7 @@ async function resolveItems(ids: number[]): Promise<Map<number, ResolvedItem>> {
 }
 
 /** Items liés d'UNE faiblesse, dans l'ordre enregistré, depuis la résolution groupée. */
-function relatedFrom(idsJson: string | null, query: string, resolved: Map<number, ResolvedItem>): RelatedItem[] {
+function relatedFrom(idsJson: string | null, resolved: Map<number, ResolvedItem>): RelatedItem[] {
   const out: RelatedItem[] = [];
   for (const id of parseIds(idsJson)) {
     const r = resolved.get(id);
@@ -103,7 +103,7 @@ function relatedFrom(idsJson: string | null, query: string, resolved: Map<number
       sourceType: r.sourceType,
       sourceTitle: r.sourceTitle,
       lectureId: r.lectureId,
-      href: itemHref(r.anchor, r.sourcePath, r.itemId, query),
+      href: itemHref(r.anchor, r.sourcePath),
     });
   }
   return out;
@@ -153,7 +153,7 @@ function toWeakness(r: any, resolved: Map<number, ResolvedItem>): Weakness {
     timesSeen: r.times_seen,
     loggedAt: r.logged_at,
     lastReviewedAt: r.last_reviewed_at,
-    related: relatedFrom(r.related_item_ids, r.topic, resolved),
+    related: relatedFrom(r.related_item_ids, resolved),
   };
 }
 
