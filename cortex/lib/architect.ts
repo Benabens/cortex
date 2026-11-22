@@ -1,4 +1,4 @@
-import { completeJson } from "@/lib/llm";
+import { EXAM_OUTPUT_MAX_TOKENS, completeJson } from "@/lib/llm";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE } from "@/lib/course-grounding";
 import { profile } from "@/lib/course-profile";
 import type { Archetype } from "@/lib/archetypes";
@@ -281,9 +281,18 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
   ].filter((l) => l != null).join("\n");
   step("P2 : rédaction de l'énoncé multi-étapes (format du cours + piège)…", 38);
   // Avec figure, figure_spec est un objet libre : le fournisseur repasse en texte libre (lib/llm).
-  const q = await completeJson<ExamQuestion & { figure_spec?: FigureSpec }>({ prompt, model: "opus", timeoutMs: 480_000, json: { schema } });
+  const q = await completeJson<ExamQuestion & { figure_spec?: FigureSpec }>({ prompt, model: "opus", timeoutMs: 480_000, json: { schema }, ...WRITE_LIMITS }, { retryTruncated: false });
   return { ...q, category: a.category, points: pts };
 }
+
+/**
+ * Rédaction et révision d'un exercice complet (énoncé + corrigé résolu, réflexion comprise) : la
+ * même sortie que sa régénération (lib/exam regenerateExercise : 30 k tokens en moyenne au banc
+ * du 17/11, jamais sous 16 000). Sans budget, elles prenaient le défaut de 16 000 et sortaient
+ * coupées, redemandées trois fois au même budget. Coupée à 64 k, la demande ne se redemande pas
+ * à l'identique : la rédaction échoue (repli de l'appelant), la révision garde la version courante.
+ */
+const WRITE_LIMITS = { maxTokens: EXAM_OUTPUT_MAX_TOKENS } as const;
 
 function rubricBlockInline(archetypeId: string): string {
   const r = rubricFor(archetypeId);
@@ -349,7 +358,7 @@ async function reviseFromAudit(a: Archetype, q: ExamQuestion, audit: Audit, refI
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points} (version durcie/réparée). Le corrigé doit rester JUSTE. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  const r = await completeJson<ExamQuestion>({ prompt, model: "opus", timeoutMs: 480_000, json: { schema: ONE_EX_SCHEMA } });
+  const r = await completeJson<ExamQuestion>({ prompt, model: "opus", timeoutMs: 480_000, json: { schema: ONE_EX_SCHEMA }, ...WRITE_LIMITS }, { retryTruncated: false });
   return { ...r, category: a.category, points: q.points };
 }
 
