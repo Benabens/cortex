@@ -82,3 +82,13 @@ test("aucun dangerouslySetInnerHTML hors du composant SafeHtml", () => {
   for (const d of ["app", "components", "lib"]) walk(path.join(ROOT, d));
   assert.deepEqual(offenders, [], `HTML injecté sans sanitizer : ${offenders.join(", ")}`);
 });
+
+test("sanitizeHtml : un « < » de comparaison écrit par le modèle reste du texte, la suite de la phrase aussi", async () => {
+  const { sanitizeHtml } = await import("../lib/sanitize-html");
+  // Relâchement d'arête (Dijkstra) : le navigateur lisait « <d[u]+w… » comme une balise.
+  assert.equal(sanitizeHtml("<p>Si d[v]<d[u]+w alors relâcher</p><p>Étape 2</p>"), "<p>Si d[v]&lt;d[u]+w alors relâcher</p><p>Étape 2</p>");
+  assert.equal(sanitizeHtml("<p>for (i=0; i<n; i++) si a<b et b>c alors fin</p>"), "<p>for (i=0; i&lt;n; i++) si a&lt;b et b&gt;c alors fin</p>");
+  assert.equal(sanitizeHtml("<pre><code>while (lo<hi) {}</code></pre>"), '<pre tabindex="0"><code>while (lo&lt;hi) {}</code></pre>');
+  // Les vraies balises, elles, restent des balises.
+  assert.equal(sanitizeHtml("<ol><li>flow=1 < 2 : <strong>on augmente</strong></li></ol>"), "<ol><li>flow=1 &lt; 2 : <strong>on augmente</strong></li></ol>");
+});

@@ -25,31 +25,30 @@ export function renderData(summary: string, data: unknown): string {
   return `${summary}\n\n${DATA_NOTICE}\n<cortex_data>\n${safeJson(data)}\n</cortex_data>`;
 }
 
-/** Texte borné (un extrait de cours n'a pas à remplir la fenêtre du modèle). */
+/**
+ * Texte borné (un extrait de cours n'a pas à remplir la fenêtre du modèle) : coupé à la fin
+ * d'un mot quand il y en a une assez près, jamais au milieu d'une paire de substitution.
+ */
 export function clip(text: string | null | undefined, max: number): string {
   const t = (text ?? "").trim();
-  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
+  if (t.length <= max) return t;
+  let cut = Math.max(0, max - 1);
+  if (cut > 0 && /[\uD800-\uDBFF]/.test(t[cut - 1])) cut--;
+  if (/\S/.test(t[cut] ?? " ")) {
+    const head = t.slice(0, cut);
+    const space = head.search(/\s\S*$/);
+    if (space >= cut - Math.max(20, Math.floor(cut / 5)) && space > 0) cut = space;
+  }
+  return `${t.slice(0, cut).trimEnd()}…`;
 }
-
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " };
 
 /**
  * HTML simple du moteur (énoncés, corrigés : p, ul, li, code, pre, table…) →
- * texte lisible. Pas un assainisseur : la sortie n'est jamais réinjectée comme
- * HTML, elle part encadrée comme donnée.
+ * texte lisible (lib/llm-html : un « < » de comparaison reste du texte). Pas un
+ * assainisseur : la sortie n'est jamais réinjectée comme HTML, elle part
+ * encadrée comme donnée.
  */
-export function htmlToText(html: string | null | undefined): string {
-  return (html ?? "")
-    .replace(/<\s*br\s*\/?>/gi, "\n")
-    .replace(/<\s*li[^>]*>/gi, "\n- ")
-    .replace(/<\/\s*(p|div|pre|table|tr|ul|ol|h[1-6])\s*>/gi, "\n")
-    .replace(/<\/\s*(td|th)\s*>/gi, " | ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e: string) => ENTITIES[e])
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
+export { llmHtmlToText as htmlToText } from "../llm-html";
 
 /** Jours restants avant une date ISO (AAAA-MM-JJ), ou null. */
 export function daysUntil(isoDate: string | null | undefined, now = Date.now()): number | null {
