@@ -1,4 +1,5 @@
 import DOMPurify from "isomorphic-dompurify";
+import { escapeStrayLt } from "./llm-html";
 
 /**
  * ASSAINISSEMENT DU HTML DE PROVENANCE MODÈLE OU UTILISATEUR.
@@ -39,7 +40,8 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 export function sanitizeHtml(html: string): string {
   if (typeof html !== "string" || !html) return "";
-  return DOMPurify.sanitize(html, {
+  // « flow < 2 » ou « d[v]<d[u]+w » écrits tels quels par le modèle : du texte, pas une balise ouverte.
+  return DOMPurify.sanitize(escapeStrayLt(html), {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
     ALLOW_DATA_ATTR: false,
