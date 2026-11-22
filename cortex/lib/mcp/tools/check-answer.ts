@@ -36,8 +36,9 @@ export default defineTool({
   userSummary: "checkAnswer",
   input: z.object({
     course: courseArg,
-    statement: z.string().min(1).max(FIELD_LIMITS.statement).describe("The exact question / exercise statement."),
-    answer: z.string().min(1).max(FIELD_LIMITS.answer).describe("The student's answer, as written."),
+    // trim() AVANT min(1) : une réponse faite d'espaces était acceptée, corrigée sans réponse et débitée.
+    statement: z.string().trim().min(1).max(FIELD_LIMITS.statement).describe("The exact question / exercise statement."),
+    answer: z.string().trim().min(1).max(FIELD_LIMITS.answer).describe("The student's answer, as written."),
     confirmation_token: confirmationTokenArg,
   }),
   output,
