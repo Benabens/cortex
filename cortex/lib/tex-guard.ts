@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { PREAMBLE_SHAPES, shapePreamble } from "@/lib/exam-preamble";
 
 /**
  * GARDE DU SOURCE LaTeX AVANT COMPILATION.
@@ -145,11 +146,13 @@ let _trusted: string[] | null = null;
 /** Textes de confiance retirés avant analyse : le préambule et les macros de figures du dépôt. */
 function trustedBlocks(): string[] {
   if (_trusted) return _trusted;
-  _trusted = ["preamble.tex", "figures.tex", "generic.tex", "unicode-fonts.tex", "cjk-fonts.tex"]
-    .map((f) => path.join(LATEX_DIR, f))
-    .filter((p) => fs.existsSync(p))
-    .map((p) => fs.readFileSync(p, "utf8"))
-    .filter((t) => t.length > 0);
+  const read = (f: string) => (fs.existsSync(path.join(LATEX_DIR, f)) ? fs.readFileSync(path.join(LATEX_DIR, f), "utf8") : "");
+  // Le préambule sous chacune de ses formes (taille, colonnes de l'annale) : le gabarit maison ne
+  // passe jamais pour du contenu. Prod, 22/11/2026 : seule la forme 11 pt était retirée.
+  const preamble = read("preamble.tex");
+  const shapes = preamble ? PREAMBLE_SHAPES.map((s) => shapePreamble(preamble, s)) : [];
+  const files = ["figures.tex", "generic.tex", "unicode-fonts.tex", "cjk-fonts.tex"].map(read);
+  _trusted = Array.from(new Set([...shapes, ...files])).filter((t) => t.length > 0);
   return _trusted;
 }
 
