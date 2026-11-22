@@ -61,7 +61,7 @@ test("QCM et question ouverte : formules composées, puces en vraie liste, snake
   const { buildQcmArtifact } = await import("../lib/qcm-latex");
   const { examsDir } = await import("../lib/paths");
   const items = [{
-    topic: "Gradient", type: "scq" as const, stem: STEM, options: [String.raw`$\frac{a}{b}$`, "x_{t+1} = 0", String.raw`\(\sum_i x_i\)`, "aucune"],
+    topic: "Gradient", type: "scq" as const, stem: STEM, options: [String.raw`$\frac{a}{b}$`, "x_{t+1} = 0", String.raw`\(\sum_i x_i\)`, "aucune des deux :\n- option un\n- option deux"],
     correct: [0], misconceptions: ["", "", "", ""], explanation: "Car $x_{t+1} < x_t$ :\n- un\n- deux", verified: 1 as const,
   }];
   // LaTeX libre : un indice hors maths (« Missing $ inserted ») faisait passer toute l'ouverte en texte simple
@@ -72,7 +72,7 @@ test("QCM et question ouverte : formules composées, puces en vraie liste, snake
   for (const file of ["qcm-4411.pdf", "qcm-4411-corrige.pdf"]) {
     const lines = pdfLines(path.join(dir, file));
     assertComposed(lines, file);
-    for (const item of ["premier point", "second point", "étape un", "étape deux", "point ouvert A", "point ouvert B"]) {
+    for (const item of ["premier point", "second point", "étape un", "étape deux", "point ouvert A", "point ouvert B", "option un", "option deux"]) {
       assert.ok(lines.some((l) => new RegExp(`^(?:•|\\d\\.)\\s*${item}$`).test(l)), `${file} : « ${item} » n'est pas un élément de liste`);
     }
     assert.ok(lines.some((l) => l.includes("snake_case.py")), `${file} : snake_case.py modifié`);
@@ -88,7 +88,7 @@ test("question composée : scénario, sous-questions, options, réponse et barè
   const { buildBlocksArtifact } = await import("../lib/blocks-latex");
   const { examsDir } = await import("../lib/paths");
   const part = (kind: "scq" | "short") => ({
-    kind, prompt: "Calculez x_{t+1} :\n- cas 1\n- cas 2", code: "", options: kind === "scq" ? [String.raw`$x^2$`, String.raw`\(\sum_i x_i\)`, "x_{t+1}", String.raw`\frac{a}{b}`] : [],
+    kind, prompt: "Calculez x_{t+1} :\n- cas 1\n- cas 2", code: "", options: kind === "scq" ? [String.raw`$x^2$`, String.raw`\(\sum_i x_i\)`, "x_{t+1}", "deux cas :\n- choix un\n- choix deux"] : [],
     correct: kind === "scq" ? 0 : -1, answer: kind === "short" ? String.raw`On obtient \[x_{t+1} = 0\].` : "", criteria: kind === "short" ? [{ label: "donne $x_{t+1}$", points: 2 }] : [],
     points: 2, explanation: String.raw`Parce que \frac{a}{b} :` + "\n- un\n- deux",
   });
@@ -99,6 +99,6 @@ test("question composée : scénario, sous-questions, options, réponse et barè
   for (const file of ["blocks-4412.pdf", "blocks-4412-corrige.pdf"]) {
     const lines = pdfLines(path.join(dir, file));
     assertComposed(lines, file);
-    for (const item of ["hypothèse un", "hypothèse deux", "cas 1", "cas 2"]) assert.ok(lines.some((l) => new RegExp(`^•\\s*${item}$`).test(l)), `${file} : « ${item} » n'est pas une puce`);
+    for (const item of ["hypothèse un", "hypothèse deux", "cas 1", "cas 2", "choix un", "choix deux"]) assert.ok(lines.some((l) => new RegExp(`^•\\s*${item}$`).test(l)), `${file} : « ${item} » n'est pas une puce`);
   }
 });

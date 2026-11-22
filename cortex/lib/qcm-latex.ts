@@ -4,7 +4,7 @@ import { examDurationMin } from "@/lib/exam-format";
 import { examLayout, examPdf, type ExamLayout, type ExamPdf } from "@/lib/exam-layout";
 import { choicesTex, openHeadTex, qcmHeadTex } from "@/lib/exam-layout-tex";
 import { esc } from "@/lib/tex-escape";
-import { formulasOrText, markdownListsTex, texInline, texText } from "@/lib/tex-rich";
+import { formulasOrText, markdownListsTex, texText } from "@/lib/tex-rich";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
@@ -34,9 +34,9 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, 
     // poussée à droite de l'option par \hfill, elle débordait ou se coupait en fragments entre
     // deux lignes justifiées dès que l'option ou la note étaient longues).
     const note = withKey && !correct && q.misconceptions?.[k]?.trim()
-      ? String.raw`\nopagebreak{\raggedright\leftskip=1.7em\footnotesize\itshape\color{gray}${L.misconception}${texInline(q.misconceptions[k].trim())}\par}`
+      ? String.raw`\nopagebreak{\raggedright\leftskip=1.7em\footnotesize\itshape\color{gray}${L.misconception}${texText(q.misconceptions[k].trim())}\par}`
       : "";
-    return { text: texInline(o), correct, note };
+    return { text: texText(o), correct, note };
   });
   // figure rendue (PNG déjà dans examsDir, à côté du .tex compilé).
   const fig = q.figureFile

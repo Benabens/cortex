@@ -6,7 +6,7 @@ import { blockHeadTex } from "@/lib/exam-layout-tex";
 import { examsDir } from "@/lib/paths";
 import { examDocument } from "@/lib/qcm-latex";
 import { esc } from "@/lib/tex-escape";
-import { formulasOrText, texInline, texText } from "@/lib/tex-rich";
+import { formulasOrText, texText } from "@/lib/tex-rich";
 import { sectionLabel } from "@/lib/section-label";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
@@ -56,7 +56,7 @@ function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): 
   const head = String.raw`\par\medskip\needspace{4\baselineskip}\noindent\textbf{(${LETTER[i].toLowerCase()})}\quad{\footnotesize[${pts(p.points)}]}\quad ${texText(p.prompt)}\par\smallskip`;
   const body: string[] = [];
   if (p.kind === "scq") {
-    body.push(...p.options.map((o, k) => String.raw`\noindent\hspace*{1em}${withKey && k === p.correct ? TICK : BOX}~\textbf{${LETTER[k]}.}~${texInline(o)}\par\smallskip`));
+    body.push(...p.options.map((o, k) => String.raw`\noindent\hspace*{1em}${withKey && k === p.correct ? TICK : BOX}~\textbf{${LETTER[k]}.}~${texText(o)}\par\smallskip`));
   } else if (p.kind === "code_output") {
     body.push(codeTex(p.code));
     body.push(withKey ? String.raw`\noindent{\color{${L.color}}\textbf{${L.output}}}` + "\n" + codeTex(p.answer) : String.raw`\noindent ${L.output}\rulelines{3}`);
@@ -65,7 +65,7 @@ function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): 
       ? [
           String.raw`\noindent{\color{${L.color}}\textbf{${L.modelAnswer}}} ${texText(p.answer)}\par\smallskip`,
           String.raw`\noindent{\footnotesize\textbf{${L.grading}}}\par`,
-          ...p.criteria.map((c) => String.raw`\noindent\hspace*{1em}{\footnotesize --- ${texInline(c.label)} (${pts(c.points)})}\par`),
+          ...p.criteria.map((c) => String.raw`\noindent\hspace*{1em}{\footnotesize --- ${texText(c.label)} (${pts(c.points)})}\par`),
         ].join("\n")
       : String.raw`\rulelines{4}`);
   }
