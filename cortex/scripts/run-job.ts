@@ -234,6 +234,13 @@ async function main() {
     if (!r.ok) await fail(r.message, r.info, { refund: false });
     return finish(0);
   }
+  // Correction en job (check_answer du connecteur) : même règle que le drill (lib/check-job).
+  if (job.type === "check") {
+    await logJob(jobId, `Worker démarré (PID ${process.pid})`);
+    const r = await (await import("../lib/check-job")).executeCheckJob(jobId);
+    if (!r.ok) await fail(r.message, r.info, { refund: false });
+    return finish(0);
+  }
   if (FILELESS) await fail(`Job ${job.type} lancé sans les fichiers du cours.`);
 
   if (job.type === "ingest") {
@@ -441,7 +448,7 @@ async function main() {
  * Drill (CORTEX_JOB_TYPE, posé par startWorker) : il ne lit que la base du cours, jamais ses
  * fichiers. Sans ce raccourci, chaque drill rapatriait tout le cours depuis le seau.
  */
-const FILELESS = process.env.CORTEX_JOB_TYPE === "drill";
+const FILELESS = process.env.CORTEX_JOB_TYPE === "drill" || process.env.CORTEX_JOB_TYPE === "check";
 
 /**
  * Les fichiers du cours (annales, contenu, examens, captures) sont sur le disque
