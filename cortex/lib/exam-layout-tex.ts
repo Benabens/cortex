@@ -112,5 +112,5 @@ export function blockHeadTex(layout: ExamLayout, L: BlockLabels, n: number, titl
   // Points hors du \textbf, à droite : la place historique des questions composées.
   const right = place === "margin" ? String.raw` \hfill [${L.pts(points)}]` : "";
   const inline = place === "inline" ? ` (${L.pts(points)})` : "";
-  return String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{${num}${sep}${title}}${inline}${right}}\par\vspace{3pt}\hrule\vspace{8pt}`;
+  return String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{${num}${title ? `${sep}${title}` : ""}}${inline}${right}}\par\vspace{3pt}\hrule\vspace{8pt}`;
 }

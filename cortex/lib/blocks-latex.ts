@@ -6,6 +6,7 @@ import { blockHeadTex } from "@/lib/exam-layout-tex";
 import { examsDir } from "@/lib/paths";
 import { examDocument } from "@/lib/qcm-latex";
 import { esc } from "@/lib/tex-escape";
+import { sectionLabel } from "@/lib/section-label";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
 import path from "node:path";
@@ -72,7 +73,8 @@ function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): 
 
 function renderBlock(b: ExamBlock, n: number, withKey: boolean, L: BlockLabels, layout: ExamLayout): string {
   return [
-    blockHeadTex(layout, L, n, esc(b.title), b.points),
+    // « Question 4 » de l'annale, sous le numéro 3 de l'examen : le numéro de l'annale ne s'imprime pas.
+    blockHeadTex(layout, L, n, esc(sectionLabel(b.title) ?? ""), b.points),
     richTex(b.scenario),
     ...b.parts.map((p, i) => renderPart(p, i, withKey, L)),
   ].join("\n");

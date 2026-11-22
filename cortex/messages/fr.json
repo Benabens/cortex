@@ -1526,7 +1526,8 @@
     "correcting": "Correction…",
     "correct": "Corriger mon examen",
     "answered": "{answered}/{total} répondues (hors réponses courtes)",
-    "back": "← retour aux examens"
+    "back": "← retour aux examens",
+    "incomplete": "Examen incomplet : {count} {count, plural, one {question} other {questions}} sur {requested}, total {points, number} pts. {missing, plural, =0 {Une question n’a pas passé la vérification} one {« {sections} » n’a pas passé la vérification} other {« {sections} » n’ont pas passé la vérification}} après plusieurs essais : {missing, plural, =0 {retirée} one {retirée} other {retirées}} plutôt que {missing, plural, =0 {livrée fausse} one {livrée fausse} other {livrées fausses}}."
   },
   "examFrame": {
     "title": "Examen blanc #{id}",

@@ -15,6 +15,7 @@ import { examsDir } from "@/lib/paths";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
 import { runPython } from "@/lib/sandbox-exec";
 import { normalize, tokenize } from "@/lib/text";
+import { sectionLabel } from "@/lib/section-label";
 import path from "node:path";
 import { storage } from "@/lib/storage";
 
@@ -240,14 +241,31 @@ function nearestNotions(sectionText: string, topics: { label: string; method: st
     .map((x) => x.t.label);
 }
 
+/**
+ * Une section qui décrit une FORME (« vrai/faux justifiés », « Question 3 ») ne partage aucun mot
+ * avec les notions du cours : sans notion, ses extraits du cours sont pris au hasard du texte de
+ * la section, et elle n'a aucune réserve. Prod, 22/11/2026 : une telle section, rejetée trois fois,
+ * disparaissait de l'examen (4 questions sur 5). Elle reçoit les notions qu'aucune autre section
+ * ne prend, les plus pesées d'abord ; la première guide aussi la recherche d'extraits.
+ */
+function lendNotions(slots: BlockSlot[], topics: { label: string; weight?: number | null }[]): BlockSlot[] {
+  const taken = new Set(slots.flatMap((s) => s.notions));
+  const free = [...topics].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).map((t) => t.label).filter((l) => !taken.has(l));
+  return slots.map((s) => {
+    if (s.notions.length) return s;
+    const lent = free.splice(0, 2);
+    return lent.length ? { ...s, notions: lent, query: [...s.query, lent[0]] } : s;
+  });
+}
+
 /** Un bloc par section de l'annale modèle ; sans sections, la couverture des chapitres décide. Plus des réserves. */
 async function planSlots(plan: BlockPlan): Promise<{ slots: BlockSlot[]; spares: BlockSlot[] }> {
   const topics = await coverageTopics().catch(() => []);
   if (plan.sections.length) {
-    const slots = plan.sections.slice(0, plan.blockCount).map((s) => {
+    const slots = lendNotions(plan.sections.slice(0, plan.blockCount).map((s) => {
       const theme = s.description ? `${s.name} — ${s.description}` : s.name;
       return { theme, section: s.name, query: [s.name, s.description].filter(Boolean), notions: nearestNotions(theme, topics) };
-    });
+    }), topics);
     // Plus de questions demandées que de sections : les suivantes reprennent les sections dans
     // l'ordre, recentrées sur une autre de leurs notions (pas deux fois la même question, H).
     for (let i = slots.length; i < plan.blockCount; i++) {
@@ -339,7 +357,7 @@ async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockP
     { check: (v) => blockIssue(v, plan.partsMin, plan.partsMax, plan) },
   );
   const parts = (raw.parts ?? []).map(cleanPart).map(shuffleOptions);
-  return { title: text(raw.title) || slot.section || "Question", section: slot.section, scenario: String(raw.scenario ?? "").trim(), parts, points: parts.reduce((s, p) => s + p.points, 0), verified: null };
+  return { title: sectionLabel(text(raw.title)) ?? sectionLabel(slot.section) ?? "", section: slot.section, scenario: String(raw.scenario ?? "").trim(), parts, points: parts.reduce((s, p) => s + p.points, 0), verified: null };
 }
 
 /**
@@ -527,7 +545,8 @@ export async function generateBlockExam(
   if (blocks.length < n) step(`⚠ ${blocks.length}/${n} questions composées livrées : ${n - blocks.length} rejetée(s) après ${ATTEMPTS} versions.`, 0);
   step(phaseLine(BLOCKS_PHASE, Date.now() - tBlocks), 0);
 
-  const examId = await saveBlockExam(blocks);
+  const missing = failed.filter((f) => !built.has(f.i)).sort((a, b) => a.i - b.i).map((f) => slots[f.i].section ?? slots[f.i].theme.slice(0, 80));
+  const examId = await saveBlockExam(blocks, { requested: n, missing });
   await opts.onExamReady?.(examId);
   step("Rendu du PDF (énoncé + corrigé)…", 0);
   const tPdf = Date.now();
@@ -539,9 +558,16 @@ export async function generateBlockExam(
   step(phaseLine("PDF", Date.now() - tPdf), 0);
   step(phaseLine("Total", Date.now() - tStart), 0);
   const verified = blocks.filter((b) => b.verified === 1).length;
-  await q.run(`UPDATE exams SET status = 'ready', html_path = ?, verify_summary = ? WHERE id = ?`, art.file || null, `${verified}/${blocks.length} questions composées vérifiées à l'aveugle`, examId);
+  await q.run(`UPDATE exams SET status = 'ready', html_path = ?, verify_summary = ? WHERE id = ?`, art.file || null, blocksSummary(blocks.length, n, verified), examId);
   report(`Examen #${examId} prêt : ${blocks.length} questions composées ✓`, 100);
   return { id: examId, count: blocks.length, requested: n, ...(art.texError ? { texError: art.texError } : {}), ...(art.texWarning ? { texWarning: art.texWarning } : {}) };
+}
+
+/** « 4/4 questions composées vérifiées à l'aveugle », ou, quand une question manque, « 4 questions composées sur 5 demandées, … ». */
+export function blocksSummary(count: number, requested: number, verified: number): string {
+  const qs = (n: number) => `${n} question${n > 1 ? "s" : ""} composée${n > 1 ? "s" : ""}`;
+  if (count >= requested) return `${verified}/${count} questions composées vérifiées à l'aveugle`;
+  return `${qs(count)} sur ${requested} demandées, ${verified} vérifiée${verified > 1 ? "s" : ""} à l'aveugle`;
 }
 
 /** Le corrigé PDF d'un examen, s'il a compilé. */
@@ -552,14 +578,15 @@ export async function solutionsPdf(htmlPath: string | null): Promise<string | nu
 
 async function ensureBlockSchema(): Promise<void> {
   await q.ensureTable("exams");
-  await q.ensureColumns("exams", ["verify_summary"]);
+  await q.ensureColumns("exams", ["verify_summary", "requested_count", "missing_json"]);
   await q.ensureTable("exam_blocks");
   await q.ensureTable("block_parts");
 }
 
-export async function saveBlockExam(blocks: ExamBlock[]): Promise<number> {
+/** `requested` et `missing` (sections tombées) : le manque est dit sur l'examen, pas seulement à la fin du job. */
+export async function saveBlockExam(blocks: ExamBlock[], ask: { requested: number; missing: string[] } = { requested: blocks.length, missing: [] }): Promise<number> {
   await ensureBlockSchema();
-  const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('blocks','generating')`);
+  const examId = await q.insert(`INSERT INTO exams (format_template, status, requested_count, missing_json) VALUES ('blocks','generating',?,?)`, ask.requested, JSON.stringify(ask.missing));
   for (const [i, b] of blocks.entries()) {
     const blockId = await q.insert(`INSERT INTO exam_blocks (exam_id, idx, title, section, scenario, points, verified) VALUES (?,?,?,?,?,?,?)`, examId, i, b.title, b.section, b.scenario, b.points, b.verified);
     for (const [k, p] of b.parts.entries()) {
@@ -577,21 +604,33 @@ export async function saveBlockExam(blocks: ExamBlock[]): Promise<number> {
 export type PartView = { id: number; idx: number; kind: PartKind; prompt: string; code: string; options: string[]; points: number; correct?: number; answer?: string; criteria?: Criterion[]; explanation?: string };
 export type BlockView = { id: number; idx: number; title: string; section: string | null; scenario: string; points: number; parts: PartView[] };
 /** `solutions` : le PDF du corrigé, seulement s'il existe (il peut ne pas avoir compilé). */
-export type BlockExamView = { kind: "blocks"; id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; solutions: string | null; blocks: BlockView[] };
+/** `requested` : questions demandées (≥ blocks.length) ; `missing` : sections de l'annale tombées à la vérification. */
+export type BlockExamView = { kind: "blocks"; id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; solutions: string | null; requested: number; missing: string[]; blocks: BlockView[] };
+
+function parseMissing(raw: string | null): string[] {
+  try {
+    const v: unknown = JSON.parse(raw ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 type PartRow = { id: number; block_id: number; idx: number; kind: PartKind; prompt: string; code: string | null; options_json: string | null; correct: number | null; answer: string | null; criteria_json: string | null; points: number; explanation: string | null };
 
 /** L'examen à questions composées ; sans `withKeys`, ni réponse, ni barème, ni explication. null s'il n'existe pas. */
 export async function getBlockExam(examId: number, withKeys = false): Promise<BlockExamView | null> {
   await ensureBlockSchema();
-  const e = await q.get<{ id: number; created_at: string; status: string | null; verify_summary: string | null; html_path: string | null }>(
-    `SELECT id, created_at, status, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'blocks'`, examId,
+  const e = await q.get<{ id: number; created_at: string; status: string | null; verify_summary: string | null; html_path: string | null; requested_count: number | null; missing_json: string | null }>(
+    `SELECT id, created_at, status, verify_summary, html_path, requested_count, missing_json FROM exams WHERE id = ? AND format_template = 'blocks'`, examId,
   );
   if (!e) return null;
   const blocks = await q.all<{ id: number; idx: number; title: string; section: string | null; scenario: string; points: number }>(`SELECT id, idx, title, section, scenario, points FROM exam_blocks WHERE exam_id = ? ORDER BY idx`, examId);
   const parts = await q.all<PartRow>(`SELECT * FROM block_parts WHERE exam_id = ? ORDER BY block_id, idx`, examId);
   return {
     kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null, solutions: await solutionsPdf(e.html_path),
+    // Examens d'avant la colonne : rien n'est dit (le nombre demandé n'a pas été gardé).
+    requested: Math.max(blocks.length, Number(e.requested_count ?? 0)), missing: parseMissing(e.missing_json),
     blocks: blocks.map((b) => ({
       id: b.id, idx: b.idx, title: b.title, section: b.section, scenario: b.scenario, points: Number(b.points),
       parts: parts.filter((p) => p.block_id === b.id).map((p) => ({

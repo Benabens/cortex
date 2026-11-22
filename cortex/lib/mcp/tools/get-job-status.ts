@@ -3,6 +3,7 @@ import { examQuestions } from "@/lib/exam";
 import { localizeJob } from "@/lib/i18n/job-text";
 import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
 import { getBlockExam } from "@/lib/blocks";
+import { sectionLabel } from "@/lib/section-label";
 import { getQcmExam } from "@/lib/qcm";
 import { drillOfJob } from "@/lib/drill-job";
 import { redactMessage } from "@/lib/observability";
@@ -72,7 +73,7 @@ async function blocksView(examId: number, withSolutions: boolean): Promise<ExamO
     questions: parts.slice(0, MAX_QCM).map(({ b, bi, p, pi }, i) => ({
       number: i + 1,
       kind: p.kind === "scq" ? "single_choice" as const : "written" as const,
-      concept: clip(`Question ${bi + 1}${String.fromCharCode(97 + pi)} : ${b.title}`, 200),
+      concept: clip(`Question ${bi + 1}${String.fromCharCode(97 + pi)}${sectionLabel(b.title) ? ` : ${sectionLabel(b.title)}` : ""}`, 200),
       statement: clip(`${b.scenario}\n\n(${String.fromCharCode(97 + pi)}) [${p.points} pt] ${p.prompt}${p.code ? `\n${p.code}` : ""}${p.options.length ? `\n${p.options.map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}` : ""}`, 3000),
       solution: withSolutions
         ? clip(p.kind === "scq" ? `${LETTERS[p.correct ?? -1] ?? "?"}: ${p.explanation ?? ""}` : `${p.answer ?? ""}${p.criteria?.length ? `\nRubric: ${p.criteria.map((c) => `${c.label} (${c.points} pt)`).join("; ")}` : ""}`, 3000) || null

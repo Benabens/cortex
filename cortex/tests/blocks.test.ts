@@ -369,3 +369,65 @@ test("C × forme de l'annale — lectures de code Java et réponses courtes : ni
   assert.deepEqual(exam.blocks[0].parts.map((x) => x.kind), ["short", "code_output", "short"]);
   assert.equal(exam.blocks[0].parts[1].answer, "[1, 2]", "la sortie d'un extrait Java reste celle que le juge a vérifiée");
 });
+
+/** Plan d'une annale modèle à sections (lib/exam-format blocksOf) : « Question N — description ». */
+const sectionPlan = (descriptions: string[]) => ({
+  blockCount: descriptions.length, partsMin: 3, partsMax: 4, totalPoints: null,
+  sections: descriptions.map((description, i) => ({ name: `Question ${i + 1}`, description })),
+});
+
+test("C × section de forme (prod 22/11 : « vrai/faux justifiés » perdue) : elle reçoit une notion du cours libre, et une reprise", async () => {
+  const id = await compositeCourse(3);
+  // La 2ᵉ section décrit une FORME, aucun mot commun avec les notions : sans notion, ni reprise, elle tombait.
+  const plan = sectionPlan(["ethical theories and stakeholders", "True or false statements, each one justified", "feedback loops of a recommender"]);
+  script = {
+    "centrée sur": [block("spare", [scq("S"), short("S"), code("[1, 2]")])],
+    // Clé fausse : le juge la conteste, avec ou sans extraits du cours.
+    "True or false": [block("TF", [{ ...scq("TF"), correct: 1 }, short("TF"), code("[1, 2]")])],
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+    "feedback": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  prompts.length = 0;
+  const r = await runWithCourse(id, () => generateBlockExam(plan, { onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.count, r.requested], [3, 3], steps.join("\n"));
+  const tf = prompts.filter((p) => /^THÈME : Question 2/m.test(p));
+  // La notion prêtée est celle qu'aucune autre section ne prend : « Keyword filtering ».
+  assert.ok(tf.length && tf.every((p) => /Notions du cours à mobiliser[^\n]*Keyword filtering/.test(p)), tf.map((p) => /THÈME.*$/m.exec(p)?.[0]).join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, false)))!;
+  assert.deepEqual(exam.blocks.map((b) => b.section), ["Question 1", "Question 2", "Question 3"], "la reprise garde sa section");
+});
+
+test("C × manque dit clairement : une question tombée est annoncée sur l'examen, avec le total ajusté", async () => {
+  const id = await compositeCourse(2);
+  const plan = sectionPlan(["ethical theories and stakeholders", "keyword filtering of posts"]);
+  script = {
+    "Question 2": [block("B", [{ ...scq("B"), correct: 1 }, short("B"), code("[1, 2]")])],
+    "ethical": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const r = await runWithCourse(id, () => generateBlockExam(plan, {}));
+  assert.deepEqual([r.count, r.requested], [1, 2]);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, false)))!;
+  assert.equal(exam.requested, 2, "le nombre demandé reste lisible sur l'examen");
+  assert.deepEqual(exam.missing, ["Question 2"], "la question tombée est nommée");
+  assert.equal(exam.blocks.length, 1);
+  assert.match(exam.verifySummary ?? "", /^1 question composée sur 2 demandées/);
+});
+
+test("C × numérotation : le nom d'une section qui n'est qu'un numéro de l'annale ne double pas celui de l'examen", async () => {
+  const { sectionLabel } = await import("../lib/section-label");
+  assert.equal(sectionLabel("Question 4"), null);
+  assert.equal(sectionLabel("Q4"), null);
+  assert.equal(sectionLabel("Exercice 3 :"), null);
+  assert.equal(sectionLabel("Problem IV"), null);
+  assert.equal(sectionLabel("Question 4 — Fermentation"), "Fermentation");
+  assert.equal(sectionLabel("Q2: Moderation"), "Moderation");
+  assert.equal(sectionLabel("Aufgabe 2. Gärung"), "Gärung");
+  assert.equal(sectionLabel("Blending of wines"), "Blending of wines");
+  assert.equal(sectionLabel("Questions about yeast"), "Questions about yeast");
+  assert.equal(sectionLabel(null), null);
+});
