@@ -306,6 +306,33 @@ jobs:
             ls page*.png && echo "✓ tectonic (cache hors ligne) et pdftoppm en $(id -un)"
           '
 
+      # Mise en page 10pt/12pt (lib/exam-preamble shapePreamble, relevée dans l'annale) : size10.clo
+      # et size12.clo (classes LaTeX de base) sont les seuls fichiers qui manquaient hors ligne
+      # (banc du 22/11/2026), quelle que soit la police — les trois documents ci-dessous reprennent
+      # les trois combinaisons déjà préchauffées (base, unicode+CJK, hangul+RTL+hébreu+arabe).
+      # --only-cached échoue tout de suite si l'un des deux fichiers manque encore du cache.
+      - name: Mises en page 10pt et 12pt — compilées hors ligne, toutes polices
+        run: |
+          docker run --rm --network none --entrypoint bash cortex-app -c '
+            set -e
+            L=/app/cortex/latex
+            mkdir -p /tmp/sz && cd /tmp/sz
+            cp $L/epfl-logo.png . 2>/dev/null || true
+            cat $L/preamble.tex $L/figures.tex $L/generic.tex > base.tex
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nHors ligne.\n\\\\end{document}\n" >> base.tex
+            cat $L/preamble.tex $L/figures.tex $L/generic.tex $L/unicode-fonts.tex $L/cjk-fonts.tex > unicode.tex
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nЖα中\n\\\\end{document}\n" >> unicode.tex
+            cat $L/preamble.tex $L/figures.tex $L/generic.tex $L/unicode-fonts.tex $L/cjk-fonts.tex $L/hangul-fonts.tex $L/rtl.tex $L/hebrew-fonts.tex $L/arabic-fonts.tex > rtl.tex
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\n한 \\\\CortexRL{\\\\CortexHe{א}} \\\\CortexRL{\\\\CortexAr{ب}}\n\\\\end{document}\n" >> rtl.tex
+            for DOC in base unicode rtl; do
+              for SZ in 10 12; do
+                sed "s/\\\\documentclass\[11pt/\\\\documentclass[${SZ}pt/" ${DOC}.tex > ${DOC}-${SZ}pt.tex
+                /usr/local/bin/tectonic --chatter minimal --only-cached ${DOC}-${SZ}pt.tex
+                test -s ${DOC}-${SZ}pt.pdf && echo "✓ ${DOC} ${SZ}pt compilé hors ligne"
+              done
+            done
+          '
+
       # OCR des PDF scannés (lib/ocr) : tesseract est dans l'image avec ses langues et lit, sans
       # réseau, une page d'anglais et une page de français rendues à 300 dpi comme le fait l'ingestion.
       # Affiche le poids de sa couche et le temps de lecture d'une page (chiffres de la PR).
