@@ -160,8 +160,9 @@ function scriptsEnd(s: string, j: number): number {
 
 /**
  * FORMULE SANS DÉLIMITEURS, reconnue seulement quand elle ne peut pas être autre chose :
- *  - une lettre seule suivie d'un indice ou d'un exposant : « x_{t+1} », « a_n », « x^2 » ; la
- *    lettre ne suit ni une lettre, ni un chiffre, ni « _ . \ / @ : » (« snake_case », « max_iter »,
+ *  - une lettre seule suivie d'un indice ou d'un exposant : « x_{t+1} », « a_n », « x^2 », avec son
+ *    coefficient collé (« 2x_t », « 0.5x^2 », jamais « 0x_ff ») ; la lettre (ou le coefficient) ne
+ *    suit ni une lettre, ni un chiffre, ni « _ . \ / @ : » (« snake_case », « max_iter »,
  *    « __init__ », « /tmp/a_1 », « github.com/u/x_y » restent du texte) et rien d'un mot, d'une
  *    adresse ou d'un chemin ne suit (« a_b.py », « x_tt », « a_b@epfl.ch ») ;
  *  - une commande mathématique connue (MATH_COMMANDS) avec ses arguments et ses indices :
@@ -170,7 +171,7 @@ function scriptsEnd(s: string, j: number): number {
  * Deux formules que séparent seulement des espaces et des opérateurs n'en font qu'une. Le code entre
  * accents graves n'est jamais lu comme une formule, délimitée ou non.
  */
-const BARE_START = /(?<![\p{L}\p{N}_.\\/@:])[A-Za-z](?=[_^])|(?<![:/@])\\[a-zA-Z]+/gu;
+const BARE_START = /(?<![\p{L}\p{N}_.\\/@:])(?:[1-9]\d*(?:\.\d+)?|0\.\d+)?[A-Za-z](?=[_^])|(?<![:/@])\\[a-zA-Z]+/gu;
 const BARE_GAP = /^[ =+\-*/<>]*$/;
 
 function bareAtoms(s: string): { start: number; end: number }[] {
@@ -188,8 +189,8 @@ function bareAtoms(s: string): { start: number; end: number }[] {
       if (end < 0) continue;
       end = scriptsEnd(s, end);
     } else {
-      end = scriptsEnd(s, start + 1);
-      if (end === start + 1) continue;
+      end = scriptsEnd(s, start + m[0].length);
+      if (end === start + m[0].length) continue;
     }
     const prev = atoms[atoms.length - 1];
     // une commande collée à un mot n'est une formule qu'à la suite d'une autre (« \eta\nabla »)
