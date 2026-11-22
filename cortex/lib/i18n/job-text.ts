@@ -22,7 +22,7 @@ export type JobStepInfo =
   | { key: "done" }
   | { key: "doneIncomplete"; missing: number; requested: number; backCenti?: number }
   | { key: "resumed"; attempt: number; max: number }
-  | { key: "waiting"; position: number; ingest: boolean };
+  | { key: "waiting"; position: number; ingest: boolean; assist?: boolean; own?: boolean };
 
 export type LocalizableJob = {
   type: string;
@@ -68,7 +68,8 @@ function stepText(job: LocalizableJob, locale: Locale, generic: boolean): string
   if (info?.key === "done") return t("jobText.stepDone");
   if (info?.key === "doneIncomplete") return t("jobText.stepDoneIncomplete", { shortfall: shortfallText(info, locale) });
   if (info?.key === "resumed" && job.status === "queued") return t("jobText.stepResumed", { attempt: info.attempt, max: info.max });
-  if (info?.key === "waiting" && job.status === "queued") return t("jobText.stepWaiting", { position: info.position, what: info.ingest ? "ingest" : "generation" });
+  if (info?.key === "waiting" && job.status === "queued" && info.own) return t("jobText.stepWaitingOwn", { what: info.ingest ? "ingest" : "assist" });
+  if (info?.key === "waiting" && job.status === "queued") return t("jobText.stepWaiting", { position: info.position, what: info.ingest ? "ingest" : info.assist ? "assist" : "generation" });
   if (!job.currentStep || !generic) return job.currentStep;
   switch (job.status) {
     case "queued": return t("jobText.stepQueued");
