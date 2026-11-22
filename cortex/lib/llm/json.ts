@@ -43,12 +43,41 @@ function tryParse(s: string): Parsed {
     return { ok: true, value: JSON.parse(s) };
   } catch (e) {
     // virgules traînantes (`,]` / `,}`), fréquentes en sortie de modèle (comportement historique)
+    const noTrailing = s.replace(/,(\s*[}\]])/g, "$1");
     try {
-      return { ok: true, value: JSON.parse(s.replace(/,(\s*[}\]])/g, "$1")) };
+      return { ok: true, value: JSON.parse(noTrailing) };
     } catch {
+      const literal = literalBackslashes(noTrailing);
+      if (literal !== noTrailing) {
+        try { return { ok: true, value: JSON.parse(literal) }; } catch { /* motif d'origine ci-dessous */ }
+      }
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   }
+}
+
+/** Échappement JSON valide, ou antislash seul (séquence invalide : `\a`, `\s`, `\underline`…). */
+const ESCAPE = /\\(u[0-9a-fA-F]{4}|["\\/bfnrt])?/g;
+
+/**
+ * LaTeX écrit sans doubler ses antislashs (`\alpha`, `\subq`, `\mathbb`) : une séquence d'échappement
+ * invalide ne peut être qu'un antislash littéral. jsonrepair, lui, la supprimait : « \subq{1.1} Soit
+ * \alpha \in \mathbb{R} » devenait « subq{1.1} Soit alpha in mathbb{R} » sans erreur (et sans
+ * \subq, la complétude d'une correction ne se contrôlait plus) ; un `\underline` rendait toute la
+ * réponse illisible. Dans une telle réponse, `\t` `\b` `\f` `\r` suivis d'une lettre sont aussi du
+ * LaTeX (`\textbf`, `\begin`, `\frac`, `\right`) : aucun texte ne met de tabulation ou de retour
+ * chariot devant un mot. `\n` garde son sens de retour à la ligne, `\"` et `\\` le leur.
+ * Inchangé (même chaîne) quand aucune séquence n'est invalide.
+ */
+function literalBackslashes(s: string): string {
+  let invalid = false;
+  for (const m of s.matchAll(ESCAPE)) if (!m[1]) { invalid = true; break; }
+  if (!invalid) return s;
+  return s.replace(ESCAPE, (m, esc: string | undefined, at: number) => {
+    if (!esc) return "\\\\";
+    if ("bfrt".includes(esc) && /[a-zA-Z]/.test(s[at + 2] ?? "")) return "\\\\" + esc;
+    return m;
+  });
 }
 
 type Scan = { state: "closed" | "open" | "mismatch"; end: number };
@@ -177,7 +206,8 @@ export function extractJson<T = unknown>(text: string): T {
     throw new JsonOutputError("Réponse du modèle tronquée : le JSON s'arrête avant sa fin.", { truncated: true });
   }
   try {
-    return JSON.parse(jsonrepair(target)) as T;
+    // Antislashs littéraux d'abord : jsonrepair supprime ceux d'une séquence invalide.
+    return JSON.parse(jsonrepair(literalBackslashes(target))) as T;
   } catch {
     throw new JsonOutputError(`Réponse du modèle illisible (JSON invalide : ${parseError}).`);
   }
