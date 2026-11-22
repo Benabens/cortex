@@ -402,10 +402,58 @@ export async function readStoredProfile(): Promise<StoredProfile | null> {
   try {
     await q.ensureTable("format_profile");
     const r = await q.get<{ json: string }>(`SELECT json FROM format_profile ORDER BY id DESC LIMIT 1`);
-    return r ? (JSON.parse(r.json) as StoredProfile) : null;
+    return r ? cleanProfile(JSON.parse(r.json) as StoredProfile) : null;
   } catch {
     return null;
   }
+}
+
+/** Nombre lu tel quel, ou écrit en texte (« 90 », « 90 min »). */
+function numberOf(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const m = /^\s*(\d+(?:[.,]\d+)?)\s*(?:min(?:utes?)?\.?|pts?\.?|points?|%)?\s*$/i.exec(v);
+  return m ? Number(m[1].replace(",", ".")) : null;
+}
+
+/** Une durée en minutes : un nombre, « 90 min », « 2h », « 2 h 30 », « 1h30 ». */
+function minutesOf(v: unknown): number | null {
+  const h = typeof v === "string" ? /^\s*(\d{1,2})\s*h(?:eures?|ours?)?\s*(\d{1,2})?\s*(?:min)?\s*$/i.exec(v) : null;
+  return h ? Number(h[1]) * 60 + Number(h[2] ?? 0) : numberOf(v);
+}
+
+/** Dans [lo, hi] et arrondi, sinon 0 (« inconnu » dans un profil de format). */
+const within = (n: number | null, lo: number, hi: number, round = true): number => (n !== null && n >= lo && n <= hi ? (round ? Math.round(n) : n) : 0);
+
+/**
+ * Les nombres d'un profil de format tels qu'un générateur peut s'en servir. Le modèle qui lit
+ * les annales répond en texte libre : une durée négative (-90) passait le repli « déclarée ou
+ * détectée » et donnait des points négatifs à chaque question ; « 2h » s'affichait « 2h min » ;
+ * un nombre de questions écrit « vingt » rendait la part de QCM NaN, et tout l'examen avec. Un
+ * nombre illisible ou hors bornes vaut 0, l'inconnu de ce profil (le défaut du plan s'applique).
+ * Appliqué à la lecture : les profils déjà enregistrés en profitent sans nouvelle détection.
+ */
+export function cleanProfile<P extends FormatProfile>(p: P): P {
+  if (!p || typeof p !== "object") return p;
+  const types = Array.isArray(p.question_types) ? p.question_types : [];
+  return {
+    ...p,
+    format_summary: typeof p.format_summary === "string" ? p.format_summary : "",
+    duration_min: within(minutesOf(p.duration_min), 5, 600),
+    total_points: within(numberOf(p.total_points), 1, 10_000, false),
+    has_mcq: p.has_mcq === true || String(p.has_mcq).toLowerCase() === "true",
+    question_types: types
+      .filter((t) => !!t && typeof t === "object" && typeof t.type === "string")
+      .map((t) => ({
+        ...t,
+        approx_count: within(numberOf(t.approx_count), 0, 500),
+        share_pct: within(numberOf(t.share_pct), 0, 100, false),
+        points_each: within(numberOf(t.points_each), 0, 1_000, false),
+        note: typeof t.note === "string" ? t.note : "",
+      })),
+    sections: Array.isArray(p.sections) ? p.sections : [],
+    topics_emphasis: Array.isArray(p.topics_emphasis) ? p.topics_emphasis : [],
+  };
 }
 
 /** Annales ingérées (finals, partiels) : leur nombre, et un échantillon de leur texte pour la langue. */
