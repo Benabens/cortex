@@ -147,6 +147,9 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   };
 
   const upload = async (files: FileList | File[]) => {
+    // Cours pas encore résolu (liste des cours en vol) : un envoi partirait avec `course=` vide, que
+    // le serveur lit comme le cours par défaut (refus « Cours inconnu », ou fichier rangé ailleurs).
+    if (!courseId) return;
     if ([...files].some((file) => ARCHIVE_FILE.test(file.name))) {
       await importFolder(files);
       return;
@@ -220,6 +223,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
    * téléverser inutilement (le serveur refiltre de toute façon).
    */
   const importFolder = async (files: FileList | File[]) => {
+    if (!courseId) return; // même garde que upload()
     setError(null);
     setUploadedMsg(null);
     setUploading(true);
@@ -331,7 +335,9 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); upload(e.dataTransfer.files); }}
+        aria-disabled={!courseId || undefined}
         className={cn(
+          !courseId && "cursor-wait opacity-60",
           "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center transition-colors",
           dragOver
             ? "border-[color-mix(in_oklch,var(--color-accent)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_10%,transparent)]"
@@ -344,6 +350,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           multiple
           accept={ACCEPT}
           className="sr-only"
+          disabled={!courseId}
           onChange={(e) => e.target.files && upload(e.target.files)}
         />
         <span
@@ -356,7 +363,9 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           <p className="text-[0.92rem] font-semibold text-ink-1">
             {uploading
               ? t("uploading")
-              : dropKind === "past_exam"
+              : !courseId
+                ? t("loadingCourse")
+                : dropKind === "past_exam"
                 ? t("dropPastExam")
                 : dropKind === "sample_questions"
                   ? t("dropSampleQuestions")
@@ -405,7 +414,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           variant="secondary"
           className="w-full"
           onClick={() => folderRef.current?.click()}
-          disabled={uploading || running}
+          disabled={uploading || running || !courseId}
         >
           <FolderInput className="size-4" strokeWidth={2.25} />
           {t("chooseFolder")}

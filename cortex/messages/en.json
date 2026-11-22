@@ -69,7 +69,7 @@
     "monitoring_envelope_unreadable": "Unreadable envelope",
     "monitoring_project_unknown": "Unknown project",
     "connected_app_not_found": "App not found.",
-    "job_not_found": "Job not found",
+    "job_not_found": "Job not found.",
     "exam_invalid": "Invalid exam.",
     "qcm_exam_not_found": "Multiple-choice exam not found.",
     "id_missing": "Missing id",
@@ -147,7 +147,7 @@
     "file_not_pdf": "This file isn’t a PDF.",
     "conversation_too_short": "Paste a conversation with at least a few exchanges.",
     "weakness_mining_failed": "The conversation couldn’t be analysed: {detail}",
-    "weakness_not_found": "Weakness not found",
+    "weakness_not_found": "Weakness not found.",
     "weakness_analysis_failed": "The weakness couldn’t be analysed: {detail}",
     "llm_model_unknown": "Unknown model. Choose opus, sonnet, or haiku.",
     "qcm_composition_empty": "The composition is empty. Choose at least one multiple-choice or open question.",
@@ -1292,7 +1292,7 @@
     "title": "Syllabus",
     "emptyDescription": "Topics found in finals, extracted from past exams.",
     "emptyTitle": "No topics analysed for this course",
-    "emptyHint": "Import past exams, then select “Reanalyse past exams”. Cortex reads each final and extracts the topics that appear, with links to the exam and course materials.",
+    "emptyHint": "Import past exams from Sources, then select “Prepare course”. Cortex reads each final and extracts the topics that appear, with links to the exam and course materials.",
     "addPastExams": "Add past exams",
     "finalYear": "Final {year}",
     "finalFallback": "Final",
@@ -1510,7 +1510,9 @@
     "correcting": "Marking…",
     "correct": "Mark my exam",
     "answered": "{answered}/{total} answered",
-    "back": "← back to exams"
+    "back": "← back to exams",
+    "notFoundHint": "It may have been deleted, or it belongs to another course.",
+    "backToExams": "Back to exams"
   },
   "blockExam": {
     "kindScq": "Single choice",
@@ -1644,7 +1646,8 @@
     "unreadHint": "The other course files were read normally.",
     "removeFromCourse": "Remove from course",
     "refusedItem": "<name>{fileName}</name>: {reason}",
-    "debitedSuffix": ": {debited}"
+    "debitedSuffix": ": {debited}",
+    "loadingCourse": "Loading course…"
   },
   "sourceViewer": {
     "found": "⟵ Cortex · found here",
