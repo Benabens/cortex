@@ -161,6 +161,7 @@ export async function sendMagicLink({ identifier, url }: { identifier: string; u
         to: [identifier],
         subject: mail.subject,
         html: mail.html,
+        text: mail.text,
       }),
     });
     if (!res.ok) throw new Error(`Envoi Resend échoué (HTTP ${res.status}) : ${(await res.text()).slice(0, 300)}`);
