@@ -22,11 +22,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { runWithCourse } from "../db/client";
 import { runWithUser } from "../db/context";
-import { authAll, authRun } from "../db/auth-store";
+import { authRun } from "../db/auth-store";
 import { dbDriverName, nowStr, q } from "../db/q";
-import { TABLES } from "../db/tables";
 import { assertAuthRequired, assertE2ETestAuthAllowed, assertLlmProviderAllowed, assertStorageBucketIsolated } from "../lib/boot-guards";
 import { dataRoot, ensureCoursesLoaded, normalizeCourse } from "../lib/courses";
+import { migrateTenants } from "../lib/tenant-migrations";
 
 const log = (msg: string) => console.log(`[prod-boot] ${msg}`);
 
@@ -50,28 +50,7 @@ function initVolume(): void {
 }
 
 // ── B) migrations idempotentes de tous les tenants connus ───────────────────
-async function migrateTenants(): Promise<void> {
-  if (dbDriverName() !== "postgres") return;
-  // Le SELECT déclenche la création des tables du store auth (dont tenants).
-  const rows = await authAll<{ user_id: string; course: string }>(
-    "SELECT user_id, course FROM tenants ORDER BY user_id, course"
-  );
-  if (!rows.length) {
-    log("migrations : aucun tenant enregistré (base neuve) — bootstrap lazy au premier accès");
-    return;
-  }
-  for (const t of rows) {
-    await runWithUser(t.user_id, () =>
-      runWithCourse(normalizeCourse(t.course), async () => {
-        for (const spec of TABLES) {
-          await q.ensureTable(spec.name);
-          await q.ensureColumns(spec.name, spec.cols.map((c) => c.name));
-        }
-      })
-    );
-    log(`migré : tenant ${t.user_id} × ${t.course} (${TABLES.length} tables)`);
-  }
-}
+// (lib/tenant-migrations : schéma rattrapé depuis db/tables.ts, index de recherche réparé)
 
 // ── C) seed du contenu committé ─────────────────────────────────────────────
 async function seedCourses(): Promise<void> {
@@ -204,7 +183,7 @@ async function main(): Promise<void> {
   assertIsolationSane();
   initVolume();
   await migrateCourses();
-  await migrateTenants();
+  await migrateTenants(log);
   await seedCourses();
   log("terminé");
   process.exit(0);

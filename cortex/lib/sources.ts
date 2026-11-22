@@ -1,6 +1,7 @@
 import { ensureFts, currentCourse } from "@/db/client";
+import { currentUser } from "@/db/context";
 import { q } from "@/db/q";
-import { indexItemForSearch, unindexSource } from "@/lib/search";
+import { indexItemForSearch, rebuildVocab, unindexSource } from "@/lib/search";
 import { sourceHref } from "@/lib/deeplink";
 import { contentRoot, refsDir } from "@/lib/paths";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
@@ -149,7 +150,9 @@ export async function writeRef({ relPath, title, pages, ocr }: ParsedRef): Promi
 export async function ingestRefFile(relPath: string): Promise<{ items: number }> {
   const parsed = await readRefFile(relPath);
   // Lu hors transaction, réécrit d'un bloc : une erreur en route laisse l'annale d'avant intacte.
-  return { items: await q.tx(() => writeRef(parsed)) };
+  // Le vocabulaire (correction des fautes de la recherche) suit le corpus : sans lui, les termes
+  // propres à l'annale déposée n'étaient corrigés qu'après la préparation suivante.
+  return { items: await q.tx(async () => { const n = await writeRef(parsed); await rebuildVocab(); return n; }) };
 }
 
 /**
@@ -328,6 +331,10 @@ export async function addUploadedRef(buffer: Buffer, filename: string): Promise<
   const relPath = `refs/${name}`;
   await ingestRefFile(relPath);
   if (stored.home === "local") await settleOriginals({ after: "ingest", paths: [relPath] });
+  // Le quota d'index d'un compte gratuit se juge sur ce relevé (lib/originals/index-quota) : sans
+  // lui, les dépôts par cette route ne comptaient qu'à la préparation suivante.
+  const { refreshIndexUsage } = await import("@/lib/originals/index-quota");
+  await refreshIndexUsage(currentUser(), currentCourse());
   const { kind, year } = inferExamMeta(name);
   await q.run(
     `INSERT INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,1)
@@ -381,13 +388,17 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   const indexed = srcs.length
     ? Number((await q.get<{ n: number }>(`SELECT count(*) n FROM items WHERE source_id IN (${srcs.map(() => "?").join(",")})`, ...srcs.map((s) => s.id)))?.n ?? 0)
     : 0;
-  // purge corpus
-  for (const { id } of srcs) {
-    await unindexSource(id);
-    await q.run(`DELETE FROM items WHERE source_id = ?`, id);
-    await q.run(`DELETE FROM sources WHERE id = ?`, id);
-  }
-  await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
+  // purge corpus, d'un bloc : une coupure en route laissait des passages sans source (ou l'inverse),
+  // et le vocabulaire gardait les termes du support retiré.
+  await q.tx(async () => {
+    for (const { id } of srcs) {
+      await unindexSource(id);
+      await q.run(`DELETE FROM items WHERE source_id = ?`, id);
+      await q.run(`DELETE FROM sources WHERE id = ?`, id);
+    }
+    await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
+    if (srcs.length) await rebuildVocab();
+  });
   if (row?.uploaded) {
     await storage().remove(path.join(REFS_DIR(), path.basename(srcPath)));
   } else if (!indexed) {

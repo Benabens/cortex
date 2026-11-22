@@ -12,8 +12,8 @@
  * - IDEMPOTENT : sans --drop, les lignes déjà présentes sont ignorées
  *   (ON CONFLICT DO NOTHING) ; avec --drop, le tenant est reconstruit à neuf.
  * - VÉRIFICATION : comptes source vs cible par table — mismatch ⇒ exit 1.
- * - La recherche plein-texte n'est PAS copiée (fts_items = artefact SQLite ;
- *   côté PG la recherche est dérivée de `items` — cf. lib/search.ts).
+ * - La recherche plein-texte n'est PAS copiée (fts_items = artefact SQLite) : elle est
+ *   recalculée depuis `items` (items.text_norm, vocabulaire — cf. repairSearchIndex).
  */
 process.env.DB_DRIVER = "postgres";
 
@@ -24,6 +24,7 @@ import { runWithUser, tenantSchema } from "../db/context";
 import { closePostgres } from "../db/driver-postgres";
 import { q } from "../db/q";
 import { TABLES } from "../db/tables";
+import { repairSearchIndex } from "../lib/search";
 import { coursePaths, ensureCoursesLoaded, listCourseIds } from "../lib/courses";
 
 type Args = { user: string; courses: string[]; drop: boolean };
@@ -112,6 +113,10 @@ async function migrateCourse(user: string, courseId: string, drop: boolean): Pro
         }
       }
       src.close();
+      // fts_items ne se copie pas : sans son pendant Postgres (items.text_norm), le tenant migré
+      // ne trouvait RIEN à la recherche ni à l'ancrage des générations (CS-202 et CS-250, 21/11).
+      const repair = await repairSearchIndex();
+      console.log(`  ✓ index de recherche : ${repair.textNorm} passage(s) indexé(s)${repair.vocab !== null ? `, vocabulaire reconstruit (${repair.vocab} termes)` : ""}`);
       return allOk;
     })
   );
