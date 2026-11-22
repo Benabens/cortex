@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { getUsageLimits } from "@/lib/billing/limits";
 import { SOURCE_CATEGORIES, SourceError, addTextSource, addUrlSource } from "@/lib/course-source";
+import { trackLoopsEvent } from "@/lib/loops";
 import { errorText } from "@/lib/i18n/user-error";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { ToolError, codeForStatus, defineTool } from "../tool";
@@ -55,6 +56,7 @@ export default defineTool({
       // Compte gratuit : l'original ne reste pas sur le serveur (lib/originals). Son texte est lu
       // tout de suite par une ingestion gratuite, sinon il partirait sans index.
       const local = saved.home === "local" ? await startFreeIngest(c.id) : null;
+      void trackLoopsEvent({ userId: ctx.principal.userId }, "sources_added", { course: c.id, count: 1 }).catch(() => {});
       const steps = saved.folder === "refs" ? await pastExamNextSteps(ctx.principal.userId) : "Add the other materials the same way, then call prepare_course to (re)build the course.";
       return {
         status: "added" as const,

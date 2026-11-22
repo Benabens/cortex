@@ -2,6 +2,7 @@ import { currentCourse, runWithCourse } from "@/db/client";
 import { currentUser, runWithUser } from "@/db/context";
 import { dbDriverName, q, nowStr } from "@/db/q";
 import { inc, log, observe } from "@/lib/metrics";
+import { trackLoopsEvent } from "@/lib/loops";
 import { examsDir } from "@/lib/paths";
 import { spawn } from "node:child_process";
 import { killProcessGroup } from "@/lib/process-group";
@@ -28,6 +29,8 @@ export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exerci
 
 /** Aides du connecteur exécutées en job : file à part, sans fichiers du cours, jamais relancées par « réessayer ». */
 export const ASSIST_JOB_TYPES: readonly JobType[] = ["drill", "check"];
+/** Examen blanc généré par l'étudiant (QCM ou composé) — pour l'événement marketing `first_mock_exam`. */
+export const MOCK_EXAM_JOB_TYPES: readonly JobType[] = ["qcm", "exam"];
 export type Job = {
   id: number;
   type: JobType;
@@ -338,6 +341,12 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
         inc("cortex_jobs_total", { type: j.type, status: fields.status });
         const ms = Date.now() - new Date(j.created_at + "Z").getTime();
         if (Number.isFinite(ms) && ms >= 0) observe("cortex_job_duration_ms", ms, { type: j.type });
+      }
+      // Premier examen blanc RÉUSSI de ce cours (qcm ou composé) : pas de colonne user_id sur
+      // `jobs` (table scopée au cours courant) → « premier » s'entend par cours, pas par compte.
+      if (fields.status === "done" && j && MOCK_EXAM_JOB_TYPES.includes(j.type as JobType)) {
+        const prior = await q.get<{ n: number }>(`SELECT COUNT(*) AS n FROM jobs WHERE type = ? AND status = 'done' AND id != ?`, j.type, id);
+        if ((prior?.n ?? 0) === 0) void trackLoopsEvent({ userId: currentUser() }, "first_mock_exam", { type: j.type }).catch(() => {});
       }
     } catch { /* métrique best-effort */ }
   }

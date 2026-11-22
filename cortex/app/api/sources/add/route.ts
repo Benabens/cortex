@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/db/context";
 import { SOURCE_CATEGORIES, SourceError, addFileSource, type SourceCategory } from "@/lib/course-source";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { trackLoopsEvent } from "@/lib/loops";
 import { requireCourse } from "@/lib/req";
 import { checkIndexQuota } from "@/lib/originals/index-quota";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
@@ -57,6 +58,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return apiError(req, errorForFile(first.userError, first.file), first.status);
   }
   const skipped = refused.map((r) => fileErrorText(req, r.file, r.userError));
+  void trackLoopsEvent({ userId: currentUser() }, "sources_added", { course, count: saved.length }).catch(() => {});
 
   const existing = await activeJob("ingest");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, files: saved.length, skipped });

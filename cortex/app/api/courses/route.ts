@@ -4,6 +4,7 @@ import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { buildCourseRow, InvalidCourseError } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
+import { trackLoopsEvent } from "@/lib/loops";
 import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
@@ -57,6 +58,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // AVANT que l'interface ne bascule dessus.
   await reloadCourses();
   const created = listCoursesOf(u).find((c) => c.id === row.id);
+  void trackLoopsEvent({ userId: u }, "course_created", { courseId: row.id }).catch(() => {});
   return NextResponse.json({ course: created ? toDto(created) : null }, { status: 201 });
 }
 )
