@@ -225,15 +225,20 @@ function queryWords(query: string): string[] {
  * sujet (Svenson (1981), à 3 500 caractères du titre d'un support de HUM-285, 02/11).
  */
 export function densestWindow(text: string, query: string, cap: number): string {
+  return densestSpan(text, query, cap).text;
+}
+
+/** densestWindow avec la plage retenue dans le texte aplati (dédoublonnage par recouvrement). */
+function densestSpan(text: string, query: string, cap: number): { text: string; start: number } {
   const t = readColumns(text).replace(/\s+/g, " ").trim();
-  if (t.length <= cap) return t;
+  if (t.length <= cap) return { text: t, start: 0 };
   const lower = t.toLowerCase();
   const positions = queryWords(query).map((w) => {
     const at: number[] = [];
     for (let i = lower.indexOf(w); i >= 0 && at.length < 60; i = lower.indexOf(w, i + 1)) at.push(i);
     return at;
   }).filter((a) => a.length);
-  if (!positions.length) return t.slice(0, cap);
+  if (!positions.length) return { text: t.slice(0, cap), start: 0 };
   // Fenêtres essayées autour de chaque occurrence : le mot au premier quart, au début, ou à la fin.
   const lead = Math.floor(cap / 4);
   const starts = new Set<number>();
@@ -251,7 +256,7 @@ export function densestWindow(text: string, query: string, cap: number): string 
   let end = Math.min(t.length, best + cap);
   const space = t.indexOf(" ", end);
   if (end < t.length && space >= 0 && space - end < 40) end = space;
-  return t.slice(start, end);
+  return { text: t.slice(start, end), start };
 }
 
 /**
@@ -281,15 +286,14 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
       const matter = courseMatter(row?.text ?? "");
       if (!matter) continue;
-      const text = densestWindow(matter, query, cap);
+      const { text, start: from } = densestSpan(matter, query, cap);
       const seen = windows.get(h.itemId) ?? [];
       // Fenêtre déjà montrée pour plus de moitié (une autre requête) : rien de neuf, et elle ne prend
       // pas la place d'un résultat suivant. Une fenêtre qui commence dans une autre mais va plus loin
       // est gardée : la suite d'un support (sa théorie, après l'en-tête et le notebook) était jetée
       // comme doublon, et ses deux doublons privaient une notion de tout extrait (banc rs-composite, 22/11).
-      const from = readColumns(matter).replace(/\s+/g, " ").trim().indexOf(text);
       const span: [number, number] = [from, from + text.length];
-      if (from < 0 || seen.some(([a, b]) => Math.min(b, span[1]) - Math.max(a, span[0]) > text.length / 2)) continue;
+      if (seen.some(([a, b]) => Math.min(b, span[1]) - Math.max(a, span[0]) > text.length / 2)) continue;
       windows.set(h.itemId, [...seen, span]);
       out.push({ src: h.sourceTitle, text });
       used += text.length;

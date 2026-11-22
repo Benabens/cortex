@@ -477,7 +477,8 @@ const BLOCKS_PHASE = "Questions composées";
  * disjointes par support. Le nom de la section n'est plus cherché quand elle a d'autres termes.
  */
 async function slotPassages(slot: BlockSlot): Promise<{ src: string; text: string }[]> {
-  const terms = slot.section && slot.query.length > 1 ? slot.query.slice(1) : slot.query;
+  const rest = slot.query.filter((x) => x !== slot.section);
+  const terms = rest.length ? rest : slot.query;
   const subjects = terms.flatMap((x) => x.split(/[,;](?![^(]*\))\s*/)).map((x) => x.trim()).filter((x) => x.length >= 3);
   return evidencePassages([...new Set([...subjects, ...slot.notions])], { perQuery: 2, cap: 900, budget: 9_000 }).catch(() => []);
 }
