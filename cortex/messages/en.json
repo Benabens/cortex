@@ -305,9 +305,11 @@
   },
   "magicLink": {
     "subject": "Sign in to Cortex",
-    "intro": "Click the link below to sign in to Cortex:",
+    "intro": "Click the button below to sign in to Cortex.",
     "button": "Sign in",
-    "ignore": "If you didn’t request this email, you can ignore it."
+    "ignore": "If you didn’t request this email, you can ignore it.",
+    "validity": "This link is valid for 24 hours and works only once.",
+    "fallback": "Button not showing? Paste this link into your browser:"
   },
   "common": {
     "retry": "Try again",

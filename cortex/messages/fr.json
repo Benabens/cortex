@@ -305,9 +305,11 @@
   },
   "magicLink": {
     "subject": "Connexion à Cortex",
-    "intro": "Clique pour te connecter à Cortex :",
+    "intro": "Clique sur le bouton pour te connecter à Cortex.",
     "button": "Se connecter",
-    "ignore": "Si tu n'es pas à l'origine de cette demande, ignore ce message."
+    "ignore": "Si tu n’es pas à l’origine de cette demande, ignore ce message.",
+    "validity": "Ce lien est valable 24 heures et ne sert qu’une fois.",
+    "fallback": "Le bouton ne s’affiche pas ? Copie ce lien dans ton navigateur :"
   },
   "common": {
     "retry": "Réessayer",
