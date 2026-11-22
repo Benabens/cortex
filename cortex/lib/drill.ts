@@ -78,7 +78,10 @@ export async function generateDrill(concept: string): Promise<Drill> {
     { prompt: prompt(FORMAT_RULES), model: "opus", timeoutMs: 220_000, json: { schema: DRILL_SCHEMA }, ...DRILL_LIMITS },
     {
       check: async (v) => {
-        if (!(typeof v?.statement_html === "string" && v.statement_html.trim() && typeof v.solution_html === "string")) return "statement_html et solution_html (chaînes) sont requis";
+        if (!(typeof v?.statement_html === "string" && v.statement_html.trim() && typeof v.solution_html === "string" && v.solution_html.trim())) return "statement_html et solution_html (chaînes non vides) sont requis";
+        // Le drill promet 5 indices révélés un par un : un tableau absent, court ou vide était livré
+        // (remplacé par []) et facturé comme un drill complet.
+        if (hintsOf(v).length < 5) return "hints doit contenir EXACTEMENT 5 indices (chaînes non vides), du plus vague à l'étape décisive";
         // Une notion que le cours ne présente pas est redemandée, avec son nom (lib/course-grounding).
         const absent = await absentCourseTerms(Array.isArray(v.course_terms) ? v.course_terms : []);
         return absent.length ? `notions absentes du cours : ${absent.join(", ")} — n'utilise que les notions et les définitions des extraits du cours` : null;
@@ -88,7 +91,11 @@ export async function generateDrill(concept: string): Promise<Drill> {
     },
   );
   delete d.course_terms;
-  if (!Array.isArray(d.hints)) d.hints = [];
-  d.hints = d.hints.slice(0, 5);
+  d.hints = hintsOf(d).slice(0, 5);
   return d;
+}
+
+/** Les indices utilisables d'une réponse : des chaînes non vides, rognées. */
+function hintsOf(v: { hints?: unknown }): string[] {
+  return Array.isArray(v?.hints) ? v.hints.filter((h): h is string => typeof h === "string" && !!h.trim()).map((h) => h.trim()) : [];
 }

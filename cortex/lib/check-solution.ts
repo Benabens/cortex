@@ -177,6 +177,16 @@ function withRubric(parsed: unknown, rubric: { label: string; points: number }[]
  * Via le fournisseur LLM configuré. `imageRel` = chemin relatif au cwd d'une photo de la réponse.
  * `rubric` (+ `reference`, la réponse modèle) : barème imposé, corrigé critère par critère.
  */
+/**
+ * Taille de la réponse, réflexion comprise : sans elle, la correction prenait le défaut des aides
+ * (6 000 tokens) à l'effort par défaut, et une trace d'algorithme corrigée sortait coupée ; la
+ * relance renvoyait la même demande au même budget, trois fois (même défaut que le drill, #176).
+ * Coupée : UNE relance qui demande moins (corrigé et explications abrégés, effort bas).
+ */
+const CHECK_LIMITS = { maxTokens: 12_000, effort: "medium" } as const;
+const CHECK_SHORT_LIMITS = { maxTokens: 8_000, effort: "low" } as const;
+const CHECK_SHORT_RULE = `RÉPONSE PRÉCÉDENTE TROP LONGUE, coupée avant la fin : garde le même verdict et le même barème, mais feedback en 3 phrases au plus et correct_solution ABRÉGÉE (les étapes clés et le résultat, 200 mots au plus, une trace en un seul petit tableau).`;
+
 export async function checkSolution(input: { statement: string; answer?: string; imageRel?: string | null; rubric?: { label: string; points: number }[]; reference?: string }): Promise<CheckResult> {
   const c = getCourse(currentCourse());
   // Langue de l'examen : celle de la correction quand la réponse ne permet pas d'en juger.
@@ -215,9 +225,11 @@ export async function checkSolution(input: { statement: string; answer?: string;
     ...(passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)] : []),
     `Réponds UNIQUEMENT avec un objet JSON {"verdict","feedback","correct_solution","criteria":[{"label","points","achieved","essential","justification"}]}. Aucune prose autour, aucune balise markdown.`
   );
+  const prompt = lines.join("\n");
   const parsed = await completeJson<unknown>(
-    { prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA } },
+    { prompt, model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA }, ...CHECK_LIMITS },
     {
+      onTruncated: (req) => ({ ...req, prompt: `${prompt}\n\n${CHECK_SHORT_RULE}`, ...CHECK_SHORT_LIMITS }),
       check: (v) => !isLegacyResult(v)
         ? "verdict (correct | partial | wrong), feedback et correct_solution sont requis"
         : rubric && (v as { criteria?: unknown[] }).criteria?.length !== rubric.length
