@@ -44,7 +44,15 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (origin) {
     let sameOrigin = false;
     try {
-      sameOrigin = new URL(origin).host === req.nextUrl.host;
+      // Derrière le proxy de Railway, req.nextUrl.host est l'hôte interne du
+      // conteneur : on compare aussi à l'hôte public (x-forwarded-host, AUTH_URL).
+      const host = new URL(origin).host;
+      const allowed = new Set([req.nextUrl.host, req.headers.get("x-forwarded-host") ?? "", req.headers.get("host") ?? ""]);
+      for (const u of [process.env.AUTH_URL, process.env.NEXTAUTH_URL]) {
+        if (u) try { allowed.add(new URL(u).host); } catch { /* URL invalide : ignorée */ }
+      }
+      allowed.delete("");
+      sameOrigin = allowed.has(host);
     } catch {
       sameOrigin = false;
     }
