@@ -1001,7 +1001,9 @@
     "classifiedExam": "“{title}” moved to past exams: updating the course materials.",
     "classifiedSupport": "“{title}” moved to course materials: updating them now.",
     "classifyDone": "Course materials up to date.",
-    "classifyFailed": "Couldn’t classify it: {error}"
+    "classifyFailed": "Couldn’t classify it: {error}",
+    "textOnly": "text only",
+    "textOnlyTitle": "The original file is not kept: this document’s text stays in search, exams and practice. Upload it again to be able to open it."
   },
   "originals": {
     "localNote": "Your file stays on your computer: Cortex reads its text (and the pages of a past exam while preparing the course), then removes it from its servers within {hours} hours. Only the index is kept for search and your mock exams.",
@@ -1649,7 +1651,10 @@
   "sourceViewer": {
     "found": "⟵ Cortex · found here",
     "clear": "clear highlighting",
-    "notFound": "File not found"
+    "notFound": "File not found",
+    "missingTitle": "Original unavailable",
+    "missingBody": "Cortex read and indexed this document, but its original file is not kept: its text stays in search, exams and practice. To open it here, upload it again from Sources.",
+    "back": "Back to sources"
   },
   "examOutput": {
     "site": "On the site",

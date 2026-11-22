@@ -3,6 +3,8 @@ import { currentUser } from "@/db/context";
 import { q } from "@/db/q";
 import { indexItemForSearch, rebuildVocab, unindexSource } from "@/lib/search";
 import { sourceHref } from "@/lib/deeplink";
+import { existingSourcePaths } from "@/lib/source-files";
+import { localOriginals } from "@/lib/originals/registry";
 import { contentRoot, refsDir } from "@/lib/paths";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import * as cheerio from "cheerio";
@@ -259,13 +261,15 @@ export type CorpusSource = {
   path: string;
   year: number | null;
   items: number;
-  href: string | null; // deep-link « voir » (ouvre la source à sa 1re page/ancre)
+  href: string | null; // deep-link « voir » (ouvre la source à sa 1re page/ancre) ; null = original absent
 };
 
 /**
  * Toutes les sources du corpus (tous types) avec un deep-link « voir » — pour rendre les facettes
  * cliquables (filtrer + ouvrir un cours / une série / un exercice). Zéro lien mort : href dérivé de
- * l'ancre RÉELLE du 1er item (ou du chemin) via la logique unifiée sourceHref.
+ * l'ancre RÉELLE du 1er item (ou du chemin) via la logique unifiée sourceHref, et null quand le
+ * fichier n'existe ni dans le stockage du cours ni sur l'ordinateur de l'étudiant (source indexée
+ * d'un cours migré dont l'original n'a jamais été copié).
  */
 export async function listCorpusSources(): Promise<CorpusSource[]> {
   const course = currentCourse();
@@ -277,14 +281,25 @@ export async function listCorpusSources(): Promise<CorpusSource[]> {
       WHERE s.id IN (SELECT min(id) FROM sources GROUP BY path)
       ORDER BY s.type, (s.year IS NULL), s.year DESC, s.title`
   );
+  const present = await existingSourcePaths(course, rows.map((r) => r.path));
+  const onComputer = present ? await localOriginalNames() : null;
+  const openable = (p: string) => !present || present.has(p) || !!onComputer?.has(baseName(p));
   return rows.map((r) => ({
     type: r.type,
     title: r.title,
     path: r.path,
     year: r.year,
     items: r.items,
-    href: sourceHref(course, r.path, r.anchor ?? r.path),
+    href: openable(r.path) ? sourceHref(course, r.path, r.anchor ?? r.path) : null,
   }));
+}
+
+const baseName = (p: string) => (p.split("/").pop() ?? p).toLowerCase();
+
+/** Originaux restés sur l'ordinateur (lib/originals), par nom de fichier comme les retrouve /csrc. */
+async function localOriginalNames(): Promise<Set<string>> {
+  const rows = await localOriginals("local").catch(() => []);
+  return new Set(rows.map((o) => baseName(o.path)));
 }
 
 /** Compte le corpus par type (pour situer l'utilisateur). */

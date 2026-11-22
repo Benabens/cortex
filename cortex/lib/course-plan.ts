@@ -2,7 +2,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
-import { sourceHref } from "@/lib/deeplink";
+import { liveSourceHref, sourceHref } from "@/lib/deeplink";
 import { lectureOfCourseHref } from "@/lib/course-order";
 
 /**
@@ -405,5 +405,6 @@ export async function getPlanChapters(): Promise<PlanChapter[]> {
   const rows = await q.all<{ id: number; seq: number; lecture_no: number | null; title: string; subtitle: string | null; summary: string | null; source_href: string | null }>(
     `SELECT id, seq, lecture_no, title, subtitle, summary, source_href FROM plan_chapters ORDER BY seq`
   );
-  return rows.map((r) => ({ id: r.id, seq: r.seq, lectureNo: r.lecture_no, title: r.title, subtitle: r.subtitle, summary: r.summary, sourceHref: r.source_href }));
+  const course = currentCourse();
+  return rows.map((r) => ({ id: r.id, seq: r.seq, lectureNo: r.lecture_no, title: r.title, subtitle: r.subtitle, summary: r.summary, sourceHref: liveSourceHref(course, r.source_href) }));
 }

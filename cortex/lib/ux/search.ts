@@ -63,18 +63,9 @@ export function metaFor(sourceType: string) {
 /**
  * Lien clic→source — réplique CLIENT-SAFE de lib/deeplink.ts (le module back
  * importe Node et ne peut pas être bundlé côté client ; même logique, ne pas diverger) :
- * cs-202 : HTML → viewer /voir (déplie + surligne), sinon /sites/<anchor> ;
- * autres cours : /csrc?course&p=<sourcePath> + fragment #page=N de l'anchor.
+ * /csrc?course&p=<sourcePath> + fragment #page=N de l'anchor, pour tous les cours.
  */
-export function hitHref(course: string, h: Hit, q: string): string {
-  if (course === "cs-202") {
-    if (h.sourcePath.endsWith(".html")) {
-      const item = h.itemId != null ? `&item=${h.itemId}` : "";
-      const query = q ? `&q=${encodeURIComponent(q)}` : "";
-      return `/voir?src=${encodeURIComponent(h.sourcePath)}${item}${query}`;
-    }
-    return `/sites/${h.anchor}`;
-  }
+export function hitHref(course: string, h: Hit): string {
   const frag = h.anchor.includes("#") ? "#" + h.anchor.split("#")[1] : "";
   return `/csrc?course=${encodeURIComponent(course)}&p=${encodeURIComponent(h.sourcePath)}${frag}`;
 }

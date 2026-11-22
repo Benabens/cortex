@@ -232,6 +232,7 @@ export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; o
                     <div className="text-[0.72rem] text-ink-4">
                       <span className="font-data">{ext}</span>
                       {onComputer.has(f.path) && <OnComputerBadge />}
+                      {hrefByPath.has(f.path) && !href && !onComputer.has(f.path) && <TextOnlyBadge />}
                     </div>
                   </div>
 
@@ -307,6 +308,7 @@ export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; o
                     <div className="text-[0.72rem] text-ink-4">
                       <span className="font-data">{ext}</span>
                       {onComputer.has(s.path) && <OnComputerBadge />}
+                      {!s.href && !onComputer.has(s.path) && <TextOnlyBadge />}
                     </div>
                   </div>
                   <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
@@ -348,6 +350,16 @@ function SeeLink({ href, label }: { href: string; label: string }) {
       {t("view")}
       <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
     </a>
+  );
+}
+
+/** Source indexée sans fichier d'origine (cours migré) : pas de « Voir », on dit pourquoi. */
+function TextOnlyBadge() {
+  const t = useTranslations("fileManager");
+  return (
+    <span title={t("textOnlyTitle")} className="ml-2 inline-flex items-center rounded-md border border-line px-1.5 py-px text-[0.68rem] text-ink-3">
+      {t("textOnly")}
+    </span>
   );
 }
 

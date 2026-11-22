@@ -99,7 +99,7 @@ export function SearchExperience() {
         setSelected((s) => Math.max(0, s - 1));
       } else if (e.key === "Enter" && !loading && query.trim() === debounced && flat[selected]) {
         e.preventDefault();
-        window.open(hitHref(courseId, flat[selected], debounced), "_blank", "noopener");
+        window.open(hitHref(courseId, flat[selected]), "_blank", "noopener");
       } else if (e.key === "Escape") {
         if (query) {
           e.preventDefault();
@@ -257,7 +257,7 @@ export function SearchExperience() {
                   return (
                     <a
                       key={`${h.itemId}-${i}`}
-                      href={hitHref(courseId, h, debounced)}
+                      href={hitHref(courseId, h)}
                       target="_blank"
                       rel="noopener noreferrer"
                       data-idx={i}
