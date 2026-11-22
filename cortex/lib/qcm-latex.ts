@@ -4,6 +4,7 @@ import { examDurationMin } from "@/lib/exam-format";
 import { examLayout, examPdf, type ExamLayout, type ExamPdf } from "@/lib/exam-layout";
 import { choicesTex, openHeadTex, qcmHeadTex } from "@/lib/exam-layout-tex";
 import { esc } from "@/lib/tex-escape";
+import { formulasOrText, markdownListsTex, texInline, texText } from "@/lib/tex-rich";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
@@ -33,9 +34,9 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, 
     // poussée à droite de l'option par \hfill, elle débordait ou se coupait en fragments entre
     // deux lignes justifiées dès que l'option ou la note étaient longues).
     const note = withKey && !correct && q.misconceptions?.[k]?.trim()
-      ? String.raw`\nopagebreak{\raggedright\leftskip=1.7em\footnotesize\itshape\color{gray}${L.misconception}${esc(q.misconceptions[k].trim())}\par}`
+      ? String.raw`\nopagebreak{\raggedright\leftskip=1.7em\footnotesize\itshape\color{gray}${L.misconception}${texInline(q.misconceptions[k].trim())}\par}`
       : "";
-    return { text: esc(o), correct, note };
+    return { text: texInline(o), correct, note };
   });
   // figure rendue (PNG déjà dans examsDir, à côté du .tex compilé).
   const fig = q.figureFile
@@ -44,9 +45,9 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, 
   return [
     qcmHeadTex(pdf.layout, L, n, q.type, points, esc(q.topic)),
     fig,
-    `\\noindent ${esc(q.stem).replace(/^\((SCQ|MCQ)\)\s*/i, "")}\\par\\smallskip`,
+    `\\noindent ${texText(q.stem.replace(/^\s*\((SCQ|MCQ)\)\s*/i, ""))}\\par\\smallskip`,
     choicesTex(pdf.layout, opts),
-    withKey && q.explanation ? String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${esc(q.explanation).replace(/\n+/g, String.raw`\newline `)}}\par` : "",
+    withKey && q.explanation ? String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${texText(q.explanation, String.raw`\newline `)}}\par` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -68,13 +69,13 @@ function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts: nu
   const L = pdf.qcm;
   // les énoncés ouverts (architecte ML) sont déjà en LaTeX (corps) — on les insère tels quels,
   // précédés d'un en-tête. Si pas de \subq dedans, on ajoute un espace de réponse.
-  const stmt = alignTikzNodes((q.statement_tex ?? "").trim());
+  const stmt = alignTikzNodes(markdownListsTex((q.statement_tex ?? "").trim()));
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
     (n > 1 || L.pageBeforeFirstOpen ? String.raw`\clearpage` : String.raw`\par\vspace{8pt}`) + openHeadTex(pdf.layout, L, n, esc(q.concept), q.points ?? defaultPts),
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
-    withSol ? String.raw`\par\medskip{\textbf{\color{${L.color}}${L.openSolution}}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
+    withSol ? String.raw`\par\medskip{\textbf{\color{${L.color}}${L.openSolution}}}\par\smallskip` + "\n" + alignTikzNodes(markdownListsTex(q.solution_tex ?? "")) : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -197,14 +198,22 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
   };
   const why = (e: unknown) => (e as Error).message.slice(0, 200);
 
+  // Chaque étape retente d'abord avec les formules du texte en texte (lib/tex-rich) : une formule
+  // qui ne compile pas ne doit pas faire passer les questions ouvertes en texte simple.
+  const compile = async (d: QcmExamData, solutions: boolean) => {
+    const r = await formulasOrText(async () => compileExamPdf(await write(d, solutions)));
+    if (r.asText) formulasAsText = true;
+    return r.value;
+  };
+  let formulasAsText = false;
   let pdf: string;
   let warning: string | undefined;
   try {
-    pdf = await compileExamPdf(await write(data, false));
+    pdf = await compile(data, false);
   } catch (e) {
     if (!data.open.length) return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: (e as Error).message };
     try {
-      pdf = await compileExamPdf(await write(plain, false));
+      pdf = await compile(plain, false);
       warning = `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne passait pas : ${why(e)})`;
     } catch (e2) {
       return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: `${(e as Error).message}, repli en texte simple échoué aussi : ${why(e2)}` };
@@ -213,16 +222,17 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
   // Corrigé : même source que l'énoncé, puis le même repli s'il ne compile pas (examen 2 de
   // CS-290 : « Énoncé » sans « Corrigé »).
   try {
-    await compileExamPdf(await write(warning ? plain : data, true));
+    await compile(warning ? plain : data, true);
   } catch (e) {
     try {
       if (warning || !data.open.length) throw e;
-      await compileExamPdf(await write(plain, true));
+      await compile(plain, true);
       warning = `Corrigé compilé avec les questions ouvertes en texte simple (${why(e)})`;
     } catch (e2) {
       warning = `${warning ? `${warning} ; ` : ""}corrigé non compilé : ${why(e2)}`;
       console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message);
     }
   }
+  if (formulasAsText) warning = `${warning ? `${warning} ; ` : ""}formules imprimées en texte (elles ne compilaient pas)`;
   return { file: pdf, ...(warning ? { texWarning: warning } : {}) };
 }
