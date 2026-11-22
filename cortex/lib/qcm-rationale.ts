@@ -17,6 +17,8 @@
  * Les examens déjà en base gardent leur explication texte ; la colonne `rationale_json` est additive.
  */
 
+import type { Language } from "@/lib/exam-format";
+
 /** Justification d'un QCM : la clé, et une raison par option (`""` pour une bonne réponse ou une case à écrire). */
 export type QcmRationale = { key: string; wrong: string[]; lang?: string };
 
@@ -116,7 +118,7 @@ export function fillRationale(r: QcmRationale, got: { key?: unknown; distractors
 }
 
 const LETTERS = "ABCDEFGH";
-const WORDS: Record<string, { right: string; rights: string; wrong: string; open: string; close: string }> = {
+const WORDS: Record<Language, { right: string; rights: string; wrong: string; open: string; close: string }> = {
   fr: { right: "juste", rights: "justes", wrong: "faux", open: "« ", close: " »" },
   en: { right: "correct", rights: "correct", wrong: "wrong", open: "“", close: "”" },
   de: { right: "richtig", rights: "richtig", wrong: "falsch", open: "„", close: "“" },
@@ -124,6 +126,9 @@ const WORDS: Record<string, { right: string; rights: string; wrong: string; open
   es: { right: "correcta", rights: "correctas", wrong: "incorrecta", open: "« ", close: " »" },
   pt: { right: "correta", rights: "corretas", wrong: "incorreta", open: "« ", close: " »" },
   nl: { right: "juist", rights: "juist", wrong: "fout", open: "“", close: "”" },
+  ko: { right: "맞음", rights: "맞음", wrong: "틀림", open: "“", close: "”" },
+  he: { right: "נכון", rights: "נכונות", wrong: "שגוי", open: "“", close: "”" },
+  ar: { right: "صحيح", rights: "صحيحة", wrong: "خاطئ", open: "“", close: "”" },
 };
 
 /**
@@ -154,7 +159,7 @@ function head(option: string, max = 70): string {
  * une option qui n'est pas dans `options`, jamais deux lignes pour la même.
  */
 export function assembleExplanation(r: QcmRationale, options: string[], correct: number[], lang = r.lang ?? "fr"): string {
-  const w = WORDS[lang] ?? WORDS.en;
+  const w = WORDS[lang as Language] ?? WORDS.en;
   const shown = distinctive(options);
   const quote = (k: number) => `${w.open}${head(shown[k] ?? "")}${w.close}`;
   const keys = correct.filter((k) => k >= 0 && k < options.length).sort((a, b) => a - b);
