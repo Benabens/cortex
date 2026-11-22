@@ -94,7 +94,7 @@ export default defineTool({
     });
   },
   summarize: (o) => {
-    if (!o.analyzed) return `${o.course.label}: the syllabus has not been analysed yet. Import past exams into Cortex and run the analysis.`;
+    if (!o.analyzed) return `${o.course.label}: the syllabus has not been analysed yet. Add the course materials (add_course_source, past exams first), then run prepare_course.`;
     const countdown = o.exam.days_left !== null ? ` The exam is in ${o.exam.days_left} day(s).` : "";
     // Aucun libellé de notion ici : ils viennent des documents du cours et restent dans le bloc de données.
     return `${o.course.label}: ${o.stats.coverage_pct}% coverage, ${o.stats.mastery_pct}% mastery, ${o.stats.due_now} of ${o.stats.topics} topic(s) due for review.${countdown}`;

@@ -17,7 +17,7 @@ export default defineTool({
   name: "set_exam_format",
   title: "Declare the exam format of a course",
   description:
-    "Declares (or clears) the real exam format of a course: type (qcm, exercises, mixed, essay, oral), number of questions, duration, language, documents allowed, " +
+    "Declares (or clears) the real exam format of a course: type (qcm, exercises, mixed, composite, essay, oral), number of questions, duration, language, documents allowed, " +
     "and for multiple-choice exams whether each question has a single correct answer or several (answer_mode). " +
     "Free. Past exams of the course, when present and analysed, still take precedence; otherwise mock exams follow this format (e.g. \"a 20-question MCQ midterm, 45 min\"). " +
     "clear=true removes the declaration.",

@@ -102,7 +102,7 @@ export default defineTool({
         ? (asked ? `Format requested for this exam: ${formatSummary}; the course’s past-exam format remains the default.` : plan.generator === "blocks" ? `Past-exam format: ${formatSummary}.` : null)
         : `This course has no past exams. Format: ${formatSummary}.`;
       const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, note, confirmation: null, declined: null, job: null };
-      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-35", track_with: `get_job_status with job_id=${jobId}` });
+      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-35", track_with: `get_job_status with course="${c.id}" and job_id=${jobId}` });
 
       // Un examen déjà en cours est réutilisé, comme dans l'app : rien à confirmer, rien de débité.
       const running = await activeJob(jobType);
@@ -146,7 +146,7 @@ export default defineTool({
     const note = o.note ? ` ${o.note}` : "";
     if (o.status === "confirmation_required" && o.confirmation) return `${quoteSummary(o.confirmation)}${note}`;
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    if (o.job) return `${o.status === "started" ? "Mock exam generation started" : "A mock exam is already being generated"} (job ${o.job.job_id}, 10–35 min). Track it with get_job_status.${note}`;
+    if (o.job) return `${o.status === "started" ? "Mock exam generation started" : "A mock exam is already being generated"} (job ${o.job.job_id}, 10–35 min). Track it with get_job_status (course="${o.course.id}", job_id=${o.job.job_id}).${note}`;
     return `Mock exam.${note}`;
   },
 });

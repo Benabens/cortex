@@ -2,7 +2,7 @@ import * as z from "zod/v4";
 import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { InvalidCourseError, buildCourseRow } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
-import { courseLabel } from "../courses";
+import { courseLabel, sameCourseCode } from "../courses";
 import { LANGUAGES } from "@/lib/exam-format";
 import { courseRef, courseRefOf, examFormatInput } from "../schemas";
 import { ToolError, defineTool } from "../tool";
@@ -40,7 +40,8 @@ export default defineTool({
     const userId = ctx.principal.userId;
     await ensureCoursesLoaded();
     const code = args.code?.trim();
-    const twin = code ? listCoursesOf(userId).find((c) => c.examCode?.toLowerCase() === code.toLowerCase()) : undefined;
+    // À la ponctuation près, comme la résolution du cours : « CS 250 » et « CS-250 » sont le même code.
+    const twin = code ? listCoursesOf(userId).find((c) => sameCourseCode(c.examCode, code)) : undefined;
     if (twin) throw new ToolError("conflict", `A course already uses code ${code}: ${courseLabel(twin)} (id ${twin.id}).`);
     let row;
     try {

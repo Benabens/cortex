@@ -8,7 +8,9 @@ import { getQcmExam } from "@/lib/qcm";
 import { drillOfJob } from "@/lib/drill-job";
 import { redactMessage } from "@/lib/observability";
 import { ingestProblems } from "@/lib/ingest-report";
+import { ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
 import { clip, htmlToText } from "../content";
+import { courseLabel } from "../courses";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { defineTool, READ_ONLY_HINTS, ToolError } from "../tool";
 
@@ -150,6 +152,37 @@ function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jo
   };
 }
 
+/**
+ * Job en cours, aides comprises : activeJob() sans type écarte le drill (bandeau de l'app), mais un
+ * drill qui s'écrit EST en cours pour l'assistant — sans lui, « No generation is running » invitait à
+ * le relancer.
+ */
+async function runningJob(): Promise<Job | null> {
+  return (await activeJob()) ?? (await activeJob("drill"));
+}
+
+/**
+ * Les job_id sont numérotés PAR COURS (le job 3 existe dans plusieurs cours). Sans « course » sur un
+ * compte à plusieurs cours, on cherche le job dans chacun : un seul l'a → c'est lui ; plusieurs →
+ * on dit lesquels (type, date) au lieu de répondre « précise le cours » sans indice.
+ */
+async function courseOfJob(userId: string, jobId: number, inCourse: (ref: string, fn: () => Promise<Job | null>) => Promise<Job | null>): Promise<string | undefined> {
+  await ensureCoursesLoaded();
+  const mine = listCoursesOf(userId);
+  if (mine.length < 2) return undefined;
+  const found: { id: string; label: string; job: Job }[] = [];
+  for (const c of mine) {
+    const job = await inCourse(c.id, () => getJob(jobId)).catch(() => null);
+    if (job) found.push({ id: c.id, label: courseLabel(c), job });
+  }
+  if (found.length === 1) return found[0].id;
+  if (!found.length) throw new ToolError("not_found", `No generation job ${jobId} exists in this account’s courses.`);
+  throw new ToolError("invalid_input",
+    `Job ids are numbered per course, and job ${jobId} exists in ${found.length} courses: ` +
+    `${clip(found.map((f) => `${f.label} (course id ${f.id}: ${f.job.type}, started ${f.job.createdAt})`).join("; "), 800)}. ` +
+    "Call again with “course” set to the course the job was started in.");
+}
+
 export default defineTool({
   name: "get_job_status",
   title: "Track a generation",
@@ -157,7 +190,7 @@ export default defineTool({
     "Returns the status, progress and current step of a long-running job started by generate_mock_exam (typically 10-35 minutes, longer for a large exam), generate_drill (1-3 minutes) or prepare_course. " +
     "When a mock exam (written or multiple-choice) is done, it also returns its questions, the solutions when include_solutions is true, and a link to the exam in Cortex. " +
     "When a practice question is done, it returns the question, its five hints and its worked solution. " +
-    "Without job_id, it returns the generation currently running and the latest ones. Read-only and free.",
+    "Without job_id, it returns the generation currently running and the latest ones. Job ids are numbered per course: pass the course the job was started in. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "getJobStatus",
@@ -168,10 +201,11 @@ export default defineTool({
   }),
   output,
   async run({ course, job_id, include_solutions }, ctx) {
-    return ctx.inCourse(course, async (c) => {
+    const ref = course ?? (job_id === undefined ? undefined : await courseOfJob(ctx.principal.userId, job_id, (id, fn) => ctx.inCourse(id, fn)));
+    return ctx.inCourse(ref, async (c) => {
       const base = { course: courseRefOf(c), job: null, exam: null, active: null, recent: [] as z.infer<typeof jobOut>[] };
       if (job_id === undefined) {
-        const active = await activeJob();
+        const active = await runningJob();
         return { ...base, active: active ? jobView(active, ctx.appOrigin, c.id) : null, recent: (await listJobs(5)).map((j) => jobView(j, ctx.appOrigin, c.id)) };
       }
       const job = await getJob(job_id);
