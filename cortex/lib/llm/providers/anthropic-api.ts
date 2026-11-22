@@ -13,7 +13,10 @@ let _clientKey: string | null = null;
 
 function client(key: string): Anthropic {
   if (!_client || _clientKey !== key) {
-    _client = new Anthropic({ apiKey: key, ...(baseUrl() ? { baseURL: baseUrl() } : {}) });
+    // maxRetries 0 : les réessais sont ceux de withRetry (LLM_MAX_RETRIES), qui ouvrent chacun leur
+    // ligne d'usage et repassent le plafond de la réservation. Le défaut du SDK (2) les multipliait
+    // en douce : 9 requêtes pour un 529 persistant au lieu de 3.
+    _client = new Anthropic({ apiKey: key, maxRetries: 0, ...(baseUrl() ? { baseURL: baseUrl() } : {}) });
     _clientKey = key;
   }
   return _client;
@@ -64,11 +67,22 @@ export function structuredSchema(schema: object): object | null {
   return ok ? (strict as object) : null;
 }
 
+/**
+ * Erreurs envoyées DANS le flux, après le 200 (`event: error`) : le SDK les lève sans statut HTTP.
+ * Surcharge et panne passagère de l'API se réessaient comme leurs équivalents HTTP (529, 5xx), sous
+ * un code à part : la réponse a commencé, l'estimation d'usage est gardée (pas dans DISCARD_CODES).
+ */
+const RETRYABLE_STREAM_ERRORS = new Set(["overloaded_error", "api_error"]);
+
 function toLlmError(e: unknown): LlmError {
-  const err = e as { status?: number; message?: string; name?: string };
+  const err = e as { status?: number; message?: string; name?: string; type?: string | null };
   const msg = err?.message ? String(err.message) : String(e);
   if (err?.name === "AbortError") return new LlmError("Appel LLM annulé.", "ABORTED");
+  // Connexion refusée ou coupée avant la réponse : rien n'a été traité. Réessayée par withRetry,
+  // comme le faisait le SDK quand il gardait ses propres réessais.
+  if (e instanceof Anthropic.APIConnectionError && !(e instanceof Anthropic.APIConnectionTimeoutError)) return new LlmError(msg, "NETWORK", true);
   const status = typeof err?.status === "number" ? err.status : undefined;
+  if (status === undefined && err?.type && RETRYABLE_STREAM_ERRORS.has(err.type)) return new LlmError(msg, "STREAM_INTERRUPTED", true);
   if (status === 401 || status === 403) return new LlmError(msg, "AUTH");
   if (status === 429) return new LlmError(msg, "RATE_LIMIT", true);
   if (status === 529) return new LlmError(msg, "OVERLOADED", true);
@@ -144,12 +158,23 @@ export const anthropicProvider: LlmProvider = {
     };
     if (Object.keys(outputConfig).length) params.output_config = outputConfig;
 
+    // `timeoutMs` borne l'appel ENTIER : le `timeout` du SDK s'arrête à l'arrivée des en-têtes, et un
+    // flux qui vit (pings) sans finir retenait le job sans limite (les 480-600 s calibrées n'avaient
+    // aucun effet en prod). Une seule horloge pour l'appel, rejeu en texte libre compris.
+    const deadline = req.timeoutMs ? Date.now() + req.timeoutMs : null;
+    let timedOut = false;
     const run = async (p: Record<string, unknown>) => {
       const stream = client(key).messages.stream(
         p as Parameters<Anthropic["messages"]["stream"]>[0],
         { ...(req.timeoutMs ? { timeout: req.timeoutMs } : {}), ...(req.signal ? { signal: req.signal } : {}) }
       );
-      return stream.finalMessage();
+      const left = deadline === null ? null : Math.max(0, deadline - Date.now());
+      const timer = left === null ? null : setTimeout(() => { timedOut = true; stream.abort(); }, left);
+      try {
+        return await stream.finalMessage();
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     };
 
     let msg: Awaited<ReturnType<typeof run>>;
@@ -169,6 +194,7 @@ export const anthropicProvider: LlmProvider = {
         msg = await run(fallback);
       }
     } catch (e) {
+      if (timedOut) throw new LlmError(`Appel LLM trop long (timeout de ${req.timeoutMs} ms).`, "TIMEOUT", true);
       throw toLlmError(e);
     }
 
