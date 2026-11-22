@@ -2,6 +2,7 @@ import { currentCourse } from "@/db/client";
 import { getCourse, type CourseConfig } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { durationOf, formatContextFor } from "@/lib/exam-format";
+import { shapePreamble } from "@/lib/exam-preamble";
 import type { CoverFacts, ExamForm, ExamLayout, ExamPdf, IdField, PageSlot, Slots } from "@/lib/exam-layout";
 import { headNumber } from "@/lib/exam-layout-tex";
 import { courseTitle, courseWords, durationText, examKindText, genericPreamble, localBlockLabels, localDate, localQcmLabels, localWrittenLabels, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
@@ -186,16 +187,9 @@ function chrome(layout: ExamLayout) {
   };
 }
 
-/**
- * Le préambule commun (en 11 pt) à la taille de la mise en page ; multicol seulement pour des
- * questions sur deux colonnes (préchauffé dans l'image : Dockerfile, contrôle hors ligne de la CI).
- */
+/** Le préambule commun (en 11 pt) à la taille et aux colonnes de la mise en page (lib/exam-preamble). */
 function preamble(layout: ExamLayout) {
-  return (src: string) => {
-    let out = layout.font.size === 11 ? src : src.replace(/\\documentclass\[11pt/, String.raw`\documentclass[${layout.font.size}pt`);
-    if (layout.questions.columns === 2) out = out.replace(/\\usepackage\{needspace\}/, String.raw`\usepackage{needspace}` + "\n" + String.raw`\usepackage{multicol}`);
-    return out;
-  };
+  return (src: string) => shapePreamble(src, { size: layout.font.size, columns: layout.questions.columns });
 }
 
 /** Le PDF de la mise en page paramétrique `layout`, pour le cours courant. */

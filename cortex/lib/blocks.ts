@@ -557,7 +557,7 @@ async function ensureBlockSchema(): Promise<void> {
   await q.ensureTable("block_parts");
 }
 
-async function saveBlockExam(blocks: ExamBlock[]): Promise<number> {
+export async function saveBlockExam(blocks: ExamBlock[]): Promise<number> {
   await ensureBlockSchema();
   const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('blocks','generating')`);
   for (const [i, b] of blocks.entries()) {
