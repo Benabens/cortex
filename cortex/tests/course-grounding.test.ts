@@ -126,3 +126,56 @@ test("chiffres porteurs : pourcentages, années et entiers trouvés dans le cour
     assert.deepEqual(await absentCourseNumbers(["93", "1981", "61", "14"]), ["61", "14"]);
   });
 });
+
+test("extraits du QCM, du drill et de check-solution (suite de #202) : la théorie loin dans un support, et deux notions d'un même support, sont montrées", async () => {
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const { coursePassages } = await import("../lib/course-grounding");
+  await runWithCourse("fictif", async () => {
+    ensureFts();
+    for (const t of ["sources", "items"]) await q.ensureTable(t);
+    // Banc rs-composite du 22/11 : l'en-tête du support (le notebook) reprend le nom du chapitre,
+    // la théorie n'arrive qu'après 900 caractères.
+    const title = "Safety 2 - content recommendation";
+    const notebook = Array.from({ length: 14 }, (_, i) => `Safety 2 cell ${i}: df.sort_values("likes").head(${i + 2}) prints the least liked memes.`).join(" ");
+    const loop = "A feedback loop happens when the recommender's output becomes its next input and amplifies the user's drift.";
+    const theory = "Malinformation is genuine content shared out of context to cause harm, unlike disinformation (false and deliberate).";
+    const text = `${title}. ${loop} ${notebook} Theory. ${theory}`;
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/${title}`, null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", title, text);
+    await indexItemForSearch(iid, sid, title, text);
+    // Un sujet de QCM qui porte le nom du chapitre : la fenêtre se calait sur le titre.
+    const one = await coursePassages(["Safety 2: malinformation versus disinformation"]);
+    assert.ok(one.some((p) => p.text.includes("Malinformation is genuine content")), JSON.stringify(one));
+    // Deux sujets servis par le même support : le second n'en recevait plus rien.
+    const two = await coursePassages(["feedback loop recommender amplifies", "malinformation genuine content out of context"]);
+    assert.ok(two.some((p) => p.text.includes("feedback loop happens")), JSON.stringify(two));
+    assert.ok(two.some((p) => p.text.includes("Malinformation is genuine content")), JSON.stringify(two));
+  });
+});
+
+test("budget d'extraits : chaque requête reçoit son meilleur extrait avant qu'une autre n'en reçoive un second", async () => {
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const { evidencePassages } = await import("../lib/course-grounding");
+  await runWithCourse("ml", async () => {
+    ensureFts();
+    for (const t of ["sources", "items"]) await q.ensureTable(t);
+    const filler = (w: string) => Array.from({ length: 20 }, (_, i) => `${w} example ${i} of the chapter.`).join(" ");
+    for (const [title, w] of [["Week 1 - utilitarianism", "utilitarianism"], ["Week 2 - deontology", "deontology"], ["Week 3 - virtue ethics", "virtue"]]) {
+      // Deux pages par support : la requête a de quoi remplir deux extraits.
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/${title}`, null, 1);
+      for (const page of [1, 2]) {
+        const text = `${title}, page ${page}. ${filler(w)}`;
+        const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", title, text);
+        await indexItemForSearch(iid, sid, title, text);
+      }
+    }
+    // Lot QCM de 3 notions, 2 extraits de 300 caractères chacune, budget de 3 extraits : la dernière
+    // notion du lot n'en recevait aucun, les deux premières ayant tout pris.
+    const got = await evidencePassages(["utilitarianism", "deontology", "virtue"], { perQuery: 2, cap: 300, budget: 900 });
+    assert.deepEqual([...new Set(got.map((p) => p.src))].sort(), ["Week 1 - utilitarianism", "Week 2 - deontology", "Week 3 - virtue ethics"], JSON.stringify(got.map((p) => p.src)));
+  });
+});

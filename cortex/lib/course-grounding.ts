@@ -177,40 +177,17 @@ export async function absentCourseNumbers(numbers: string[]): Promise<string[]> 
 /** Types de sources jamais pris comme « faits du cours » à tester (annales : on n'en recopie pas les questions). */
 const NOT_COURSE_FACTS = new Set<string>(EXAM_SOURCE_TYPES);
 
-/** Fenêtre d'un texte autour du premier mot de la requête qu'il contient. */
-function windowAround(text: string, query: string, cap: number): string {
-  const t = readColumns(text).replace(/\s+/g, " ").trim();
-  if (t.length <= cap) return t;
-  const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4);
-  const lower = t.toLowerCase();
-  const at = words.map((w) => lower.indexOf(w)).filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? 0;
-  const start = Math.max(0, Math.min(at - Math.floor(cap / 3), t.length - cap));
-  return t.slice(start, start + cap);
-}
-
-/** Extraits du cours sur les sujets d'un lot (recherche plein texte), pour ancrer chaque question sur un fait précis. */
-export async function coursePassages(topics: string[], perTopic = 2, cap = 900): Promise<{ src: string; text: string }[]> {
-  const { search } = await import("@/lib/search");
-  const out: { src: string; text: string }[] = [];
-  const seen = new Set<number>();
-  // Hors programme et archives d'organisation : jamais un passage à tester (lib/source-scope).
-  const excluded = await excludedSourceIds();
-  for (const topic of topics) {
-    let groups: Awaited<ReturnType<typeof search>> = [];
-    try { groups = await search(topic, 16, "or"); } catch { continue; }
-    let k = 0;
-    for (const h of groups.flatMap((g) => g.hits)) {
-      if (k >= perTopic) break;
-      if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId)) || seen.has(h.itemId)) continue;
-      seen.add(h.itemId);
-      const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      const matter = courseMatter(row?.text ?? "");
-      if (!matter) continue;
-      out.push({ src: h.sourceTitle, text: windowAround(matter, topic, cap) });
-      k++;
-    }
-  }
-  return out;
+/**
+ * Extraits du cours sur les sujets d'un lot (QCM, drill, check-solution), pour ancrer chaque
+ * question sur un fait précis : le moteur d'evidencePassages, en fenêtres de `cap` caractères.
+ * L'ancienne recherche calait la fenêtre sur le premier mot trouvé (souvent le nom du chapitre,
+ * dans le titre du support) et ne montrait plus rien d'un support déjà cité pour un autre sujet :
+ * la théorie, plus bas, n'arrivait ni au générateur ni au juge (banc rs-composite, 22/11, #202).
+ */
+export function coursePassages(topics: string[], perTopic = 2, cap = 900): Promise<{ src: string; text: string }[]> {
+  // Budget : une fenêtre pleine par sujet, `perTopic` au moins (un drill, un énoncé). Sans lui, un lot
+  // QCM de 10 notions de CS-290 doublait (7 200 → 14 100 caractères, dump du 02/11) ; avec, 9 400.
+  return evidencePassages(topics, { perQuery: perTopic, cap, budget: cap * Math.max(perTopic, topics.length) });
 }
 
 /** Mots porteurs d'une requête : 5 lettres ou plus, ou un nombre (année, pourcentage). */
@@ -228,17 +205,17 @@ export function densestWindow(text: string, query: string, cap: number): string 
   return densestSpan(text, query, cap).text;
 }
 
-/** densestWindow avec la plage retenue dans le texte aplati (dédoublonnage par recouvrement). */
-function densestSpan(text: string, query: string, cap: number): { text: string; start: number } {
+/** densestWindow avec la plage retenue dans le texte aplati `flat` (dédoublonnage des fenêtres). */
+function densestSpan(text: string, query: string, cap: number): { text: string; start: number; flat: string } {
   const t = readColumns(text).replace(/\s+/g, " ").trim();
-  if (t.length <= cap) return { text: t, start: 0 };
+  if (t.length <= cap) return { text: t, start: 0, flat: t };
   const lower = t.toLowerCase();
   const positions = queryWords(query).map((w) => {
     const at: number[] = [];
     for (let i = lower.indexOf(w); i >= 0 && at.length < 60; i = lower.indexOf(w, i + 1)) at.push(i);
     return at;
   }).filter((a) => a.length);
-  if (!positions.length) return { text: t.slice(0, cap), start: 0 };
+  if (!positions.length) return { text: t.slice(0, cap), start: 0, flat: t };
   // Fenêtres essayées autour de chaque occurrence : le mot au premier quart, au début, ou à la fin.
   const lead = Math.floor(cap / 4);
   const starts = new Set<number>();
@@ -256,14 +233,37 @@ function densestSpan(text: string, query: string, cap: number): { text: string; 
   let end = Math.min(t.length, best + cap);
   const space = t.indexOf(" ", end);
   if (end < t.length && space >= 0 && space - end < 40) end = space;
-  return { text: t.slice(start, end), start };
+  return { text: t.slice(start, end), start, flat: t };
+}
+
+/**
+ * Une fenêtre face aux plages déjà montrées du même support : null si tous les mots de la requête
+ * qu'elle contient y sont déjà (rien de neuf), sinon la fenêtre privée de ce qui recouvre une plage
+ * montrée, calée sur un mot. Banc rs-composite, 22/11 : recalée en fin de support, la fenêtre de la
+ * théorie recouvrait pour plus de moitié celle de l'en-tête et était jetée comme doublon.
+ */
+function freshSpan(flat: string, query: string, from: number, to: number, shown: [number, number][]): [number, number] | null {
+  const inShown = (i: number) => shown.some(([a, b]) => i >= a && i < b);
+  const lower = flat.toLowerCase();
+  const hits: number[] = [];
+  for (const w of queryWords(query)) for (let i = lower.indexOf(w, from); i >= 0 && i < to; i = lower.indexOf(w, i + 1)) hits.push(i);
+  if (!hits.length ? shown.some(([a, b]) => a < to && b > from) : hits.every(inShown)) return null;
+  let start = from;
+  let end = to;
+  for (const [a, b] of shown) {
+    if (a <= start && b > start) start = b;
+    if (a < end && b >= end) end = a;
+  }
+  if (start > from && start < end) start = flat.indexOf(" ", start - 1) + 1 || start;
+  return end - start >= 80 ? [start, end] : null;
 }
 
 /**
  * Passages du cours qui servent de PREUVE : pour chaque requête (un fait, un énoncé, une
  * notion), les meilleurs résultats de la recherche plein texte, en fenêtres larges centrées sur
  * la requête. Deux fenêtres d'un même support ne sont gardées que si elles ne se recouvrent pas.
- * Jamais les annales, exemples ni consignes d'examen, ni une source hors programme. `budget` borne le total en caractères.
+ * Jamais les annales, exemples ni consignes d'examen, ni une source hors programme. `budget` borne
+ * le total en caractères, servi par tours : le meilleur extrait de chaque requête, puis le second.
  */
 export async function evidencePassages(queries: string[], opts: { perQuery?: number; cap?: number; budget?: number } = {}): Promise<{ src: string; text: string }[]> {
   const { perQuery = 2, cap = 1800, budget = 24_000 } = opts;
@@ -275,29 +275,47 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
   const windows = new Map<number, [number, number][]>();
   const excluded = await excludedSourceIds();
   let used = 0;
-  for (const query of queries.map((x) => x.trim()).filter(Boolean)) {
-    if (used >= budget) break;
-    let hits: Awaited<ReturnType<typeof rankedHits>> = [];
-    try { hits = await rankedHits(query.slice(0, 400), 16, "or"); } catch { continue; }
-    let k = 0;
-    for (const h of hits) {
-      if (k >= perQuery || used >= budget) break;
+  const wanted = queries.map((x) => x.trim()).filter(Boolean);
+  // Résultats de chaque requête, cherchés à son premier tour, et la position atteinte dans la liste.
+  const hitsOf = new Map<number, Awaited<ReturnType<typeof rankedHits>>>();
+  const next = new Map<number, number>();
+  /** Le prochain extrait neuf d'une requête, ou null quand ses résultats sont épuisés. */
+  const take = async (i: number): Promise<{ src: string; text: string } | null> => {
+    const query = wanted[i];
+    if (!hitsOf.has(i)) {
+      let hits: Awaited<ReturnType<typeof rankedHits>> = [];
+      try { hits = await rankedHits(query.slice(0, 400), 16, "or"); } catch { /* requête sans résultat */ }
+      hitsOf.set(i, hits);
+    }
+    const hits = hitsOf.get(i)!;
+    for (let j = next.get(i) ?? 0; j < hits.length; j++) {
+      const h = hits[j];
+      next.set(i, j + 1);
       if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId))) continue;
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
       const matter = courseMatter(row?.text ?? "");
       if (!matter) continue;
-      const { text, start: from } = densestSpan(matter, query, cap);
+      const { text, start: from, flat } = densestSpan(matter, query, cap);
       const seen = windows.get(h.itemId) ?? [];
-      // Fenêtre déjà montrée pour plus de moitié (une autre requête) : rien de neuf, et elle ne prend
-      // pas la place d'un résultat suivant. Une fenêtre qui commence dans une autre mais va plus loin
-      // est gardée : la suite d'un support (sa théorie, après l'en-tête et le notebook) était jetée
-      // comme doublon, et ses deux doublons privaient une notion de tout extrait (banc rs-composite, 22/11).
-      const span: [number, number] = [from, from + text.length];
-      if (seen.some(([a, b]) => Math.min(b, span[1]) - Math.max(a, span[0]) > text.length / 2)) continue;
+      // Fenêtre dont les mots de la requête sont déjà montrés (une autre requête) : rien de neuf, et
+      // elle ne prend pas la place d'un résultat suivant. Sinon, seulement ce qu'elle apporte : la
+      // suite d'un support (sa théorie, après l'en-tête et le notebook) était jetée comme doublon,
+      // et ses doublons privaient une notion de tout extrait (banc rs-composite, 22/11).
+      const span = freshSpan(flat, query, from, from + text.length, seen);
+      if (!span) continue;
       windows.set(h.itemId, [...seen, span]);
-      out.push({ src: h.sourceTitle, text });
-      used += text.length;
-      k++;
+      return { src: h.sourceTitle, text: flat.slice(span[0], span[1]) };
+    }
+    return null;
+  };
+  // Par tours : servies l'une après l'autre, les premières requêtes d'un lot (QCM de 10 notions)
+  // prenaient tout le budget et les dernières n'avaient aucun extrait.
+  for (let round = 0; round < perQuery && used < budget; round++) {
+    for (let i = 0; i < wanted.length && used < budget; i++) {
+      const p = await take(i);
+      if (!p) continue;
+      out.push(p);
+      used += p.text.length;
     }
   }
   return out;

@@ -94,6 +94,16 @@ const sim = { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misf
  */
 const MISFILED = { from: 9, to: 8, fact: () => pseudo(9, 2) };
 let designed = 0;
+/** Rang de chaque fait dans le cours inventé, et combien de fois il a déjà été conçu. */
+const factRank = new Map([...where.keys()].map((st, r) => [st, r + 1]));
+const factDesigns = new Map<string, number>();
+/** Fait dont la clé est contestée à sa première conception (voir verify). */
+const CONTESTED = THEMES[2].fact.statement;
+function caseOf(statement: string): number {
+  const times = factDesigns.get(statement) ?? 0;
+  factDesigns.set(statement, times + 1);
+  return (factRank.get(statement) ?? 0) + 100 * times;
+}
 const calls = { facts: 0, design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, other: 0 };
 const total = () => Object.values(calls).reduce((a, b) => a + b, 0);
 
@@ -114,9 +124,12 @@ function design(prompt: string): string {
   const lines = [...prompt.matchAll(/^ {2}(\d+)\) (.+)$/gm)].map((m) => m[2]);
   const n = Number(/\((\d+) QCM\)/.exec(prompt)?.[1] ?? 1);
   return JSON.stringify({ items: Array.from({ length: n }, (_, k) => {
-    const g = ++designed;
     const line = lines[k] ?? "";
     const factM = /^(.+?) — FAIT À TESTER \[(f-[0-9a-f]+)\] : (.+?)$/.exec(line);
+    // Numéro d'une question par fait, pas par ordre d'arrivée : les lots partent en parallèle, et le
+    // premier arrivé prenait les premiers numéros (donc les rejets « tous les 9 », les options à
+    // réparer « tous les 3 ») selon une course entre les lots.
+    const g = factM ? caseOf(factM[3].trim()) : ++designed;
     const topic = (factM?.[1] ?? line.replace(/ \[.*$/, "").replace(/ — .*$/, "")).trim();
     let key: string;
     let source: string;
@@ -159,7 +172,9 @@ function verify(prompt: string): string {
     const opts = [...body.matchAll(/^\s+\((\d+)\) (.*)$/gm)];
     const key = Number(opts.find((m) => m[2].startsWith(KEY))?.[1] ?? 0);
     const g = Number(/cas (\d+)/.exec(body)?.[1] ?? 1);
-    const reject = sim.rejectEvery > 0 && g % sim.rejectEvery === 0;
+    // Le fait du nudge, toujours retenu, voit sa clé contestée à sa première conception : le chemin
+    // « rejet → fait de réserve » reste parcouru quel que soit le numéro que tombent les autres faits.
+    const reject = sim.rejectEvery > 0 && (g % sim.rejectEvery === 0 || (g < 100 && body.includes(CONTESTED)));
     return {
       index, correct: reject ? [(key + 1) % opts.length] : [key], ok: !reject, discrimination: 4, name_only: false, issue: reject ? "clé contestée" : "",
       course_terms: [], off_course: "", off_course_terms: [], off_course_options: [], off_course_key: false, off_matter: "",
@@ -246,6 +261,7 @@ before(async () => {
 beforeEach(() => {
   Object.assign(sim, { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false, perNotion: 0 });
   designed = 0;
+  factDesigns.clear();
   seenTopics.clear();
   process.env.QCM_FACTS = "1";
 });
@@ -358,6 +374,7 @@ test("examen #14 rejoué : 20/20, aucun fait partagé, ≥ 10 notions, chaque pr
   // AVANT : la même composition conçue par notion, sur le même cours (sans faits).
   process.env.QCM_FACTS = "0";
   designed = 0;
+  factDesigns.clear();
   seenTopics.clear();
   const before = await generate(await course());
   t.diagnostic(`par notion : ${before.detail}`);
