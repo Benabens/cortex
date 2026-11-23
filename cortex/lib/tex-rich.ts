@@ -248,7 +248,7 @@ function formulaSegments(s: string): Segment[] {
     const tex = mathTex(display ?? m[3] ?? m[4]);
     if (tex === null) continue;
     if (m.index > last) out.push(...bareSegments(s.slice(last, m.index)));
-    out.push({ math: display !== undefined ? `\\displaystyle ${tex.trim()}` : tex });
+    out.push({ math: display !== undefined ? displayTex(tex) : tex });
     last = m.index + m[0].length;
   }
   if (last < s.length) out.push(...bareSegments(s.slice(last)));
@@ -258,12 +258,19 @@ function formulaSegments(s: string): Segment[] {
 /** Une ligne de texte du modèle → LaTeX en ligne (option, titre, critère) : formules sûres en maths, le reste par `esc`. */
 export function texInline(s: string): string {
   if (plainMath.getStore()) return esc(s ?? "");
-  return segments(s ?? "").map((g) => {
-    if (!("math" in g)) return esc(g.text);
-    const seen = composed.getStore();
-    if (seen) seen.n++;
-    return `$${g.math}$`;
-  }).join("");
+  return segments(s ?? "").map((g) => ("math" in g ? composedMath(g.math) : esc(g.text))).join("");
+}
+
+/** Une formule en ligne, d'une ligne à part une fois composée : `\\displaystyle`, sans saut de ligne. */
+function displayTex(tex: string): string {
+  return `\\displaystyle ${tex.trim()}`;
+}
+
+/** Une formule validée entre dollars, comptée pour `formulasOrText`. */
+function composedMath(tex: string): string {
+  const seen = composed.getStore();
+  if (seen) seen.n++;
+  return `$${tex}$`;
 }
 
 /** Puce Markdown (« - », « * », « • ») ou numéro (« 1. », « 2) ») en début de ligne, suivis d'une espace. */
@@ -348,10 +355,7 @@ export async function formulasOrText<T>(build: () => Promise<T>): Promise<{ valu
  */
 export function formulaOrText(content: string, display: boolean, source: string): string {
   const tex = plainMath.getStore() ? null : mathTex(content);
-  if (tex === null) return esc(source);
-  const seen = composed.getStore();
-  if (seen) seen.n++;
-  return `$${display ? `\\displaystyle ${tex.trim()}` : tex}$`;
+  return tex === null ? esc(source) : composedMath(display ? displayTex(tex) : tex);
 }
 
 /** Maths déjà délimitées et code en ligne d'un source LaTeX : rien à y mettre entre dollars. */

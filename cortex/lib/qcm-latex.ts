@@ -160,8 +160,20 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   return examDocument([cover, firstPart, secondPart], dateLabel, pdf);
 }
 
-/** Maths d'un LaTeX libre : environnements d'équation, display, puis en ligne (hors « \$ »). */
-const OPEN_MATH = /\\begin\{(equation|align|gather|multline)(\*?)\}([\s\S]*?)\\end\{\1\2\}|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<!\\)\$((?:\\.|[^$\\])+?)\$/g;
+/**
+ * Morceaux d'un LaTeX libre lus avant le texte : code (environnement littéral, \verb), dont un « $ »
+ * n'ouvre rien ; environnements d'équation ; maths en display ; en ligne, avec la règle du « $ » de
+ * lib/tex-rich (« 5$ et 6$ » reste un montant).
+ */
+// groupes nommés : par le constructeur, la cible ES2017 de tsconfig refuse ceux d'un littéral
+const OPEN_PIECES = new RegExp(String.raw`\\begin\{(?<code>lstlisting|verbatim\*?|Verbatim|minted|comment)\}(?:\[[^\]]*\]|\{[^}]*\})*(?<codeBody>[\s\S]*?)\\end\{\k<code>\}|\\verb(?<v>[^a-zA-Z\s])(?<verb>[\s\S]*?)\k<v>|\\begin\{(?<env>equation|align|gather|multline|eqnarray|displaymath|math)(?<star>\*?)\}(?<envBody>[\s\S]*?)\\end\{\k<env>\k<star>\}|\$\$(?<dollars>[\s\S]+?)\$\$|\\\[(?<brackets>[\s\S]+?)\\\]|\\\((?<parens>[\s\S]+?)\\\)|(?<!\\)\$(?=\S)(?<inline>(?:\\.|[^$\\\n])*?\S)\$(?!\d)`, "g");
+
+/** Un environnement d'équation, ligne par ligne : sans « & », étiquette ni numéro, chaque ligne en display. */
+function equationLines(body: string): string {
+  return body.replace(/\\(?:label|tag)\{[^}]*\}|\\(?:nonumber|notag)\b/g, "").split(/\\\\(?:\[[^\]]*\])?/)
+    .map((l) => l.replace(/&/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean)
+    .map((l) => formulaOrText(l, true, l)).join("\n\n");
+}
 
 /** Texte hors maths d'un LaTeX libre : environnements et commandes retirés, leur texte gardé. */
 function plainText(tex: string): string {
@@ -186,14 +198,19 @@ export function plainOpenTex(tex: string): string {
   return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).join("\n\n");
 }
 
-/** Maths composées, texte hors maths en texte simple ; `bare` : ses formules sans délimiteurs d'abord mises entre $…$. */
+/** Maths composées, code gardé tel quel, le reste en texte simple ; `bare` : formules sans délimiteurs d'abord mises entre $…$. */
 function plainWithFormulas(src: string, bare: boolean): string {
   let out = "";
   let last = 0;
   const rest = (t: string) => (bare ? plainWithFormulas(wrapBareFormulasTex(t), false) : plainText(t));
-  for (const m of src.matchAll(OPEN_MATH)) {
-    const display = m[3] ?? m[4] ?? m[5];
-    out += rest(src.slice(last, m.index)) + formulaOrText(display ?? m[6] ?? m[7], display !== undefined, m[0]);
+  for (const m of src.matchAll(OPEN_PIECES)) {
+    const g = m.groups!;
+    const code = g.codeBody ?? g.verb;
+    const display = g.dollars ?? g.brackets;
+    out += rest(src.slice(last, m.index));
+    if (code !== undefined) out += esc(code.trim());
+    else if (g.envBody !== undefined) out += `\n\n${equationLines(g.envBody)}\n\n`;
+    else out += formulaOrText(display ?? g.parens ?? g.inline, display !== undefined, m[0]);
     last = m.index + m[0].length;
   }
   return out + rest(src.slice(last));

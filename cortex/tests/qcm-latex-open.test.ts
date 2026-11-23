@@ -199,3 +199,20 @@ test("repli en texte simple d'une ouverte : ses formules restent composées, et 
   assert.ok(asText.includes(String.raw`\textbackslash{}frac\{a\}\{b\}`), asText);
   assert.ok(asText.includes(String.raw`x\_\{t+1\} = 2x\_t`), asText);
 });
+
+test("repli en texte simple : le code reste du code, un « $ » de montant reste du texte, align* reste lisible (revue du 23/11)", async () => {
+  const { plainOpenTex } = await import("../lib/qcm-latex");
+  // un « $ » de code ou de montant n'ouvre aucune formule, et le code n'en reçoit pas
+  const code = plainOpenTex("Lancez :\n\\begin{lstlisting}\necho $HOME and $PATH\ny_1 = 2\n\\end{lstlisting}\npuis \\verb|$a$|.");
+  assert.doesNotMatch(code, /(?<!\\)\$/, code);
+  assert.match(code, /echo \\\$HOME and \\\$PATH/);
+  assert.match(code, /y\\_1 = 2/);
+  assert.doesNotMatch(plainOpenTex("Prix $5 et $10."), /(?<!\\)\$/);
+  const money = plainOpenTex("Coûte 5$ et 6$ au total, avec $x_t$.");
+  assert.ok(money.startsWith(String.raw`Coûte 5\$ et 6\$ au total`), money);
+  assert.ok(money.includes("$x_t$"), money);
+  // align* : une formule par ligne, sans « & » ni « \\ » ni étiquette
+  const align = plainOpenTex(String.raw`On a \begin{align*} a &= b + 1 \label{eq:a} \\ c &= 2d \end{align*} donc.`);
+  assert.ok(align.includes(String.raw`$\displaystyle a = b + 1$`) && align.includes(String.raw`$\displaystyle c = 2d$`), align);
+  assert.doesNotMatch(align, /textbackslash|align|label/, align);
+});
