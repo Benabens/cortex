@@ -179,3 +179,20 @@ test("budget d'extraits : chaque requête reçoit son meilleur extrait avant qu'
     assert.deepEqual([...new Set(got.map((p) => p.src))].sort(), ["Week 1 - utilitarianism", "Week 2 - deontology", "Week 3 - virtue ethics"], JSON.stringify(got.map((p) => p.src)));
   });
 });
+
+test("revue : plages déjà montrées au milieu d'une fenêtre, ou données dans le désordre : jamais montrées deux fois", async () => {
+  const { freshSpan } = await import("../lib/course-grounding");
+  const flat = `${"alphazone note. ".repeat(12)}${"betazone note. ".repeat(12)}${"gammazone note. ".repeat(12)}`;
+  const beta = flat.indexOf("betazone");
+  const gamma = flat.indexOf("gammazone");
+  // Une plage montrée au milieu (la zone beta) : le segment neuf le plus riche, sans elle.
+  const mid = freshSpan(flat, "alphazone gammazone", 0, flat.length, [[beta, gamma]])!;
+  assert.ok(mid[1] <= beta || mid[0] >= gamma, `recouvre la plage montrée : ${mid}`);
+  // Deux plages dans le désordre, l'une dans l'autre au début : même résultat que dans l'ordre.
+  const a = freshSpan(flat, "gammazone", 0, flat.length, [[60, beta], [0, 100]]);
+  const b = freshSpan(flat, "gammazone", 0, flat.length, [[0, 100], [60, beta]]);
+  assert.deepEqual(a, b);
+  assert.ok(a![0] >= beta, `${a}`);
+  // Tous les mots de la requête déjà montrés : rien de neuf.
+  assert.equal(freshSpan(flat, "betazone", 0, flat.length, [[beta, gamma]]), null);
+});

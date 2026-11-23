@@ -463,9 +463,12 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
     // les cite par leur texte, sinon le générateur corrige au hasard (banc rs-composite, 22/11).
     const options = b.parts[t.index]?.options ?? [];
     const named = opts.map((o) => {
-      const m = /^\s*\(?([A-H])\)?\s*(?:$|[(:.—–-]\s*(.*)$)/.exec(o);
+      // « B », « (B) texte », « B (raison) », « B : raison » ; « A, B — … » reste tel quel.
+      const m = /^\s*\(?([A-H])\)?(?=$|[\s(:.—–-])[\s(:.—–-]*(.*)$/.exec(o);
       const option = m ? options[LETTER.indexOf(m[1])] : undefined;
-      return option ? `« ${option.slice(0, 120)} »${m![2]?.trim() ? ` (${m![2].trim().replace(/\)$/, "").slice(0, 160)})` : ""}` : o;
+      // La raison perd la parenthèse fermante de « B (raison) ».
+      const reason = m?.[2]?.trim().replace(/\)$/, "").slice(0, 160);
+      return option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : o;
     });
     if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")}`);
   }

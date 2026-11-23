@@ -186,7 +186,7 @@ const NOT_COURSE_FACTS = new Set<string>(EXAM_SOURCE_TYPES);
  */
 export function coursePassages(topics: string[], perTopic = 2, cap = 900): Promise<{ src: string; text: string }[]> {
   // Budget : une fenêtre pleine par sujet, `perTopic` au moins (un drill, un énoncé). Sans lui, un lot
-  // QCM de 10 notions de CS-290 doublait (7 200 → 14 100 caractères, dump du 02/11) ; avec, 9 400.
+  // QCM de 10 notions de CS-290 doublait (7 200 → 14 100 caractères, dump du 02/11) ; avec, 9 000.
   return evidencePassages(topics, { perQuery: perTopic, cap, budget: cap * Math.max(perTopic, topics.length) });
 }
 
@@ -237,25 +237,30 @@ function densestSpan(text: string, query: string, cap: number): { text: string; 
 }
 
 /**
- * Une fenêtre face aux plages déjà montrées du même support : null si tous les mots de la requête
- * qu'elle contient y sont déjà (rien de neuf), sinon la fenêtre privée de ce qui recouvre une plage
- * montrée, calée sur un mot. Banc rs-composite, 22/11 : recalée en fin de support, la fenêtre de la
- * théorie recouvrait pour plus de moitié celle de l'en-tête et était jetée comme doublon.
+ * Une fenêtre face aux plages déjà montrées du même support : la fenêtre privée de ces plages
+ * (dans l'ordre du texte, une plage au milieu comprise), réduite au segment neuf qui porte le plus
+ * de mots de la requête, calé sur un mot ; null si aucun segment neuf n'en porte (rien de neuf).
+ * Banc rs-composite, 22/11 : recalée en fin de support, la fenêtre de la théorie recouvrait pour
+ * plus de moitié celle de l'en-tête et était jetée comme doublon.
  */
-function freshSpan(flat: string, query: string, from: number, to: number, shown: [number, number][]): [number, number] | null {
-  const inShown = (i: number) => shown.some(([a, b]) => i >= a && i < b);
+export function freshSpan(flat: string, query: string, from: number, to: number, shown: [number, number][]): [number, number] | null {
+  const cuts = shown.filter(([a, b]) => a < to && b > from).sort((x, y) => x[0] - y[0]);
+  if (!cuts.length) return [from, to];
+  const segments: [number, number][] = [];
+  let at = from;
+  for (const [a, b] of cuts) {
+    if (a > at) segments.push([at, a]);
+    at = Math.max(at, b);
+  }
+  if (at < to) segments.push([at, to]);
   const lower = flat.toLowerCase();
   const hits: number[] = [];
   for (const w of queryWords(query)) for (let i = lower.indexOf(w, from); i >= 0 && i < to; i = lower.indexOf(w, i + 1)) hits.push(i);
-  if (!hits.length ? shown.some(([a, b]) => a < to && b > from) : hits.every(inShown)) return null;
-  let start = from;
-  let end = to;
-  for (const [a, b] of shown) {
-    if (a <= start && b > start) start = b;
-    if (a < end && b >= end) end = a;
-  }
-  if (start > from && start < end) start = flat.indexOf(" ", start - 1) + 1 || start;
-  return end - start >= 80 ? [start, end] : null;
+  const score = ([a, b]: [number, number]) => hits.filter((i) => i >= a && i < b).length;
+  const best = segments.filter(([a, b]) => b - a >= 80).sort((x, y) => score(y) - score(x))[0];
+  if (!best || !score(best)) return null;
+  const start = best[0] > from ? flat.indexOf(" ", best[0] - 1) + 1 || best[0] : best[0];
+  return [start, best[1]];
 }
 
 /**

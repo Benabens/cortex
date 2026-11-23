@@ -99,10 +99,12 @@ const factRank = new Map([...where.keys()].map((st, r) => [st, r + 1]));
 const factDesigns = new Map<string, number>();
 /** Fait dont la clé est contestée à sa première conception (voir verify). */
 const CONTESTED = THEMES[2].fact.statement;
+/** Écart de numéro entre deux conceptions d'un même fait (le cours inventé a moins de faits). */
+const REDESIGN = 100;
 function caseOf(statement: string): number {
   const times = factDesigns.get(statement) ?? 0;
   factDesigns.set(statement, times + 1);
-  return (factRank.get(statement) ?? 0) + 100 * times;
+  return (factRank.get(statement) ?? 0) + REDESIGN * times;
 }
 const calls = { facts: 0, design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, other: 0 };
 const total = () => Object.values(calls).reduce((a, b) => a + b, 0);
@@ -174,7 +176,7 @@ function verify(prompt: string): string {
     const g = Number(/cas (\d+)/.exec(body)?.[1] ?? 1);
     // Le fait du nudge, toujours retenu, voit sa clé contestée à sa première conception : le chemin
     // « rejet → fait de réserve » reste parcouru quel que soit le numéro que tombent les autres faits.
-    const reject = sim.rejectEvery > 0 && (g % sim.rejectEvery === 0 || (g < 100 && body.includes(CONTESTED)));
+    const reject = sim.rejectEvery > 0 && (g % sim.rejectEvery === 0 || (g < REDESIGN && body.includes(CONTESTED)));
     return {
       index, correct: reject ? [(key + 1) % opts.length] : [key], ok: !reject, discrimination: 4, name_only: false, issue: reject ? "clé contestée" : "",
       course_terms: [], off_course: "", off_course_terms: [], off_course_options: [], off_course_key: false, off_matter: "",
