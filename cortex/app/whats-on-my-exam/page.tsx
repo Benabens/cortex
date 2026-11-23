@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { Check, LockKeyhole } from "lucide-react";
-import { freeToolLimits } from "@/lib/exam-topics/config";
+import { freeToolEnabled, freeToolLimits } from "@/lib/exam-topics/config";
 import { getLocale, getT } from "@/lib/i18n/server";
 import { DEFAULT_LANDING_URL, landingOrigin } from "@/lib/legal";
 import { publicOrigin } from "@/lib/public-url";
@@ -42,6 +43,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function ExamTopicsPage() {
+  if (!freeToolEnabled()) notFound();
   const t = await getT("examTopics");
   const locale = await getLocale();
   const limits = freeToolLimits();

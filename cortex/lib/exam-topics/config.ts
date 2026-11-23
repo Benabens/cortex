@@ -8,6 +8,14 @@
 /** Pseudo-utilisateur de l'outil : sa dépense du jour, dans llm_usage, est le plafond quotidien. */
 export const FREE_TOOL_USER = "free-tool";
 
+/**
+ * Interrupteur de l'outil, séparé des plafonds de dépense : absent ou toute valeur hors `1`/`true`
+ * vaut fermé. Décision de Ben (23/11) : retiré pour l'instant, le code reste pour une démo plus tard.
+ */
+export function freeToolEnabled(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return env.FREE_TOOL_ENABLED === "1" || env.FREE_TOOL_ENABLED === "true";
+}
+
 function num(name: string, def: number, env: Partial<NodeJS.ProcessEnv>): number {
   const raw = env[name]?.trim();
   if (!raw) return def;

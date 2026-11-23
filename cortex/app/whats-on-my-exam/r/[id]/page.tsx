@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArrowRight, Check } from "lucide-react";
 import { contactEmail } from "@/lib/contact";
+import { freeToolEnabled } from "@/lib/exam-topics/config";
 import type { ExamTopic, ExamTopicsResult } from "@/lib/exam-topics/result";
 import { getRun } from "@/lib/exam-topics/runs";
 import { getLocale, getT } from "@/lib/i18n/server";
@@ -36,6 +37,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 export default async function ExamTopicsResultPage({ params }: Params) {
   const { id } = await params;
+  if (!freeToolEnabled()) notFound();
   const run = await getRun(id);
   if (!run) notFound();
   const t = await getT("examTopics");
