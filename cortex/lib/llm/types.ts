@@ -143,13 +143,15 @@ export const EXAM_OUTPUT_MAX_TOKENS = 64_000;
 
 /**
  * Effort des sites difficiles (rédaction, correction, vérification) qui ne fixent pas le leur.
- * Sur Sonnet 5 ils tournaient à son défaut, « high ». Sur Opus 5.5, banc du 23/11/2026 (examen
- * écrit CS-202 de 8 exercices) : « high » = 595 k tokens de sortie, 12,6 $, 27 min ; « medium » =
- * 229 k tokens, 5,1 $, 13 min, 8 exercices sur 8 livrés — et moins de réflexion que Sonnet 5 en
- * « high » n'en produisait. LLM_HARD_EFFORT le règle sans redéploiement (low, medium, high) ; une
- * valeur inconnue garde le défaut.
+ * Sur Sonnet 5 ils tournaient à son défaut, « high ». Banc jugé du 23/11/2026, clés justes :
+ *  - examen écrit CS-202 (8 exercices) : Sonnet 5 high 2/8, Opus 5.5 medium 4/8, Opus 5.5 high 5/8 ;
+ *  - QCM ML (23 questions) : Sonnet 5 high 15/23, Opus 5.5 medium 18/23, Opus 5.5 high 20/23.
+ * « high » coûte plus (examen 9,2 à 12,6 $ contre 4,6 à 7,9 $ ; QCM 7,3 $ contre 5,7 $) : les prix
+ * en crédits (lib/billing/credits) sont calés sur son p95, « medium » ne fait donc qu'élargir la
+ * marge. LLM_HARD_EFFORT le règle sans redéploiement (low, medium, high) ; une valeur inconnue
+ * garde le défaut.
  */
-export const HARD_TASK_EFFORT_DEFAULT: LlmEffort = "medium";
+export const HARD_TASK_EFFORT_DEFAULT: LlmEffort = "high";
 export function hardTaskEffort(): LlmEffort {
   const v = process.env.LLM_HARD_EFFORT?.trim().toLowerCase();
   return v === "low" || v === "medium" || v === "high" ? v : HARD_TASK_EFFORT_DEFAULT;

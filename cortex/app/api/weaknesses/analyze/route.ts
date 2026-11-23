@@ -87,7 +87,7 @@ async function handlePOST(req: NextRequest) {
     // Voie « API payante » explicite (bouton historique) → provider anthropic forcé.
     // Lire une capture et la classer est mécanique : Sonnet (lib/llm/config, classement des sites).
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-    // l'appel au modèle, APRÈS validation de la demande : 0,3 crédit, rendu seulement si
+    // l'appel au modèle, APRÈS validation de la demande : le prix d'une aide, rendu seulement si
     // l'appel n'est pas parti ou si la réponse est inutilisable (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
     const res = await assistCall("weakness-analyze", () => completeVia("anthropic", {

@@ -708,9 +708,8 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
     json: { schema: BATCH_SCHEMA },
     // Prod du 13/11 (job 2) : la réflexion d'un lot de 2 exercices remplissait les 16 000 tokens
     // de sortie (15 760 en moyenne) : lots coupés, facturés, puis refaits exercice par exercice.
-    // Effort des sites difficiles (lib/llm/types : medium sur Opus 5.5 ; le « moyen » de Sonnet 5
-    // donnait des clés et explications moins justes au banc du 15/11) ; la limite laisse au lot la
-    // place de finir (banc du 17/11 : jusqu'à 62 k tokens).
+    // Effort des sites difficiles (lib/llm/types : high, plus de clés justes au banc jugé du 23/11) ;
+    // la limite laisse au lot la place de finir (banc du 17/11 : jusqu'à 62 k tokens).
     maxTokens: EXAM_OUTPUT_MAX_TOKENS,
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];

@@ -11,12 +11,12 @@ import { ownerAlertBlocker, ownerAlertRecipient } from "./owner-alert";
 /**
  * ALERTE DE DÉPENSE PAR COMPTE ET PAR HEURE (audit fuites P7) : un e-mail au propriétaire
  * (l'adresse des alertes du mois, ./owner-alert) et un événement Sentry quand un compte
- * dépense plus de SPEND_ALERT_PER_USER_HOUR_USD (défaut 5 $) dans l'heure UTC en cours.
+ * dépense plus de SPEND_ALERT_PER_USER_HOUR_USD (défaut 20 $ : au-dessus d'un examen Opus 5.5 au
+ * p95, 12,5 $, pas de deux) dans l'heure UTC en cours.
  * L'e-mail part à chaque fois ; Sentry, lui, regroupe les occurrences en une issue et ne
  * prévient (règle « high priority ») qu'à la première. Le fusible du jour
- * (SPEND_CAP_PER_USER_USD, 15 $) coupe ; cette alerte prévient avant, pendant qu'une
- * boucle emballée ou un abus se voit encore : l'usage réel le plus lourd mesuré tient
- * en ≈ 6,6 $ sur une JOURNÉE.
+ * (SPEND_CAP_PER_USER_USD, 50 $) coupe ; cette alerte prévient avant, pendant qu'une
+ * boucle emballée ou un abus se voit encore.
  * Le seuil ne dépasse jamais le fusible du jour (sinon il ne préviendrait de rien).
  *
  * Une fois par compte et par heure, même avec plusieurs process (serveur, un worker
@@ -40,9 +40,9 @@ export function resetAccountSpendAlerts(): void {
 
 /** Seuil horaire effectif (USD) ; null = alerte coupée (`unlimited`, ou hors déploiement gardé). */
 export function accountHourAlertUsd(): number | null {
-  const threshold = floatLimit("SPEND_ALERT_PER_USER_HOUR_USD", 5);
+  const threshold = floatLimit("SPEND_ALERT_PER_USER_HOUR_USD", 20);
   if (threshold === null || threshold <= 0) return null;
-  const dayCap = floatLimit("SPEND_CAP_PER_USER_USD", 15);
+  const dayCap = floatLimit("SPEND_CAP_PER_USER_USD", 50);
   return dayCap !== null && dayCap > 0 ? Math.min(threshold, dayCap) : threshold;
 }
 

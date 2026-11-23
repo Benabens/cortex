@@ -314,12 +314,13 @@ export function spendCapUsd(): number | null {
  * Plafond de dépense PAR UTILISATEUR et PAR JOUR (USD). FAIL-CLOSED : dans un
  * déploiement gardé, un défaut s'applique même sans variable — un plafond
  * GLOBAL seul transformerait un abuseur en déni de service pour tous les autres
- * (l'audit). Défaut 15 $/user/jour : très au-dessus de l'usage réel le plus
- * lourd mesuré (~6,6 $/jour), backstop d'une boucle emballée. Le compte
+ * (l'audit). Défaut 50 $/user/jour (15 $ jusqu'au 23/11/2026) : les 3 générations du jour
+ * (DAILY_GEN_QUOTA) au p95 d'un examen Opus 5.5 (12,5 $) tiennent dessous ; backstop d'une
+ * boucle emballée. Le compte
  * propriétaire en est exempté (il reste soumis au fusible global du mois).
  */
 export function spendCapPerUserUsd(): number | null {
-  return floatLimit("SPEND_CAP_PER_USER_USD", 15);
+  return floatLimit("SPEND_CAP_PER_USER_USD", 50);
 }
 
 /** Dépense d'un utilisateur AUJOURD'HUI (USD) — fenêtre glissante = la journée
@@ -432,7 +433,9 @@ async function assertSpendCapUnchecked(): Promise<void> {
  * plus que crédits débités × valeur d'un crédit. Défaut 0,9 $ (décision de Ben, 17/11,
  * posé tel quel en prod) : 0,66 $, la valeur nette d'un crédit de l'annuel, coupait des
  * QCM réels mesurés à 2-2,9 $ pour 4 crédits (plafond 2,64 $) ; 3,6 $ les laisse finir
- * et borne toujours la boucle. JOB_SPEND_CAP_USD_PER_CREDIT la règle, `unlimited` la lève.
+ * et borne toujours la boucle. Prix du 23/11 (Opus 5.5) : le prix couvre le p95 à 45 %, le
+ * plafond (0,9 $ par crédit, plus du double de ce p95) laisse donc finir un job lent sans
+ * changer de valeur. JOB_SPEND_CAP_USD_PER_CREDIT la règle, `unlimited` la lève.
  */
 export function spendCapUsdPerCredit(): number | null {
   return floatLimit("JOB_SPEND_CAP_USD_PER_CREDIT", 0.9);

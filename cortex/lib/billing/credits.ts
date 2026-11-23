@@ -60,19 +60,27 @@ export function fmtCreditsBack(centi: number): string {
   return `${fmtCredits(centi)} ${centi >= 2 * CENTI ? "crédits rendus" : "crédit rendu"}`;
 }
 
-/** Coût EN CRÉDITS par type de génération. Surcharge : CREDITS_COST_JSON (décimales acceptées). */
+/**
+ * Coût EN CRÉDITS par type de génération. Surcharge : CREDITS_COST_JSON (décimales acceptées).
+ * Prix du 23/11/2026 (Opus 5.5 en effort high sur les sites difficiles, lib/llm) : le coût IA au p95
+ * mesuré au banc tient dans 45 % de ce que le crédit rapporte (0,90 € × 0,97 de frais Stripe, à
+ * 1,08 $ l'euro, soit 0,424 $ par crédit). p95 : examen écrit de 8 exercices 12,5 $, QCM standard
+ * 7,4 $, exercice seul 2,9 $, drill 0,21 $, correction 0,08 $. Préparation, format et programme de
+ * révision tournent sur Sonnet 5.5 (mécanique) : prix inchangés.
+ */
 const DEFAULT_COSTS: Record<string, number> = {
-  exam: 6,
-  qcm: 4,
-  exercise: 1,
-  "lab-exercise": 1,
+  exam: 30,
+  qcm: 18,
+  exercise: 8,
+  // Un exercice de labo s'écrit et se vérifie comme un exercice : même prix (non mesuré à part).
+  "lab-exercise": 8,
   blueprint: 1,
   format: 1,
   prepare: 2,
   // Appels LLM courts et interactifs (drill, vérification de solution, analyse
   // de faiblesse) : une fraction de crédit. Gratuits, ils offraient ~40 appels
   // payants par jour et par compte, indéfiniment (audit B5).
-  assist: 0.3,
+  assist: 0.5,
 };
 
 /** Coût en CENTIÈMES de crédit d'un type de génération. */

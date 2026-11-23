@@ -13,7 +13,7 @@ import { userError } from "@/lib/i18n/user-error";
  * appel resté sans réponse (« MCP server connection lost », CS-250 du 21/11/2026, 187 s). Comme
  * generate_mock_exam, generate_drill rend donc un job_id ; get_job_status rend l'exercice prêt.
  *
- * La facturation reste celle d'une aide : 0,3 crédit réservé AVANT le job (rafale, quota du jour
+ * La facturation reste celle d'une aide : le prix d'une aide réservé AVANT le job (rafale, quota du jour
  * des aides, solde : un refus revient tout de suite, sans job), sous une référence de job
  * (`job:<user>:<cours>:<uuid>`) que la réconciliation sait reprendre ; le worker appelle le modèle
  * sous cette preuve d'aide (modèle et taille bornés, lib/llm) et rend le crédit selon la règle de
