@@ -67,7 +67,9 @@ before(async () => {
           off_course: "",
           definition_mismatch: /NARROW/.test(content) ? "feedback loop : la question la réduit aux boucles positives ; le cours : renforçante OU équilibrante" : "",
           // Banc du 04/11 (CS-290 composite) : le juge a rendu les options en CHAÎNE, l'examen entier plantait.
-          trivial_distractors: /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse" }] : [],
+          trivial_distractors: /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse" }]
+            // Banc rs-composite du 22/11 : le juge nomme les options par leur LETTRE dans l'ordre mélangé.
+            : /TRIVIAL/.test(content) && /^ {2}B\. /m.test(content) ? [{ index: 0, options: ["B"] }] : [],
         });
       } else if (/"parts"/.test(content) && /"scenario"/.test(content)) {
         prompts.push(content);
@@ -639,4 +641,26 @@ test("C × extraits (banc rs-composite 22/11, Q4/Q5/Q7 « hors cours ») : chaqu
   const asked = prompts.find((p) => /^THÈME : Q4/m.test(p))!;
   assert.match(asked, /Malinformation is genuine content/, "le générateur voit la définition demandée par la section");
   assert.ok(judged.some((p) => /Malinformation is genuine content/.test(p)), "le juge voit la même définition (sinon : « hors cours »)");
+});
+
+test("C × distracteurs éliminables (banc rs-composite 22/11, 68 choix uniques sur 124) : la relance cite le texte de l'option, et la consigne dit comment construire un distracteur", async () => {
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")], "TRIVIAL: a moderation team."), block("A2", [scq("A2"), short("A2"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")])],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  prompts.length = 0;
+  judged.length = 0;
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: () => {} }));
+  assert.deepEqual([r.produced, r.requested], [3, 3]);
+  // Le juge a lu « B. <texte> » ; le générateur n'a jamais vu cet ordre (options mélangées après lui).
+  const shown = /TRIVIAL[\s\S]*?^ {2}B\. (.+)$/m.exec(judged.find((j) => /TRIVIAL/.test(j))!)![1];
+  const retry = prompts.find((p) => /VERSION PRÉCÉDENTE REJETÉE/.test(p) && /^THÈME : .*Ethical theories/m.test(p))!;
+  assert.ok(retry.includes(shown), `la relance nomme l'option par son texte : ${/VERSION PRÉCÉDENTE REJETÉE.*$/m.exec(retry)?.[0]}`);
+  // Consigne de génération des options : les défauts relevés par le juge sur le corpus réel.
+  const system = prompts[0];
+  for (const rule of [/autre chapitre/, /contredit jamais un fait/, /critère/, /absolu/]) assert.match(system, rule);
 });
