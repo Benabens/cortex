@@ -42,7 +42,7 @@ function perIpDay(): number | null {
  * Une connexion IPv6 reçoit un /64 entier : en compter chaque adresse laisserait un seul
  * abonné en changer à volonté. IPv4 : l'adresse telle quelle.
  */
-function ipGroup(ip: string): string {
+export function ipGroup(ip: string): string {
   if (!ip.includes(":")) return ip;
   const [head, tail = ""] = ip.toLowerCase().split("::");
   const left = head ? head.split(":") : [];

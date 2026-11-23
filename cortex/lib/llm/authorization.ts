@@ -5,10 +5,12 @@ import { billingEnabled } from "@/lib/billing/credits";
 import { isOwner } from "@/lib/billing/owner";
 import { currentJob } from "@/lib/billing/usage-context";
 import { GENERATION_DEBIT_SQL } from "@/lib/billing/usage";
+import { FREE_TOOL_USER } from "@/lib/exam-topics/config";
 import { LlmError } from "./types";
 
 export type LlmAuthorization = {
-  kind: "assist" | "job" | "test";
+  /** `free_tool` : analyse de l'outil gratuit sans compte, `ref` = `exam-topics:<jeton>`. */
+  kind: "assist" | "job" | "test" | "free_tool";
   ref: string;
 };
 
@@ -48,6 +50,16 @@ export function currentLlmProof(): LlmAuthorization | null {
 
 /** Défense ultime, exécutée avant cache, compteur de dépense et provider. */
 export async function assertLlmAuthorized(): Promise<void> {
+  // Outil gratuit : aucun crédit, la preuve est une analyse admise et en cours (lib/exam-topics/runs),
+  // sous son pseudo-compte. Vérifiée même sous la dérogation de test, et jamais rattrapée par
+  // l'exemption propriétaire.
+  const proof = currentLlmProof();
+  if (proof?.kind === "free_tool" || currentUser() === FREE_TOOL_USER) {
+    const id = proof?.kind === "free_tool" && proof.ref.startsWith("exam-topics:") ? proof.ref.slice("exam-topics:".length) : null;
+    const { runIsLive } = await import("@/lib/exam-topics/runs");
+    if (currentUser() !== FREE_TOOL_USER || !id || !(await runIsLive(id))) throw new LlmPaymentRequiredError();
+    return;
+  }
   // Les tests de moteur appellent volontairement le point d'entrée directement
   // avec des providers locaux factices. Cette dérogation n'est reconnue que par
   // le runner `npm test` et jamais dans un processus Next de production.
@@ -55,6 +67,5 @@ export async function assertLlmAuthorized(): Promise<void> {
   const user = currentUser();
   if (await isOwner(user)) return;
 
-  const proof = currentLlmProof();
   if (!proof || !(await reservationExists(proof.ref, user))) throw new LlmPaymentRequiredError();
 }

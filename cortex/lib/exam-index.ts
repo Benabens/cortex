@@ -56,7 +56,8 @@ export function renderExamPages(course: string, refBasename: string, maxPages = 
   return cachedPdfPages(course, refBasename, maxPages).map((p) => ({ page: p.page, rel: path.relative(process.cwd(), p.abs) }));
 }
 
-const EXO_SCHEMA = {
+/** Exporté : l'outil gratuit (lib/exam-topics) extrait avec les mêmes champs. */
+export const EXO_SCHEMA = {
   type: "object",
   properties: {
     exercises: {

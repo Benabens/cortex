@@ -1,5 +1,6 @@
 import { q, nowStr, nowPlusDays } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
+import type { LlmModel } from "@/lib/llm/types";
 import { profile } from "@/lib/course-profile";
 import { ensureIndexSchema, indexExamExercises } from "@/lib/exam-index";
 import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
@@ -401,22 +402,39 @@ export type PartitionType = { label: string; method: string | null; exo_type: st
  * entre le repli par libellé (`aggregateTopicsFromIndex`) et l'arrêt (regroupement demandé
  * explicitement, où un repli silencieux remettrait un type par libellé) revient à l'appelant.
  */
-export async function clusterIndexLabels(rawCount: Map<string, number>): Promise<TopicCluster[]> {
+export type ClusterOptions = {
+  /** Ouverture du prompt (défaut : celle du profil du cours). */
+  intro?: string;
+  /** Langue des labels canoniques (défaut : celle du cours). */
+  lang?: string;
+  /** Archétypes proposés (défaut : ceux du profil ; [] = aucun bloc). */
+  archetypes?: { id: string; concept: string }[];
+  /** Consigne de granularité (défaut : 15 à 30 types par grande technique d'algorithmique). */
+  target?: string;
+  model?: LlmModel;
+  timeoutMs?: number;
+};
+
+export async function clusterIndexLabels(rawCount: Map<string, number>, opts: ClusterOptions = {}): Promise<TopicCluster[]> {
   const rawLabels = [...rawCount.keys()];
   const p0 = profile();
-  const lang = await courseLanguageName();
+  const lang = opts.lang ?? await courseLanguageName();
+  const archetypes = opts.archetypes ?? p0.archetypes;
+  const target = opts.target ?? "Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…).";
   const prompt = [
-    p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
+    opts.intro ?? p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,
     ...rawLabels.map((l) => `  - "${l}" (×${rawCount.get(l)})`),
+    ...(opts.archetypes === undefined || archetypes.length ? [
+      ``,
+      `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
+      archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
+    ] : []),
     ``,
-    `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
-    p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
-    ``,
-    `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Labels canoniques en ${lang}. Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
+    `${target} Labels canoniques en ${lang}. Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
     JSON.stringify(CLUSTER_SCHEMA, null, 2),
   ].join("\n");
-  const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));
+  const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: opts.model ?? "opus", timeoutMs: opts.timeoutMs ?? 600_000 }));
   return (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
 }
 
