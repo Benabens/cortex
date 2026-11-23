@@ -120,6 +120,7 @@ test("une aide mécanique (analyse d'un point faible) reste sur Sonnet, même si
 const MECHANICAL = [
   "lib/qcm-facts.ts", "lib/intake.ts", "lib/course-plan.ts", "lib/exam-dna.ts", "lib/exam-index.ts",
   "lib/program.ts", "lib/conversation-mining.ts", "app/api/weaknesses/analyze/route.ts",
+  "lib/format.ts", "lib/revision.ts",
 ];
 /** Sites DIFFICILES : rédaction, correction, vérification. */
 const HARD = ["lib/drill.ts", "lib/check-solution.ts", "lib/qcm.ts", "lib/verify.ts", "lib/blocks.ts", "lib/labs.ts", "lib/exam.ts"];
