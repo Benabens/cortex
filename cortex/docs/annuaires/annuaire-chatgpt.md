@@ -101,7 +101,7 @@ n'existe que si `REVIEW_LOGIN_EMAIL` et `REVIEW_LOGIN_PASSWORD_HASH` sont posée
 propriétaire, limitée en débit, et se coupe à `REVIEW_LOGIN_UNTIL` avec les sessions ouvertes par elle. Le
 consentement OAuth du plugin passe par elle (`/oauth/authorize` → `/login` → retour, `e2e/review-login.spec.ts`).
 
-**Activer, préparer le compte (20 crédits, cours DEMO-101) et couper après la revue** : `annuaire-claude.md`, § 4
+**Activer, préparer le compte (80 crédits, cours DEMO-101) et couper après la revue** : `annuaire-claude.md`, § 4
 (mêmes commandes, même compte). Les identifiants se saisissent dans le formulaire de soumission, jamais dans le
 paquet ni dans le dépôt.
 
