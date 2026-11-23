@@ -21,6 +21,7 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { SafeHtml } from "@/components/ui/SafeHtml";
+import { MathText } from "@/components/ui/MathText";
 import { WeightBar } from "@/components/viz/WeightBar";
 import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
 import {
@@ -276,14 +277,14 @@ export function TrainingStudio() {
               <span className="text-[0.76rem] text-ink-4">{t("finalFormat")}</span>
             </div>
             <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1" lang={language}>{drill.concept}</h2>
-            <div lang={language}><SafeHtml className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" html={drill.statement_html} /></div>
+            <div lang={language}><SafeHtml className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" html={drill.statement_html} math /></div>
 
             {drill.hints.length > 0 && (
               <div className="mt-4 space-y-2">
                 {drill.hints.slice(0, shownHints).map((h, i) => (
                   <div key={i} className="rise-in flex items-start gap-2.5 rounded-lg border border-line bg-surface-2/40 p-3 text-[0.84rem] text-ink-2">
                     <Lightbulb className="mt-0.5 size-4 shrink-0 text-warning" strokeWidth={2} />
-                    <span lang={language}><span className="mr-1.5 font-data text-[0.72rem] font-semibold text-ink-3">{i + 1}/{drill.hints.length}</span>{h}</span>
+                    <span lang={language}><span className="mr-1.5 font-data text-[0.72rem] font-semibold text-ink-3">{i + 1}/{drill.hints.length}</span><MathText text={h} /></span>
                   </div>
                 ))}
                 {shownHints < drill.hints.length && (
@@ -297,7 +298,7 @@ export function TrainingStudio() {
 
             <div className="mt-4 border-t border-line pt-4">
               {showSolution ? (
-                <div lang={language}><SafeHtml className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" html={drill.solution_html} /></div>
+                <div lang={language}><SafeHtml className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" html={drill.solution_html} math /></div>
               ) : (
                 <Button variant="secondary" size="sm" onClick={() => setShowSolution(true)}>
                   <Eye className="size-3.5" strokeWidth={2.25} /> {t("showSolution")}

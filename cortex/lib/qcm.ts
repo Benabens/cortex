@@ -2859,7 +2859,8 @@ export function shownExplanation(raw: string | null | undefined): string {
   return text;
 }
 
-export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
+/** `statement` : affiché (formules KaTeX) ; `checkStatement` : le même sans KaTeX, envoyé à la correction (POST /api/check-solution). */
+export type QcmOpenView = { id: number; concept: string; statement: string; checkStatement: string; solution: string };
 export type QcmExamView = { id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; solutions: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 type QcmExamRow = { id: number; created_at: string; verify_summary: string | null; html_path: string | null };
 type QcmItemRow = {
@@ -2885,7 +2886,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { texToHtml } = require("@/lib/exam-latex") as typeof import("@/lib/exam-latex");
     open = (await q.all<QcmOpenRow>(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`, examId))
-      .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
+      .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? "", { katex: true }), checkStatement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "", { katex: true }) : "" }));
   } catch {}
   return {
     id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null,

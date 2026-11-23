@@ -1,0 +1,18 @@
+/* Formules (components/ui/MathText, SafeHtml math) : couleur héritée du texte (KaTeX dessine en
+   currentColor, thèmes clair et sombre compris) ; une formule détachée défile dans son propre
+   conteneur au lieu d'élargir la page (mobile 390 px), atteignable au clavier (tabindex posé par
+   lib/sanitize-html). */
+.math-display {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.math-display > .katex-display {
+  margin: 0.5em 0;
+}
+.math-display:focus-visible {
+  outline: 2px solid var(--color-accent, currentColor);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

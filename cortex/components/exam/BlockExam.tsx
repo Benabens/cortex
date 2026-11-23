@@ -5,6 +5,7 @@ import { ExamFrame } from "./ExamFrame";
 import { useState, type CSSProperties } from "react";
 import { OpenResponse } from "@/components/exam/OpenResponse";
 import { ReportButton } from "@/components/exam/ReportButton";
+import { MathText } from "@/components/ui/MathText";
 import { useReducedMotion } from "@/lib/ux/hooks";
 import type {
   BlockExamView,
@@ -42,8 +43,6 @@ const codeStyle: CSSProperties = {
   color: "var(--ink)",
   margin: "8px 0",
 };
-const escapeHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Texte du scénario : paragraphes, blocs ```…``` en code. */
 function Rich({ text, language }: { text: string; language?: string }) {
@@ -76,7 +75,7 @@ function Rich({ text, language }: { text: string; language?: string }) {
                 margin: "6px 0",
               }}
             >
-              {c.body.trim()}
+              <MathText text={c.body.trim()} />
             </p>
           ),
         )}
@@ -174,7 +173,7 @@ export function BlockExam({
           lang={language}
           style={{ color: "var(--ink)", whiteSpace: "pre-wrap" }}
         >
-          {p.prompt}
+          <MathText text={p.prompt} />
         </div>
         {p.kind === "scq" && (
           <div className="flex flex-col gap-1.5">
@@ -240,7 +239,7 @@ export function BlockExam({
                     lang={language}
                     style={{ fontSize: 13.5, color: "var(--ink)", flex: 1 }}
                   >
-                    {o}
+                    <MathText text={o} />
                   </span>
                   {isCorrect && (
                     <span style={{ color: "var(--green-ink)", fontSize: 13 }}>
@@ -298,17 +297,22 @@ export function BlockExam({
             part={{ examId: exam.id, partId: p.id }}
             language={language}
             onChecked={(score) => setChecked((c) => ({ ...c, [p.id]: score }))}
-            solution={
-              det
-                ? `<p>${escapeHtml(det.answer)}</p><p><strong>${escapeHtml(t("rubric"))}</strong></p><ul>${det.criteria.map((c) => `<li>${escapeHtml(c.label)} (${escapeHtml(t("points", { points: c.points }))})</li>`).join("")}</ul>`
-                : null
+            solution={null}
+            solutionContent={
+              det ? (
+                <>
+                  <p><MathText text={det.answer} /></p>
+                  <p><strong>{t("rubric")}</strong></p>
+                  <ul>{det.criteria.map((c, k) => <li key={k}><MathText text={c.label} /> ({t("points", { points: c.points })})</li>)}</ul>
+                </>
+              ) : null
             }
           />
         )}
         {det && det.explanation && (
           <p className="mt-2 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-line" }}>
             <strong style={{ color: "var(--ink)" }}>{t("why")}</strong>{" "}
-            <span lang={language}>{det.explanation}</span>
+            <span lang={language}><MathText text={det.explanation} /></span>
           </p>
         )}
         <ReportButton

@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Funnel_Display } from "next/font/google";
 import "./globals.css";
+// Formules (components/ui/MathText) : polices servies par l'app, chargées seulement quand une formule s'affiche
+import "katex/dist/katex.min.css";
+import "@/components/ui/math.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
 import { ErrorTracking } from "@/components/ErrorTracking";
