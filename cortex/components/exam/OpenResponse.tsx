@@ -7,13 +7,15 @@ import type { CheckResult } from "@/lib/check-solution";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { useTranslations } from "use-intl/react";
 
-export function OpenResponse({ questionId, statement, courseId, graded, solution, part, onChecked, language }: {
+export function OpenResponse({ questionId, statement, courseId, graded, solution, solutionContent, part, onChecked, language }: {
   questionId: number;
   statement: string;
   courseId: string;
   graded: boolean;
-  /** HTML du serveur avec ses formules (texToHtml katex, /mock) ou contenu déjà rendu (question composée). */
-  solution: string | ReactNode | null;
+  /** Corrigé en HTML produit par le serveur, formules comprises (texToHtml katex : questions ouvertes de /mock). */
+  solution: string | null;
+  /** Corrigé déjà rendu par la vue (question composée), à la place de `solution`. */
+  solutionContent?: ReactNode;
   /** Réponse courte d'une question composée : corrigée sur son barème (lu côté serveur). */
   part?: { examId: number; partId: number };
   /** Points obtenus à la vérification (score de l'examen à questions composées). */
@@ -111,12 +113,12 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
           <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }} lang={language}><MathText text={check.feedback} /></p>
         </section>
       )}
-      {graded && solution && (
+      {graded && (solution || solutionContent) && (
         <details className="mt-3" open>
           <summary className="text-[12.5px] cursor-pointer" style={{ color: "var(--green-ink)" }}>{t("solution")}</summary>
-          <div lang={language}>{typeof solution === "string"
+          <div lang={language}>{solution
             ? <SafeHtml className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} html={solution} math />
-            : <div className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }}>{solution}</div>}</div>
+            : <div className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }}>{solutionContent}</div>}</div>
         </details>
       )}
     </div>

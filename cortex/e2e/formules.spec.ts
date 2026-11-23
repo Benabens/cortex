@@ -55,7 +55,7 @@ test("QCM : énoncés, options et corrigé mis en forme, MathML compris, sans d�
   await expect(page.locator(".katex-html").first()).toHaveAttribute("aria-hidden", "true");
 
   // une réponse par question (boutons d'option, aria-pressed), puis la correction
-  const options = page.locator("button[aria-pressed]");
+  const options = page.locator("main button[aria-pressed]");
   await options.nth(0).click();
   await options.nth(4).click();
   await page.getByRole("button", { name: "Corriger mon examen" }).click();
@@ -80,10 +80,11 @@ test("question composée et retour de correction : \\frac, \\sum, indices et for
   const display = page.locator(".math-display").first();
   await expect(display).toHaveAttribute("tabindex", "0");
 
-  await page.locator("button[aria-pressed]").first().click();
+  // la réponse rédigée se saisit avant la correction (le champ passe ensuite en lecture seule)
+  await page.locator("main button[aria-pressed]").first().click();
+  await page.getByRole("textbox", { name: "Ta réponse" }).fill("Par récurrence sur n.");
   await page.getByRole("button", { name: "Corriger mon examen" }).click();
   await expect(page.getByText("Barème", { exact: true })).toBeVisible();
-  await page.getByRole("textbox", { name: "Ta réponse" }).fill("Par récurrence sur n.");
   await page.getByRole("button", { name: /Vérifier ma réponse/ }).click();
   await expect(page.getByText("L'idée de la récurrence est juste")).toBeVisible();
   await expectNoRawFormula(page);

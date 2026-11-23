@@ -12,9 +12,12 @@ import { formulaPieces, mathTex } from "@/lib/tex-rich";
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+/** Au-delà, ce n'est plus une formule d'examen (« x_1 x_1 … » fusionnés) : KaTeX y passerait des secondes. */
+const MAX_FORMULA_CHARS = 2000;
+
 /** Une formule (sans délimiteurs) → HTML KaTeX, ou null si elle n'est pas sûre ou ne se compose pas. */
 export function formulaHtml(content: string, display: boolean): string | null {
-  if (mathTex(content) === null) return null;
+  if (content.length > MAX_FORMULA_CHARS || mathTex(content) === null) return null;
   try {
     const html = katex.renderToString(content, {
       displayMode: display,
@@ -35,17 +38,32 @@ export function formulaHtml(content: string, display: boolean): string | null {
 /**
  * Texte du modèle → HTML : formules composées, le reste échappé tel quel (les sauts de ligne restent
  * des « \n », que la vue affiche comme avant). null : aucune formule composée, la vue garde son texte.
+ * `budget` : formules encore permises (partagé par un lot) ; au-delà, leur source reste telle quelle.
  */
-export function mathHtml(text: string): string | null {
+export function mathHtml(text: string, budget = { left: Infinity }): string | null {
   let rendered = false;
   const html = formulaPieces(text ?? "").map((p) => {
     if ("text" in p) return escHtml(p.text);
+    if (budget.left <= 0) return escHtml(p.source);
+    budget.left--;
     const h = formulaHtml(p.formula, p.display);
     if (h === null) return escHtml(p.source);
     rendered = true;
     return h;
   }).join("");
   return rendered ? html : null;
+}
+
+/**
+ * Formules composées par requête (POST /api/math) : une page d'examen en compte quelques centaines ;
+ * sans borne, un lot de textes truffés de petites formules bloquait le serveur plusieurs minutes.
+ */
+export const MAX_FORMULAS_PER_BATCH = 3000;
+
+/** Plusieurs textes, dans l'ordre, sous un seul budget de formules. */
+export function mathHtmlBatch(texts: string[], maxFormulas = MAX_FORMULAS_PER_BATCH): (string | null)[] {
+  const budget = { left: maxFormulas };
+  return texts.map((t) => mathHtml(t, budget));
 }
 
 /** Balises (attributs entre guillemets compris) et texte d'un HTML assaini, donc bien formé. */

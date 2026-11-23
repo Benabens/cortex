@@ -297,7 +297,8 @@ export function BlockExam({
             part={{ examId: exam.id, partId: p.id }}
             language={language}
             onChecked={(score) => setChecked((c) => ({ ...c, [p.id]: score }))}
-            solution={
+            solution={null}
+            solutionContent={
               det ? (
                 <>
                   <p><MathText text={det.answer} /></p>

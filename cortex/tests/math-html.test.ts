@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mathHtml, mathInHtml } from "../lib/math-html";
+import { mathHtml, mathHtmlBatch, mathInHtml } from "../lib/math-html";
 import { sanitizeHtml } from "../lib/sanitize-html";
 
 /** Le texte visible d'un HTML (MathML et balises retirés), pour vérifier qu'aucune source brute ne reste. */
@@ -130,4 +130,37 @@ test("un ensemble \\{…\\} dans une formule de /mock est composé, hors formule
   const html = texToHtml(String.raw`$S = \{1, 2\}$ et \{a\}`, { katex: true });
   assert.equal((html.match(/class="katex"/g) ?? []).length, 1);
   assert.match(html, /<\/span> et \{a\}$/);
+});
+
+test("un environnement equation ou align de /mock est une formule détachée, qui défile dans son conteneur", async () => {
+  const { texToHtml } = await import("../lib/exam-latex");
+  const html = texToHtml(String.raw`Soit \begin{align*} f(x) &= x^2 + 2x + 1 \\ &= (x+1)^2 \end{align*} et \begin{equation} \int_0^1 x\,dx = \frac{1}{2} \end{equation}`, { katex: true });
+  assert.equal((html.match(/class="math-display"/g) ?? []).length, 3, "une formule détachée par ligne de l'align, une pour l'equation");
+  assert.doesNotMatch(visibleHtml(html), /\\begin|\\int|&amp;/);
+});
+
+test("un lot a un budget de formules : au-delà, le texte reste tel quel (une requête ne bloque pas le serveur)", () => {
+  const html = mathHtmlBatch(["$a$ et $b$", "$c$ puis $d$", "$e$"], 3);
+  assert.equal((html[0]!.match(/class="katex"/g) ?? []).length, 2);
+  assert.equal((html[1]!.match(/class="katex"/g) ?? []).length, 1);
+  assert.match(html[1]!, /puis \$d\$$/);
+  assert.equal(html[2], null);
+});
+
+test("POST /api/math borne le travail d'une requête : textes trop longs et lot trop gros restent tels quels", async () => {
+  const { POST } = await import("../app/api/math/route");
+  const post = async (texts: string[]) => {
+    const res = await POST(new Request("http://localhost/api/math", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ texts }) }) as never);
+    return ((await res.json()) as { html: (string | null)[] }).html;
+  };
+  const ok = await post(["Soit $x_1$.", "aucune formule"]);
+  assert.match(ok[0]!, /class="katex"/);
+  assert.equal(ok[1], null);
+  // une formule géante (« x_1 x_1 … » fusionnés) n'est pas composée ; un lot énorme s'arrête à son budget
+  const t0 = Date.now();
+  const big = await post(Array(60).fill("x_1 ".repeat(1400)));
+  assert.ok(Date.now() - t0 < 3000, `requête bornée (${Date.now() - t0} ms)`);
+  assert.equal(big.length, 60);
+  assert.ok(big.every((h) => h === null));
+  assert.equal((await post(["x_1 ".repeat(2000)]))[0], null, "texte au-delà de la borne : renvoyé tel quel");
 });

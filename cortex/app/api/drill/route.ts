@@ -41,8 +41,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       const { assistCall } = await import("@/lib/billing/reserve");
       const drill = await assistCall("drill", () => generateDrill(c));
       // HTML du modèle assaini ici, formules composées (lib/math-html) : la vue l'affiche par `SafeHtml math`
-      const shown = (html: string) => mathInHtml(html) ?? sanitizeHtml(html);
-      return NextResponse.json({ ok: true, drill: { ...drill, statement_html: shown(drill.statement_html), solution_html: shown(drill.solution_html) } });
+      const withFormulas = (html: string) => mathInHtml(html) ?? sanitizeHtml(html);
+      return NextResponse.json({ ok: true, drill: { ...drill, statement_html: withFormulas(drill.statement_html), solution_html: withFormulas(drill.solution_html) } });
     } catch (e: unknown) {
       const { AssistRefused } = await import("@/lib/billing/reserve");
       if (e instanceof AssistRefused) return apiError(req, e, e.status);

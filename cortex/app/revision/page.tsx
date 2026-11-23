@@ -172,11 +172,11 @@ export default function RevisionPage() {
                               <span className="tag tag-blue" lang={language}>{q.sourceExam?.replace(/_/g, " ").slice(0, 28)}{q.examYear ? ` ${q.examYear}` : ""}{q.examPage ? ` · p.${q.examPage}` : ""}</span>
                               {q.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={q.examHref} target="_blank" rel="noopener">{t("openPdf")}</a>}
                             </div>
-                            <div className="text-[13.5px]" style={{ color: "var(--ink)" }} lang={language}>{q.statement}</div>
-                            {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }} lang={language}>{q.options}</pre>}
+                            <div className="text-[13.5px]" style={{ color: "var(--ink)" }} lang={language}><MathText text={q.statement} /></div>
+                            {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }} lang={language}><MathText text={q.options} /></pre>}
                             {q.officialAnswer && (
                               reveal[q.id]
-                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}><strong>{t("officialAnswer")}</strong> <span lang={language}>{q.officialAnswer}</span></div>
+                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}><strong>{t("officialAnswer")}</strong> <span lang={language}><MathText text={q.officialAnswer} /></span></div>
                                 : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>{t("reveal")}</button>
                             )}
                           </div>

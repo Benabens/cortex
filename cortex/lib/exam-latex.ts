@@ -656,14 +656,20 @@ function renderTex(tex: string, level: number, katex = false): string {
   t = t.replace(/\\examinode\b/g, () => keep(`<div class="fig">⬚ Figure : inode v6 (addr[0..7], single/double-indirect → index → data)</div>`));
   t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
   t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) : réponds sur papier</div>`));
-  // formules hors maths et puces Markdown, comme le PDF les compose (lib/tex-rich)
-  t = markdownListsTex(wrapBareFormulasTex(t));
-  t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
   // KaTeX : une formule sûre est mise de côté composée, détachée ou non ; refusée, elle suit le rendu <em> ci-dessous
   const composed = (whole: string, m: string, display: boolean) => {
     const html = katex ? formulaHtml(m, display) : null;
     return html === null ? whole : keep(html);
   };
+  // equation/align : une formule détachée par ligne (« \\ »), sans les & d'alignement ; une ligne refusée → tout l'environnement suit le repli
+  t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|displaymath)(\*?)\}([\s\S]*?)\\end\{\1\2\}/g, (w, _e, _s, m: string) => {
+    const lines = m.split(/\\\\(?:\[[^\]]*\])?/).map((l) => l.replace(/(?<!\\)&/g, " ").trim()).filter(Boolean);
+    const html = katex && lines.length ? lines.map((l) => formulaHtml(l, true)) : [null];
+    return html.every((h) => h !== null) ? keep(html.join("")) : w;
+  });
+  // formules hors maths et puces Markdown, comme le PDF les compose (lib/tex-rich)
+  t = markdownListsTex(wrapBareFormulasTex(t));
+  t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
   t = t.replace(/\$\$([\s\S]+?)\$\$/g, (w, m: string) => composed(w, m, true));
   t = t.replace(/(?<!\\)\\\[([\s\S]+?)\\\]/g, (w, m: string) => composed(w, m, true));
   // Maths hors ligne ramenées à $…$ : $$…$$, \[…\], \(…\) et equation/align (sans les & d'alignement).
