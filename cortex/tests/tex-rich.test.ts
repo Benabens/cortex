@@ -101,8 +101,9 @@ test("un chemin, une URL, une adresse ou du code entre accents graves ne devienn
 test("un coefficient collé à la variable fait partie de la formule : « 2x_t », « 0.5x^2 » (signalé le 22/11)", () => {
   assert.equal(texInline("on a x_{t+1} = 2x_t"), String.raw`on a $x_{t+1} = 2x_t$`);
   assert.equal(texInline("le coût 0.5x^2 + 3y_i"), String.raw`le coût $0.5x^2 + 3y_i$`);
+  assert.equal(texInline("soit a+2x_t"), String.raw`soit a+$2x_t$`);
   // ni un hexadécimal, ni une version, ni un mot, ni un fichier ou une adresse qui commencent par un chiffre
-  for (const s of ["0x_ff", "v1.2x_t", "file2x_t", "2D_array", "3d_model.obj", "2x_y.py", "1a_b@epfl.ch", "`2x_t`", "/tmp/2x_t"]) {
+  for (const s of ["0x_ff", "C++17x_y", "#2x_t", "1,5x_t", "v1.2x_t", "file2x_t", "2D_array", "3d_model.obj", "2x_y.py", "1a_b@epfl.ch", "`2x_t`", "/tmp/2x_t"]) {
     assert.ok(!/(?<!\\)\$/.test(texInline(s)), `${s} → ${texInline(s)}`);
   }
 });
