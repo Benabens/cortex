@@ -17,6 +17,16 @@ import { esc, mathSymbolTex } from "@/lib/tex-escape";
  *    du texte : une formule mal formée ne doit jamais faire échouer tout le PDF.
  */
 
+/**
+ * CONSIGNE DES PROMPTS en texte simple : QCM et questions composées (dont le PDF passe par ce module,
+ * qui reconnaît cette forme à coup sûr) et correction d'une réponse (lue par l'assistant du
+ * connecteur, qui rend les $…$). Sans elle, le modèle écrivait « x_{t+1} = 2x_t » en texte nu.
+ */
+export const FORMULA_RULE = String.raw`FORMULES : chaque formule mathématique, même un simple indice ou exposant, s'écrit entre $…$ collés à la formule ($x_{t+1} = 2x_t$, jamais $ x $), ou entre \[…\] quand elle est détachée ; jamais en texte nu (x_{t+1}, x^2 ou \frac{a}{b} hors des dollars). Le code et les noms de fichiers restent entre accents graves, sans dollars.`;
+
+/** Même consigne pour un LaTeX libre (questions ouvertes, corrigés d'examen écrit). */
+export const LATEX_FORMULA_RULE = String.raw`Toute formule, même un simple indice ou exposant (x_{t+1}, x^2), est entre $...$ ou \[ ... \] : écrite hors des maths, elle casse la compilation.`;
+
 /** Actif : formules en texte échappé (cf. withFormulasAsText). */
 const plainMath = new AsyncLocalStorage<true>();
 /** Formules composées pendant un rendu (cf. formulasOrText). */
@@ -160,8 +170,9 @@ function scriptsEnd(s: string, j: number): number {
 
 /**
  * FORMULE SANS DÉLIMITEURS, reconnue seulement quand elle ne peut pas être autre chose :
- *  - une lettre seule suivie d'un indice ou d'un exposant : « x_{t+1} », « a_n », « x^2 » ; la
- *    lettre ne suit ni une lettre, ni un chiffre, ni « _ . \ / @ : » (« snake_case », « max_iter »,
+ *  - une lettre seule suivie d'un indice ou d'un exposant : « x_{t+1} », « a_n », « x^2 », avec son
+ *    coefficient collé (« 2x_t », « 0.5x^2 » ; jamais « 0x_ff », « C++17x_y », « #2x_t », « 1,5x_t ») ; la lettre (ou le coefficient) ne
+ *    suit ni une lettre, ni un chiffre, ni « _ . \ / @ : » (« snake_case », « max_iter »,
  *    « __init__ », « /tmp/a_1 », « github.com/u/x_y » restent du texte) et rien d'un mot, d'une
  *    adresse ou d'un chemin ne suit (« a_b.py », « x_tt », « a_b@epfl.ch ») ;
  *  - une commande mathématique connue (MATH_COMMANDS) avec ses arguments et ses indices :
@@ -170,7 +181,7 @@ function scriptsEnd(s: string, j: number): number {
  * Deux formules que séparent seulement des espaces et des opérateurs n'en font qu'une. Le code entre
  * accents graves n'est jamais lu comme une formule, délimitée ou non.
  */
-const BARE_START = /(?<![\p{L}\p{N}_.\\/@:])[A-Za-z](?=[_^])|(?<![:/@])\\[a-zA-Z]+/gu;
+const BARE_START = /(?<![\p{L}\p{N}_.\\/@:])(?:(?<![#,]|\+\+)(?:[1-9]\d*(?:\.\d+)?|0\.\d+))?[A-Za-z](?=[_^])|(?<![:/@])\\[a-zA-Z]+/gu;
 const BARE_GAP = /^[ =+\-*/<>]*$/;
 
 function bareAtoms(s: string): { start: number; end: number }[] {
@@ -188,8 +199,8 @@ function bareAtoms(s: string): { start: number; end: number }[] {
       if (end < 0) continue;
       end = scriptsEnd(s, end);
     } else {
-      end = scriptsEnd(s, start + 1);
-      if (end === start + 1) continue;
+      end = scriptsEnd(s, start + m[0].length);
+      if (end === start + m[0].length) continue;
     }
     const prev = atoms[atoms.length - 1];
     // une commande collée à un mot n'est une formule qu'à la suite d'une autre (« \eta\nabla »)
@@ -238,7 +249,7 @@ function formulaSegments(s: string): Segment[] {
     const tex = mathTex(display ?? m[3] ?? m[4]);
     if (tex === null) continue;
     if (m.index > last) out.push(...bareSegments(s.slice(last, m.index)));
-    out.push({ math: display !== undefined ? `\\displaystyle ${tex.trim()}` : tex });
+    out.push({ math: display !== undefined ? displayTex(tex) : tex });
     last = m.index + m[0].length;
   }
   if (last < s.length) out.push(...bareSegments(s.slice(last)));
@@ -248,12 +259,19 @@ function formulaSegments(s: string): Segment[] {
 /** Une ligne de texte du modèle → LaTeX en ligne (option, titre, critère) : formules sûres en maths, le reste par `esc`. */
 export function texInline(s: string): string {
   if (plainMath.getStore()) return esc(s ?? "");
-  return segments(s ?? "").map((g) => {
-    if (!("math" in g)) return esc(g.text);
-    const seen = composed.getStore();
-    if (seen) seen.n++;
-    return `$${g.math}$`;
-  }).join("");
+  return segments(s ?? "").map((g) => ("math" in g ? composedMath(g.math) : esc(g.text))).join("");
+}
+
+/** Une formule en ligne, d'une ligne à part une fois composée : `\\displaystyle`, sans saut de ligne. */
+function displayTex(tex: string): string {
+  return `\\displaystyle ${tex.trim()}`;
+}
+
+/** Une formule validée entre dollars, comptée pour `formulasOrText`. */
+function composedMath(tex: string): string {
+  const seen = composed.getStore();
+  if (seen) seen.n++;
+  return `$${tex}$`;
 }
 
 /** Puce Markdown (« - », « * », « • ») ou numéro (« 1. », « 2) ») en début de ligne, suivis d'une espace. */
@@ -330,6 +348,15 @@ export async function formulasOrText<T>(build: () => Promise<T>): Promise<{ valu
     console.error("[tex] formules en texte, la compilation échouait :", (e as Error).message);
     return { value: await withFormulasAsText(build), asText: true };
   }
+}
+
+/**
+ * Une formule déjà isolée (`content`, sans ses délimiteurs) → `$…$` si `mathTex` la juge sûre,
+ * sinon son source `source` échappé, lisible ; en texte aussi sous `withFormulasAsText`.
+ */
+export function formulaOrText(content: string, display: boolean, source: string): string {
+  const tex = plainMath.getStore() ? null : mathTex(content);
+  return tex === null ? esc(source) : composedMath(display ? displayTex(tex) : tex);
 }
 
 /** Maths déjà délimitées et code en ligne d'un source LaTeX : rien à y mettre entre dollars. */

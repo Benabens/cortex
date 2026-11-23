@@ -4,6 +4,7 @@ import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErr
 import { DEFAULT_ANSWER_MODE, OPTIONS_MIN, QCM_DEFAULT, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, requestedFormat, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { FORMULA_RULE } from "@/lib/tex-rich";
 import { userError } from "@/lib/i18n/user-error";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, writeJustifications, type JustificationTarget, type OffCourseFlag } from "@/lib/qcm-evidence";
@@ -753,8 +754,9 @@ const REPLACEMENTS_SCHEMA_STRUCTURED = `{ "replacements": [ { "index": <numéro 
  * entière jetait un énoncé et une clé justes, et l'item était perdu si le nouveau tirage en gardait
  * un. Un seul appel par ronde remplace les options relevées (taxonomie des distracteurs), avec
  * l'explication ; l'énoncé, la clé et les autres options restent. Le résultat est revérifié.
+ * Exporté pour les tests (tests/prompts-formules).
  */
-async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
+export async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
   // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
   // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
@@ -773,6 +775,7 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
       `RÈGLES : hors question de calcul ou de code, chaque nouveau distracteur est un [quasi-synonyme] : une AUTRE notion, étude ou technique présente dans les extraits du cours ci-dessous, donnée comme réponse à l'énoncé dans SES termes (elle reprend ses données autant que la bonne réponse ; jamais une caractéristique de cette autre notion que l'énoncé contredit) — jamais l'option remplacée retouchée, ni la bonne réponse avec une réserve ajoutée ou un sens inversé ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; il applique les MÊMES critères que la bonne réponse et se trompe sur un détail du cours. Interdits : simple substitution d'étiquette manifestement incompatible, lecture directe de chiffres, contradiction avec un critère déjà donné dans l'énoncé. Même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. ${structured ? `Pour chaque nouveau distracteur, "why_wrong" dit pourquoi IL est faux selon le cours (le détail qu'il contredit), sans citer d'autre option, ni lettre, ni rang.` : `Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang.`} Tout en ${lang}.`,
+      FORMULA_RULE,
       DATA_RULE,
       passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "",
       "",
@@ -1000,6 +1003,7 @@ export async function generateQcmBatch(
     opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
     explanationRule(),
+    `  - ${FORMULA_RULE}`,
     opts.withAnnales ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
     `  - LANGUE : toutes les questions, options et explications en ${language}.`,
     ``,
@@ -1658,8 +1662,9 @@ const REVIEW_SCHEMA = {
  * Rend, par question, sa version auditée ou null (écartée : clé fausse ou hors cours) — `audit`
  * vaut null si la revue est illisible, et les verdicts de la vérification à l'aveugle tiennent —,
  * et les doublons, null si le contrôle est indisponible : les plafonds par notion s'appliquent seuls.
+ * Exporté pour les tests (tests/prompts-formules).
  */
-async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[]; programme?: string[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
+export async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[]; programme?: string[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
   if (!items.length) return { audit: [], dup: null };
   // #113 : cases de justification encore vides (raison oubliée par la conception, effacée par le
   // filet ou non rendue par un remplacement), écrites dans cet appel qui passe de toute façon sur
@@ -1700,7 +1705,7 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
       `Tu es un examinateur exigeant. Voici les QCM d'un même examen, avec leur clé, leur explication et le fait du cours qui les prouve. Deux contrôles, rendus dans le même objet JSON.`,
       `1. AUDIT (verdicts) : pour chaque QCM, tranche selon les extraits du cours.`,
       ...AUDIT_RULES,
-      ...(toJustify ? [`justifications : pour chaque QCM qui a des cases « ← À JUSTIFIER », une entrée {index, key, distractors} — "key" (seulement si la clé est marquée, sinon vide) dit pourquoi elle est juste selon le cours ; "distractors" a une entrée par option marquée, et elles seules : "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit), sans citer d'autre option, ni lettre, ni numéro.`] : []),
+      ...(toJustify ? [`justifications : pour chaque QCM qui a des cases « ← À JUSTIFIER », une entrée {index, key, distractors} — "key" (seulement si la clé est marquée, sinon vide) dit pourquoi elle est juste selon le cours ; "distractors" a une entrée par option marquée, et elles seules : "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit), sans citer d'autre option, ni lettre, ni numéro.`, FORMULA_RULE] : []),
       `2. DOUBLONS (notions, duplicates, repeats).`,
       ...duplicateRules(items, { strict: opts.strict, previous: prior, programme }),
       DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body,

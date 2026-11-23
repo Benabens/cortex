@@ -5,6 +5,7 @@ import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { courseMaterialTitles, durationLabel, examBudgetFor, formatContextFor } from "@/lib/exam-format";
 import { excludedSourceIds } from "@/lib/source-scope";
+import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
 import { genericDirectivesBlock, languageName, type GenericStyle } from "@/lib/profiles/generic-directives";
 import { getExamDna, pickCoverage, sampleMolds } from "@/lib/exam-dna";
 
@@ -41,6 +42,7 @@ const GENERIC_LATEX_CONTRACT = [
   `Conventions LaTeX :`,
   `  - Listes : \\begin{itemize}...\\end{itemize} ; options a) b) c) : \\begin{enumerate}[label=\\alph*)]...\\end{enumerate}.`,
   `  - Code/pseudo-code : \\begin{lstlisting} ... \\end{lstlisting}. Maths : $...$ et \\[ ... \\] (aligne avec align*).`,
+  `  - ${LATEX_FORMULA_RULE}`,
   `  - Tableaux À REMPLIR : \\begin{tabular}{|l|c|c|}\\hline ... \\\\\\hline \\end{tabular} avec des \\rule{2.5cm}{0.4pt} pour les cases vides.`,
   `  - FIGURES = vraies figures TikZ adaptées à la MATIÈRE (arbres, graphes, tableaux de DP, frontières de décision, courbes de perte, schémas), PLEINE LARGEUR, centrées, légendées \\figcaption{Figure N: ...}. Dessine chaque figure toi-même en TikZ (n'utilise aucune macro de figure prédéfinie).`,
   `RÈGLES DE COMPILATION : échappe \\% \\& \\# \\_ dans le texte ; équilibre accolades/environnements ; pas de markdown ; pas d'images externes ; LaTeX qui COMPILE du premier coup.`,

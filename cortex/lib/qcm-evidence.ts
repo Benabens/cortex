@@ -14,6 +14,7 @@
 import { corpusWindows, evidencePassages } from "@/lib/course-grounding";
 import { completeJson } from "@/lib/llm";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { FORMULA_RULE } from "@/lib/tex-rich";
 
 type Question = { topic?: string | null; stem: string; options: string[]; correct: number[]; sourceFact?: string | null };
 
@@ -185,6 +186,7 @@ export async function rewriteExplanations(items: { stem: string; options: string
   const prompt = [
     `Les explications de ces QCM ajoutent des faits que le cours ne présente pas. Réécris l'explication de chacun, sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
     `RÈGLES : l'explication dit pourquoi la bonne réponse est juste et pourquoi chaque autre option est fausse, avec les SEULS faits des passages du cours ci-dessous ; rien de ce qui est signalé hors cours, aucun chiffre, auteur, exemple ou cadre absent des passages. Désigne les options par leur CONTENU, jamais par leur lettre ni leur rang. Trois à cinq phrases, en ${language}.`,
+    FORMULA_RULE,
     ``,
     DATA_RULE,
     dataBlock(`PASSAGES DU COURS`, passages),
@@ -242,6 +244,7 @@ export async function rewriteExplanationsOnOptions(questions: { stem: string; op
   const prompt = [
     `Les explications de ces QCM réfutent des options qui ne figurent pas dans la question (restes d'une version précédente des options). Réécris l'explication de chacun, sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
     `RÈGLES : l'explication dit pourquoi la bonne réponse est juste, puis pourquoi CHACUNE des options fausses listées est fausse — exactement celles-là, une par une, et aucune autre notion ni affirmation. Reprends les faits de l'ancienne explication quand ils sont justes${passages.length ? " et ceux des passages du cours" : ""}, sans en ajouter. Désigne les options par leur CONTENU, jamais par leur lettre ni leur rang. Trois à cinq phrases, en ${language}.`,
+    FORMULA_RULE,
     ...(passages.length ? [``, DATA_RULE, dataBlock(`PASSAGES DU COURS`, passages)] : []),
     ``,
     `═══ QCM ═══`,
@@ -311,6 +314,7 @@ export async function writeJustifications(targets: JustificationTarget[], langua
   const prompt = [
     `Pour chacun de ces QCM, écris UNIQUEMENT les justifications marquées « À JUSTIFIER », sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
     `RÈGLES : "key" (seulement si la bonne réponse est marquée) dit pourquoi elle est juste, avec le fait du cours, sans parler des autres options ; sinon "key" vide. "distractors" : une entrée par option marquée, et elles seules — "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse selon le cours (le détail qu'elle contredit). Dans chaque raison, aucune autre option, aucune lettre, aucun numéro ni rang${passages.length ? ", et seulement les faits des passages du cours ci-dessous" : ""}. Une à deux phrases par raison, en ${language}.`,
+    FORMULA_RULE,
     ...(passages.length ? [``, DATA_RULE, dataBlock(`PASSAGES DU COURS`, passages)] : []),
     ``,
     `═══ QCM ═══`,

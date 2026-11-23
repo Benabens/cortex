@@ -10,6 +10,7 @@ import { HARD_STOP_CODES, completeJson, llmErrorCode, llmFailureReason } from "@
 import { languageName } from "@/lib/profiles/generic-directives";
 import { untypesetChars } from "@/lib/tex-escape";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { FORMULA_RULE } from "@/lib/tex-rich";
 import { NO_FLAG, coverageTopics, runPool } from "@/lib/qcm";
 import { examsDir } from "@/lib/paths";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
@@ -330,7 +331,8 @@ const TRUE_FALSE = /vrai\s*(?:\/|ou|-)\s*faux|true\s*(?:\/|or|-)\s*false|richtig
 const choiceOptions = (plan: BlockPlan) => (plan.options && plan.options >= 3 ? plan.options : 4);
 const isTrueFalseSlot = (slot: BlockSlot) => TRUE_FALSE.test(slot.theme);
 
-function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
+/** Prompt système d'une question composée (exporté pour les tests : tests/prompts-formules). */
+export function blockSystemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
   const c = getCourse(currentCourse());
   const language = languageName(examLanguageFor(currentCourse()))[1];
   // Le barème de l'annale fixe déjà les points de chaque sous-question : un total visé le contredirait.
@@ -348,6 +350,7 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
     COURSE_TERMS_RULE,
     COURSE_MATTER_RULE,
+    `  - ${FORMULA_RULE}`,
     `  - Barème : ${BAREME.filter(([k]) => allows(k)).map(([k, t]) => baremeText(k, t, plan.points)).join(", ")}${perBlock ? ` ; environ ${perBlock} points pour la question entière` : ""}.`,
     `Langue de l'examen : ${language} (énoncés, options, réponses et critères).`,
     counterExamples,
@@ -637,7 +640,7 @@ export async function generateBlockExam(
   const { slots, spares } = await planSlots(plan);
   if (!slots.length) throw new Error("Aucune notion ni section du cours à couvrir : prépare le cours avant de générer.");
   const { counterExamplesBlock } = await import("@/lib/question-reports");
-  const ctx = { system: systemPrompt(plan, n, await counterExamplesBlock().catch(() => "")), previous: await recentBlockPrompts(), focus: opts.focus };
+  const ctx = { system: blockSystemPrompt(plan, n, await counterExamplesBlock().catch(() => "")), previous: await recentBlockPrompts(), focus: opts.focus };
   step(`Architecte : ${n} questions composées (scénario + ${plan.partsMin} à ${plan.partsMax} sous-questions)${plan.sections.length ? `, une par section de l'annale modèle` : ""}…`, 8);
 
   const built = new Map<number, ExamBlock>();

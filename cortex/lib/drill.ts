@@ -50,6 +50,12 @@ const SHORT_RULES = [
   `- solution_html : 3 à 5 étapes d'une ligne (ou un seul petit <table>) et le résultat ; 150 mots au plus, aucune explication développée.`,
 ].join("\n");
 
+/**
+ * Formules d'un drill : son HTML s'affiche tel quel, sans rendu des maths (pas de « $…$ »), et ses
+ * indices en texte brut ; « x_{t+1} » en texte nu se lisait mal, <sub>/<sup> s'affichent juste.
+ */
+const DRILL_FORMULA_RULE = `FORMULES : dans statement_html et solution_html, indices et exposants en <sub> et <sup> (x<sub>t+1</sub> = 2x<sub>t</sub>, 2<sup>16</sup>) ; dans hints (texte brut, aucune balise), en caractères Unicode quand ils existent (x₁, x², 2¹⁶), sinon en mots. Jamais en texte nu (x_{t+1}, x^2) ni entre dollars.`;
+
 /** Génère UNE question ciblée façon examen + 5 indices progressifs (via le LLM). */
 export async function generateDrill(concept: string): Promise<Drill> {
   // Langue et style de l'examen du cours, lus avant les consignes (synchrones) du profil.
@@ -64,7 +70,8 @@ export async function generateDrill(concept: string): Promise<Drill> {
     `Génère UNE seule question d'entraînement ciblée sur : « ${concept} ».`,
     `Elle doit être APPLIQUÉE (calculer / tracer / remplir / justifier), au format et niveau ${p.drillLevel()}, en respectant les CONTRAINTES DURES ci-dessus.`,
     rules,
-    `statement_html et solution_html en HTML SIMPLE (<p>,<ul>,<ol>,<li>,<code>,<pre>,<table>,<strong>). Pas d'images, pas de LaTeX.`,
+    `statement_html et solution_html en HTML SIMPLE (<p>,<ul>,<ol>,<li>,<code>,<pre>,<table>,<strong>,<sub>,<sup>). Pas d'images, pas de LaTeX.`,
+    DRILL_FORMULA_RULE,
     COURSE_TERMS_RULE,
     COURSE_MATTER_RULE,
     passages.length ? `\n${DATA_RULE}` : null,
