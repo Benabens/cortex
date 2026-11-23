@@ -91,9 +91,9 @@ test("QCM : la conception, le remplacement des distracteurs, la revue finale et 
 
 test("question composée : le prompt système demande les formules entre $…$", async () => {
   const { runWithCourse } = await import("../db/client");
-  const { systemPrompt } = await import("../lib/blocks");
+  const { blockSystemPrompt } = await import("../lib/blocks");
   const plan = { blockCount: 1, partsMin: 2, partsMax: 3, kinds: null, points: null, totalPoints: 20, sections: [], codeLanguage: null };
-  const sys = await runWithCourse(course, async () => systemPrompt(plan as never, 1, ""));
+  const sys = await runWithCourse(course, async () => blockSystemPrompt(plan as never, 1, ""));
   assert.match(sys, PLAIN);
 });
 
@@ -113,9 +113,9 @@ test("question ouverte et corrigé réécrit (LaTeX libre) : formules entre $…
   assert.ok(p.some((x) => LATEX.test(x)), "vérification : consigne absente du corrigé réécrit");
 });
 
-test("drill : son HTML s'affiche sans rendu des maths, indices et exposants en <sub>/<sup>", async () => {
+test("drill : son HTML s'affiche sans rendu des maths, indices et exposants en <sub>/<sup>, jamais dans ses indices en texte brut", async () => {
   const { generateDrill } = await import("../lib/drill");
   const p = await sent(() => generateDrill("descente de gradient"));
-  assert.ok(p.some((x) => /FORMULES : indices et exposants en <sub> et <sup>[^\n]*jamais en texte nu/.test(x)), p[0].slice(0, 300));
+  assert.ok(p.some((x) => /FORMULES : dans statement_html et solution_html, indices et exposants en <sub> et <sup>[^\n]*dans hints \(texte brut, aucune balise\)[^\n]*Jamais en texte nu/.test(x)), p[0].slice(0, 300));
   assert.ok(p.every((x) => !PLAIN.test(x)), "drill : pas de $…$, la vue ne les rend pas");
 });

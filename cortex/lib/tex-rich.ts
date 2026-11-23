@@ -18,8 +18,9 @@ import { esc, mathSymbolTex } from "@/lib/tex-escape";
  */
 
 /**
- * CONSIGNE DES PROMPTS dont le texte passe par ce module (QCM, questions composées, corrections) :
- * la forme qu'il reconnaît à coup sûr. Sans elle, le modèle écrivait « x_{t+1} = 2x_t » en texte nu.
+ * CONSIGNE DES PROMPTS en texte simple : QCM et questions composées (dont le PDF passe par ce module,
+ * qui reconnaît cette forme à coup sûr) et correction d'une réponse (lue par l'assistant du
+ * connecteur, qui rend les $…$). Sans elle, le modèle écrivait « x_{t+1} = 2x_t » en texte nu.
  */
 export const FORMULA_RULE = String.raw`FORMULES : chaque formule mathématique, même un simple indice ou exposant, s'écrit entre $…$ collés à la formule ($x_{t+1} = 2x_t$, jamais $ x $), ou entre \[…\] quand elle est détachée ; jamais en texte nu (x_{t+1}, x^2 ou \frac{a}{b} hors des dollars). Le code et les noms de fichiers restent entre accents graves, sans dollars.`;
 

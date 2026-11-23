@@ -223,7 +223,7 @@ test("hors EPFL : ni le drill ni l'architecte ne visent un final EPFL ni le styl
  */
 const CS202_PROMPTS = {
   intro: "37fb3a7a6e2ddc70", batch: "ac53fea0f4d5fa62", directives: "c3fa97a32f85bba3", qa: "8de728d4852bf582",
-  exam: "e95a9f80adb7a779", style: "83f76ef5fc705507", drill: "e53d159d68d9fe49", design: "8bde0427880a5b3f",
+  exam: "e95a9f80adb7a779", style: "83f76ef5fc705507", drill: "0ec683e9a1e10b9d", design: "8bde0427880a5b3f",
 };
 
 test("cs-202 : ses prompts restent identiques (style de l'enseignante et cible « final EPFL » compris)", async () => {

@@ -331,7 +331,8 @@ const TRUE_FALSE = /vrai\s*(?:\/|ou|-)\s*faux|true\s*(?:\/|or|-)\s*false|richtig
 const choiceOptions = (plan: BlockPlan) => (plan.options && plan.options >= 3 ? plan.options : 4);
 const isTrueFalseSlot = (slot: BlockSlot) => TRUE_FALSE.test(slot.theme);
 
-export function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
+/** Prompt système d'une question composée (exporté pour les tests : tests/prompts-formules). */
+export function blockSystemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
   const c = getCourse(currentCourse());
   const language = languageName(examLanguageFor(currentCourse()))[1];
   // Le barème de l'annale fixe déjà les points de chaque sous-question : un total visé le contredirait.
@@ -639,7 +640,7 @@ export async function generateBlockExam(
   const { slots, spares } = await planSlots(plan);
   if (!slots.length) throw new Error("Aucune notion ni section du cours à couvrir : prépare le cours avant de générer.");
   const { counterExamplesBlock } = await import("@/lib/question-reports");
-  const ctx = { system: systemPrompt(plan, n, await counterExamplesBlock().catch(() => "")), previous: await recentBlockPrompts(), focus: opts.focus };
+  const ctx = { system: blockSystemPrompt(plan, n, await counterExamplesBlock().catch(() => "")), previous: await recentBlockPrompts(), focus: opts.focus };
   step(`Architecte : ${n} questions composées (scénario + ${plan.partsMin} à ${plan.partsMax} sous-questions)${plan.sections.length ? `, une par section de l'annale modèle` : ""}…`, 8);
 
   const built = new Map<number, ExamBlock>();

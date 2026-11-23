@@ -51,10 +51,10 @@ const SHORT_RULES = [
 ].join("\n");
 
 /**
- * Formules d'un drill : son HTML s'affiche tel quel, sans rendu des maths (pas de « $…$ ») ;
- * « x_{t+1} » en texte nu se lisait mal, <sub>/<sup> s'affichent juste.
+ * Formules d'un drill : son HTML s'affiche tel quel, sans rendu des maths (pas de « $…$ »), et ses
+ * indices en texte brut ; « x_{t+1} » en texte nu se lisait mal, <sub>/<sup> s'affichent juste.
  */
-const DRILL_FORMULA_RULE = `FORMULES : indices et exposants en <sub> et <sup> (x<sub>t+1</sub> = 2x<sub>t</sub>, 2<sup>16</sup>), jamais en texte nu (x_{t+1}, x^2) ni entre dollars.`;
+const DRILL_FORMULA_RULE = `FORMULES : dans statement_html et solution_html, indices et exposants en <sub> et <sup> (x<sub>t+1</sub> = 2x<sub>t</sub>, 2<sup>16</sup>) ; dans hints (texte brut, aucune balise), en caractères Unicode quand ils existent (x₁, x², 2¹⁶), sinon en mots. Jamais en texte nu (x_{t+1}, x^2) ni entre dollars.`;
 
 /** Génère UNE question ciblée façon examen + 5 indices progressifs (via le LLM). */
 export async function generateDrill(concept: string): Promise<Drill> {

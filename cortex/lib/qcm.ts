@@ -754,6 +754,7 @@ const REPLACEMENTS_SCHEMA_STRUCTURED = `{ "replacements": [ { "index": <numéro 
  * entière jetait un énoncé et une clé justes, et l'item était perdu si le nouveau tirage en gardait
  * un. Un seul appel par ronde remplace les options relevées (taxonomie des distracteurs), avec
  * l'explication ; l'énoncé, la clé et les autres options restent. Le résultat est revérifié.
+ * Exporté pour les tests (tests/prompts-formules).
  */
 export async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
@@ -1661,6 +1662,7 @@ const REVIEW_SCHEMA = {
  * Rend, par question, sa version auditée ou null (écartée : clé fausse ou hors cours) — `audit`
  * vaut null si la revue est illisible, et les verdicts de la vérification à l'aveugle tiennent —,
  * et les doublons, null si le contrôle est indisponible : les plafonds par notion s'appliquent seuls.
+ * Exporté pour les tests (tests/prompts-formules).
  */
 export async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[]; programme?: string[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
   if (!items.length) return { audit: [], dup: null };
