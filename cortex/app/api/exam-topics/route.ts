@@ -3,7 +3,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { clientIp } from "@/lib/client-ip";
 import { apiError } from "@/lib/i18n/api-error";
-import { freeToolLimits } from "@/lib/exam-topics/config";
+import { freeToolEnabled, freeToolLimits } from "@/lib/exam-topics/config";
 import { processRun, sweepStaleUploads, uploadsRoot } from "@/lib/exam-topics/analyze";
 import { admitRun, releaseRun } from "@/lib/exam-topics/runs";
 import { validateUploads } from "@/lib/exam-topics/upload";
@@ -34,6 +34,7 @@ const UPLOAD_REFUSALS = {
 const json = (body: unknown, status: number) => NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
 
 export const POST = withBodyLimit(async function POST(req: Request) {
+  if (!freeToolEnabled()) return apiError(req, "exam_topics_not_found", 404);
   void sweepStaleUploads();
   const form = await readFormData(req, UPLOAD_LIMITS.examTopics);
   // Champ piège, invisible pour un humain : un robot qui remplit tout est refusé sans rien lancer.

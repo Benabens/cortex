@@ -23,6 +23,7 @@ const ENV: Record<string, string> = {
   DB_DRIVER: "postgres",
   DATABASE_URL: "pglite://memory",
   TRUST_PROXY: "1",
+  FREE_TOOL_ENABLED: "1",
   FREE_TOOL_DAILY_USD: "1",
   FREE_TOOL_RUN_USD: "0.3",
   FREE_TOOL_PER_IP_DAY: "2",
@@ -381,6 +382,22 @@ test("route : lien inconnu ou mal formé → 404", async () => {
   for (const id of ["AAAAAAAAAAAAAAAAAAAAAA", "../../etc/passwd"]) {
     const res = await GET(new Request(`http://localhost/api/exam-topics/x`), { params: Promise.resolve({ id }) });
     assert.equal(res.status, 404);
+  }
+});
+
+test("interrupteur : FREE_TOOL_ENABLED absent → outil fermé, 404 sur la route de dépôt et de lecture, aucun appel IA", async () => {
+  delete process.env.FREE_TOOL_ENABLED;
+  try {
+    responder = examModel;
+    const a = await post({ lang: "en" }, [EXAM_A, EXAM_B], "203.0.113.60");
+    assert.deepEqual(a, { status: 404, body: { code: "exam_topics_not_found" } });
+    assert.equal(prompts.length, 0, "aucun appel au modèle");
+
+    const { GET } = await import("../app/api/exam-topics/[id]/route");
+    const res = await GET(new Request("http://localhost/api/exam-topics/abc"), { params: Promise.resolve({ id: "abc" }) });
+    assert.equal(res.status, 404);
+  } finally {
+    process.env.FREE_TOOL_ENABLED = "1";
   }
 });
 
