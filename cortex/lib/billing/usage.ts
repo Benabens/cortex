@@ -15,6 +15,7 @@ import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 import { alertAccountHourSpend, resetAccountSpendAlerts } from "./account-spend-alerts";
 import { DELTA_CENTI } from "./credits";
 import { userError } from "@/lib/i18n/user-error";
+import { FREE_TOOL_USER, freeToolLimits } from "@/lib/exam-topics/config";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
@@ -394,6 +395,18 @@ async function assertSpendCapUnchecked(): Promise<void> {
     }
   }
 
+  // Outil gratuit sans compte : son plafond du jour est le sien (FREE_TOOL_DAILY_USD), jamais levé,
+  // sans marge de job — la dépense déjà faite par toutes ses analyses du jour.
+  if (currentUser() === FREE_TOOL_USER) {
+    const cap = freeToolLimits().dailyUsd;
+    const spentTool = await spentTodayByUser(FREE_TOOL_USER);
+    if (spentTool >= cap) {
+      log("warn", "spend_cap.free_tool_hit", { spent: spentTool, cap });
+      throw new LlmError(PER_USER_SPEND_CAP_MESSAGE, "SPEND_CAP", false, undefined, userError("llm_user_spend_cap"));
+    }
+    return;
+  }
+
   // Le propriétaire (lib/billing/owner) en est EXEMPTÉ (décision de Ben, 15/11) : il
   // reste borné par le fusible global du mois ci-dessus, qui protège les autres comptes.
   const perUserCap = spendCapPerUserUsd();
@@ -424,6 +437,8 @@ export function spendCapUsdPerCredit(): number | null {
 
 /** Plafond d'une réservation en $ : crédits débités × valeur d'un crédit. null : rien de débité (propriétaire, facturation coupée) ou plafond levé. */
 export async function reservationCapUsd(ref: string): Promise<number | null> {
+  // Une analyse de l'outil gratuit n'a rien de débité : son plafond est FREE_TOOL_RUN_USD, jamais levé.
+  if (ref.startsWith("exam-topics:")) return freeToolLimits().runUsd;
   const perCredit = spendCapUsdPerCredit();
   if (perCredit === null) return null;
   const debit = await authGet<{ delta: number | string; sub_amount: number | string | null }>(

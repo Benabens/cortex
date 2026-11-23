@@ -4,6 +4,8 @@ import { demoReadable } from "@/lib/demo-paths";
 import { MCP_CARD_PATHS, MCP_ICON_PATHS } from "@/lib/mcp/identity";
 import { legacyHostRedirect } from "@/lib/public-url";
 import { apiError } from "@/lib/i18n/api-error";
+import { localeCookie } from "@/lib/i18n/locale";
+import { isToolPath, toolLocale, withLocaleCookie } from "@/lib/exam-topics/locale";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -24,7 +26,9 @@ const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
 // /verify-request et /signout : atteintes AVANT ou PENDANT la perte de session (lien
 // magique envoyé, déconnexion en cours) — jamais de session à ce moment-là.
-const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/verify-request", "/signout", "/api/health", "/api/relais", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/"];
+const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/verify-request", "/signout", "/api/health", "/api/relais", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/",
+  // Outil gratuit sans compte (lib/exam-topics) : page, résultats partageables et son API.
+  "/whats-on-my-exam", "/api/exam-topics"];
 
 /** Icônes et manifest (fichiers de métadonnées Next) : lus SANS session par
  *  l'onglet et l'écran d'accueil. Égalité stricte : un préfixe « /icon » ouvrirait
@@ -165,7 +169,19 @@ export default function proxy(req: NextRequest) {
   if (!RL_EXEMPT.some((p) => pathname.startsWith(p)) && rateLimited(req)) {
     return apiError(req, "rate_limited", 429);
   }
+  if (isToolPath(pathname)) return toolPassThrough(req);
   return AUTH_ON ? guarded(req) : passThrough(req);
+}
+
+/** Outil gratuit (public) : sa langue est posée dans le cookie de la requête, que lisent pages et API. */
+function toolPassThrough(req: NextRequest): NextResponse {
+  const { locale, remember } = toolLocale(req.nextUrl.searchParams.get("lang"), req.headers.get("cookie"));
+  const headers = new Headers(req.headers);
+  headers.delete("x-cortex-user"); // anti-usurpation : l'outil ne connaît aucun compte
+  headers.set("cookie", withLocaleCookie(req.headers.get("cookie"), locale));
+  const res = NextResponse.next({ request: { headers } });
+  if (remember) res.headers.append("set-cookie", localeCookie(locale));
+  return res;
 }
 
 export const config = {

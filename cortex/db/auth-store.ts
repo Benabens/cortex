@@ -139,6 +139,19 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS free_offers_ip_idx ON free_offers (ip_key, created_at)`,
+    // Outil gratuit « What's on my exam? » (lib/exam-topics) : une ligne par analyse, IP HACHÉE
+    // (effacée après 2 jours), résultat partageable sans le texte des annales.
+    `CREATE TABLE IF NOT EXISTS exam_topic_runs (
+      id TEXT PRIMARY KEY,
+      ip_key TEXT,
+      status TEXT NOT NULL,
+      result_json TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS exam_topic_runs_ip_idx ON exam_topic_runs (ip_key, created_at)`,
+    `CREATE INDEX IF NOT EXISTS exam_topic_runs_status_idx ON exam_topic_runs (status, created_at)`,
     `CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -523,6 +536,17 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS free_offers_ip_idx ON public.free_offers (ip_key, created_at)`,
+    `CREATE TABLE IF NOT EXISTS public.exam_topic_runs (
+      id text PRIMARY KEY,
+      ip_key text,
+      status text NOT NULL,
+      result_json text,
+      error text,
+      created_at text NOT NULL,
+      finished_at text
+    )`,
+    `CREATE INDEX IF NOT EXISTS exam_topic_runs_ip_idx ON public.exam_topic_runs (ip_key, created_at)`,
+    `CREATE INDEX IF NOT EXISTS exam_topic_runs_status_idx ON public.exam_topic_runs (status, created_at)`,
     `CREATE TABLE IF NOT EXISTS public.app_meta (
       key text PRIMARY KEY,
       value text NOT NULL

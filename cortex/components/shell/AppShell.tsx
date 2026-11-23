@@ -38,7 +38,8 @@ function Body({ children }: { children: React.ReactNode }) {
  *  mise en page plein écran (DA sombre de la landing). */
 // /oauth : écran de consentement du connecteur MCP, même mise en page plein écran que /login.
 // /verify-request, /signout : visiteur sans session (lien envoyé, déconnexion en cours).
-const BARE_ROUTES = ["/login", "/oauth", "/verify-request", "/signout"];
+// /whats-on-my-exam : outil gratuit sans compte (lib/exam-topics), page et résultats partageables.
+const BARE_ROUTES = ["/login", "/oauth", "/verify-request", "/signout", "/whats-on-my-exam"];
 
 export function AppShell({ children, legal, legalEnglish, contact }: {
   children: React.ReactNode; legal?: LegalLinks; legalEnglish?: string | null; contact?: string;

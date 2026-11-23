@@ -19,6 +19,8 @@ export const UPLOAD_LIMITS = {
   source: 32 * MiB,
   /** Un fichier d'un dossier de cours (30 Mio + enveloppe multipart). */
   folderFile: 32 * MiB,
+  /** Outil gratuit « What's on my exam? » : 3 PDF de 10 Mio au plus + enveloppe multipart. */
+  examTopics: 32 * MiB,
   /** Une photo (12 Mo max côté fichier) + champs texte. */
   image: 16 * MiB,
 } as const;
