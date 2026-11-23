@@ -13,6 +13,7 @@ import {
 import { useCourse } from "@/lib/ux/api";
 import { useReducedMotion } from "@/lib/ux/hooks";
 import { SafeHtml } from "@/components/ui/SafeHtml";
+import { MathText } from "@/components/ui/MathText";
 import { OpenResponse } from "@/components/exam/OpenResponse";
 import { ReportButton } from "@/components/exam/ReportButton";
 import { BlockExam } from "@/components/exam/BlockExam";
@@ -34,6 +35,8 @@ type Open = {
   id: number;
   concept: string;
   statement: string;
+  /** L'énoncé sans KaTeX, pour la correction (absent d'une réponse d'avant ce champ). */
+  checkStatement?: string;
   solution: string;
 };
 type Exam = {
@@ -291,7 +294,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                 lang={language}
                 style={{ color: "var(--ink)", whiteSpace: "pre-wrap" }}
               >
-                {it.stem}
+                <MathText text={it.stem} />
               </div>
               {it.type === "mcq" && !graded && (
                 <p
@@ -362,7 +365,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                         lang={language}
                         style={{ fontSize: 13.5, color: "var(--ink)", flex: 1 }}
                       >
-                        {o}
+                        <MathText text={o} />
                       </span>
                       {det && isCorrect && (
                         <span
@@ -382,7 +385,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                               maxWidth: 220,
                             }}
                           >
-                            ⚠ <span lang={language}>{det.misconceptions[k]}</span>
+                            ⚠ <span lang={language}><MathText text={det.misconceptions[k]} /></span>
                           </span>
                         ) : (
                           <span style={{ color: "var(--red-ink)" }}>✗</span>
@@ -397,7 +400,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                   style={{ color: "var(--ink-2)", whiteSpace: "pre-line" }}
                 >
                   <strong style={{ color: "var(--ink)" }}>{t("why")}</strong>{" "}
-                  <span lang={language}>{det.explanation}</span>
+                  <span lang={language}><MathText text={det.explanation} /></span>
                 </p>
               )}
               <ReportButton
@@ -438,11 +441,12 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                       className="prose-exam text-[13.5px]"
                       style={{ color: "var(--ink)" }}
                       html={o.statement}
+                      math
                     /></div>
                   <OpenResponse
                     key={`${courseId}:${id}:${o.id}`}
                     questionId={o.id}
-                    statement={o.statement}
+                    statement={o.checkStatement ?? o.statement}
                     courseId={courseId ?? ""}
                     graded={!!graded}
                     solution={sol?.solution ?? null}

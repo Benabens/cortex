@@ -8,6 +8,7 @@ import { LoadError } from "@/components/ui/LoadError";
 import { Segmented } from "@/components/ui/Segmented";
 import { Toggle } from "@/components/ui/Toggle";
 import { useTranslations } from "use-intl/react";
+import { MathText } from "@/components/ui/MathText";
 
 type BQ = { id: number; topic: string; lectureRank: number | null; statement: string; options: string | null; officialAnswer: string | null; sourceExam: string; examYear: number | null; examPage: number | null; examHref: string | null };
 type PQ = { id: number; kind: "qcm" | "open"; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
@@ -215,10 +216,10 @@ export default function RevisionPage() {
                                 {q.verifyMethod === "deterministic" && <span className="tag tag-green" title={t("provedTitle")}>{t("proved")}</span>}
                                 {q.verified === 1 && q.verifyMethod !== "deterministic" && <span className="tag" title={t("verifiedTitle")}>{t("verified")}</span>}
                               </div>
-                              <div className="text-[13.5px]" style={{ color: "var(--ink)" }} lang={language}>{q.statement}</div>
-                              {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }} lang={language}>{q.options}</pre>}
+                              <div className="text-[13.5px]" style={{ color: "var(--ink)" }} lang={language}><MathText text={q.statement} /></div>
+                              {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }} lang={language}><MathText text={q.options} /></pre>}
                               {reveal[q.id]
-                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)", whiteSpace: "pre-line" }}>{q.kind === "qcm" ? <><strong>{t("answer")}</strong> <span lang={language}>{q.correct}. {q.explanation}</span></> : <><strong>{t("solution")}</strong> <span lang={language}>{q.solution}</span></>}</div>
+                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)", whiteSpace: "pre-line" }}>{q.kind === "qcm" ? <><strong>{t("answer")}</strong> <span lang={language}>{q.correct}. <MathText text={q.explanation} /></span></> : <><strong>{t("solution")}</strong> <span lang={language}><MathText text={q.solution} /></span></>}</div>
                                 : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>{t("reveal")}</button>}
                             </div>
                             );

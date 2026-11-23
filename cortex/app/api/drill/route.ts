@@ -8,6 +8,8 @@ import { dueConcepts } from "@/lib/schedule";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { fieldTooLong } from "@/lib/field-limits";
+import { mathInHtml } from "@/lib/math-html";
+import { sanitizeHtml } from "@/lib/sanitize-html";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +40,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       // l'appel n'est pas parti ou si la réponse est restée illisible (lib/billing/reserve).
       const { assistCall } = await import("@/lib/billing/reserve");
       const drill = await assistCall("drill", () => generateDrill(c));
-      return NextResponse.json({ ok: true, drill });
+      // HTML du modèle assaini ici, formules composées (lib/math-html) : la vue l'affiche par `SafeHtml math`
+      const shown = (html: string) => mathInHtml(html) ?? sanitizeHtml(html);
+      return NextResponse.json({ ok: true, drill: { ...drill, statement_html: shown(drill.statement_html), solution_html: shown(drill.solution_html) } });
     } catch (e: unknown) {
       const { AssistRefused } = await import("@/lib/billing/reserve");
       if (e instanceof AssistRefused) return apiError(req, e, e.status);
