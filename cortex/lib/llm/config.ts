@@ -36,10 +36,19 @@ const MODEL_ENV: Record<string, string> = {
   haiku: "LLM_MODEL_HAIKU",
 };
 
-/** Ids par défaut côté API Anthropic (alignés sur l'historique GEN_MODEL pour opus). */
+/**
+ * Ids par défaut côté API Anthropic. Chaque site d'appel choisit son alias selon ce qu'il fait
+ * (décision de Ben du 23/11/2026) :
+ *  - « opus » (Opus 5.5) pour le DIFFICILE : rédiger un énoncé ou un corrigé (examen, QCM, drill,
+ *    labs), corriger la réponse d'un étudiant, vérifier ou juger un exercice généré ;
+ *  - « sonnet » (Sonnet 5.5, même prix que Sonnet 5) pour le MÉCANIQUE : extraction, classement,
+ *    OCR, plan du cours, résumés courts, analyse d'un point faible ;
+ *  - « haiku » pour l'outil gratuit.
+ * tests/modeles-par-site.test.ts garde la liste des sites mécaniques.
+ */
 const ANTHROPIC_DEFAULTS: Record<string, string> = {
-  opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-5",
+  opus: "claude-opus-5-5",
+  sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-4-5-20251001",
 };
 
@@ -69,9 +78,9 @@ export function mapModel(model: LlmModel, provider: ProviderName): string {
   if (envKey && process.env[envKey]) return process.env[envKey]!;
   if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
     // RÈGLE D'OR coûts : sur le provider API PAYANT, l'alias
-    // logique « opus » ne se résout vers Opus (5×/25× plus cher que Sonnet en
-    // sortie) que si EXPLICITEMENT autorisé — LLM_ALLOW_OPUS=1 ou LLM_MODEL_OPUS
-    // posé. Sinon Sonnet. Le provider claude-code (dev €0 via le CLI local) garde le
+    // logique « opus » ne se résout vers Opus (2× le prix de Sonnet) que si
+    // EXPLICITEMENT autorisé — LLM_ALLOW_OPUS=1 ou LLM_MODEL_OPUS posé. Sinon
+    // Sonnet : les prix en crédits supposent Opus sur les sites difficiles. Le provider claude-code (dev €0 via le CLI local) garde le
     // passthrough historique : « opus » y reste opus.
     if (model === "opus" && process.env.LLM_ALLOW_OPUS !== "1") return ANTHROPIC_DEFAULTS.sonnet;
     return ANTHROPIC_DEFAULTS[model];

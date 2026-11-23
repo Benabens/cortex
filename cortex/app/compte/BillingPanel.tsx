@@ -249,7 +249,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         <div>
           <h2 id="billing-title" className="text-xl font-semibold text-ink-1">{t("title")}</h2>
           <p className="mt-0.5 text-[0.8rem] text-ink-3">
-            {t("costSummary", { exam: data.costs.exam, examFormatted: f.number(data.costs.exam), qcm: data.costs.qcm, qcmFormatted: f.number(data.costs.qcm), assist: f.number(data.costs.assist) })}
+            {t("costSummary", { exam: data.costs.exam, examFormatted: f.number(data.costs.exam), qcm: data.costs.qcm, qcmFormatted: f.number(data.costs.qcm), exercise: data.costs.exercise, exerciseFormatted: f.number(data.costs.exercise), assist: data.costs.assist, assistFormatted: f.number(data.costs.assist) })}
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={onRefresh} aria-label={t("refresh")}>

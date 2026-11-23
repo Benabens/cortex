@@ -59,7 +59,9 @@ async function handlePOST(req: NextRequest) {
   if (model !== undefined && model !== null && model !== "" && !isLlmModel(model)) {
     return apiError(req, "llm_model_unknown", 400);
   }
-  const chosenModel = isLlmModel(model) ? model : "opus";
+  // Une analyse de point faible est un classement (mécanique) : jamais Opus, même demandé —
+  // son prix d'aide ne couvre pas un appel Opus (lib/llm/config, classement des sites).
+  const chosenModel = model === "haiku" ? "haiku" : "sonnet";
 
   const row = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(
     "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",

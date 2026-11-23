@@ -722,7 +722,7 @@
       "dailyGen": "Par jour et par compte : {gen, plural, one {{genFormatted} génération} other {{genFormatted} générations}}.",
       "dailyAssist": "Par jour et par compte : {assist, plural, one {{assistFormatted} aide} other {{assistFormatted} aides}}.",
       "storage": "Stockage : {value} Mo de fichiers.",
-      "costSummary": "Un examen blanc coûte {exam, plural, one {{examFormatted} crédit} other {{examFormatted} crédits}}, un examen blanc QCM ou un exercice {qcm, plural, one {{qcmFormatted} crédit} other {{qcmFormatted} crédits}}, une aide (exercice d’entraînement, correction) {assist}.",
+      "costSummary": "Un examen blanc coûte {exam, plural, one {{examFormatted} crédit} other {{examFormatted} crédits}}, un examen blanc QCM {qcm, plural, one {{qcmFormatted} crédit} other {{qcmFormatted} crédits}}, un exercice {exercise, plural, one {{exerciseFormatted} crédit} other {{exerciseFormatted} crédits}}, une aide (exercice d’entraînement, correction) {assist, plural, one {{assistFormatted} crédit} other {{assistFormatted} crédits}}.",
       "refresh": "Actualiser le solde",
       "paymentConfirmed": "Paiement confirmé. Tes crédits apparaissent dès que Stripe nous l’a notifié : quelques secondes en général. Actualise si besoin.",
       "paymentCanceled": "Paiement annulé. Rien n’a été débité.",

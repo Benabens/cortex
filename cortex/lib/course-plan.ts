@@ -188,7 +188,7 @@ export async function deriveCoursePlan(opts: { onStep?: (m: string, p: number) =
       JSON.stringify(PLAN_SCHEMA, null, 2),
     ].join("\n");
     step("Extraction du plan (titres du prof, verbatim)…", 45);
-    const parsed = extractJson<{ chapters?: RawChapter[] }>(await completeText({ prompt, model: "opus", timeoutMs: 240_000 }));
+    const parsed = extractJson<{ chapters?: RawChapter[] }>(await completeText({ prompt, model: "sonnet", timeoutMs: 240_000 }));
     llm = (parsed?.chapters ?? []).filter((c) => c && c.title && c.title.trim());
   } catch (e) {
     step(`Extraction LLM indisponible (${(e as Error).message.slice(0, 40)}) → repli déterministe`, 60);
@@ -312,7 +312,7 @@ export async function classifyNotionsByLecture(
     JSON.stringify(MAP_SCHEMA, null, 2),
   ].join("\n");
   const parsed = extractJson<{ mapping?: { id: number; lecture_no: number | null }[] }>(
-    await completeText({ prompt, model: "opus", timeoutMs: 600_000 })
+    await completeText({ prompt, model: "sonnet", timeoutMs: 600_000 })
   );
   return parsed?.mapping ?? [];
 }

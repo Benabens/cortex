@@ -141,6 +141,20 @@ export const LONG_OUTPUT_MAX_TOKENS = 32_000;
  */
 export const EXAM_OUTPUT_MAX_TOKENS = 64_000;
 
+/**
+ * Effort des sites difficiles (rédaction, correction, vérification) qui ne fixent pas le leur.
+ * Sur Sonnet 5 ils tournaient à son défaut, « high ». Sur Opus 5.5, banc du 23/11/2026 (examen
+ * écrit CS-202 de 8 exercices) : « high » = 595 k tokens de sortie, 12,6 $, 27 min ; « medium » =
+ * 229 k tokens, 5,1 $, 13 min, 8 exercices sur 8 livrés — et moins de réflexion que Sonnet 5 en
+ * « high » n'en produisait. LLM_HARD_EFFORT le règle sans redéploiement (low, medium, high) ; une
+ * valeur inconnue garde le défaut.
+ */
+export const HARD_TASK_EFFORT_DEFAULT: LlmEffort = "medium";
+export function hardTaskEffort(): LlmEffort {
+  const v = process.env.LLM_HARD_EFFORT?.trim().toLowerCase();
+  return v === "low" || v === "medium" || v === "high" ? v : HARD_TASK_EFFORT_DEFAULT;
+}
+
 export interface LlmProvider {
   readonly name: string;
   /** Le provider peut-il servir un appel maintenant ? (binaire présent / clé posée / URL posée) */

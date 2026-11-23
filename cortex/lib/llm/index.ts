@@ -72,9 +72,9 @@ function assistMaxTokens(): number {
 }
 
 /**
- * Plafond d'une aide qui fixe sa propre taille (le drill : énoncé, indices et corrigé, réflexion
- * comprise : 10 000 demandés). 12 k tokens de Sonnet 5 ≈ 0,12 $ ; le plafond par réservation
- * (0,3 crédit × 0,9 $ = 0,27 $) borne de toute façon la somme des essais d'une même aide.
+ * Plafond d'une aide qui fixe sa propre taille (le drill et la correction : 12 000 demandés,
+ * réflexion comprise). 12 k tokens d'Opus 5.5 ≈ 0,24 $ ; le plafond par réservation (prix de l'aide
+ * × JOB_SPEND_CAP_USD_PER_CREDIT) borne de toute façon la somme des essais d'une même aide.
  */
 export const ASSIST_MAX_TOKENS_CAP = 12_000;
 
@@ -84,12 +84,13 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   const callSite = callerSite();
   const job = currentJob();
   const proof = currentLlmProof();
-  // Aide à 0,3 crédit sur un fournisseur payant : jamais opus, réponse bornée — son
-  // plafond par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
+  // Aide sur un fournisseur payant : le modèle est celui du site (Opus pour le drill et la
+  // correction, Sonnet pour une analyse : lib/llm/config), la réponse est bornée — son plafond
+  // par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
   // La taille vient du site d'appel quand il la connaît (un drill ne tient pas dans le défaut
   // d'une correction : coupé 3 fois à 6000 tokens, CS-250 du 21/11) ; sinon ASSIST_MAX_TOKENS.
   if (proof?.kind === "assist" && isPaidProvider(provider.name)) {
-    req = { ...req, model: req.model === "haiku" ? "haiku" : "sonnet", maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
+    req = { ...req, maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
   }
   const model = req.model ?? "opus";
   const labels = { provider: provider.name, model };
@@ -284,5 +285,5 @@ function retryNote(reason: string, n: number, attempts: number): string {
 export { extractJson, JsonOutputError } from "./json";
 export { BAD_OUTPUT_CODES, HARD_STOP_CODES, OWN_LLM_CODES, PROVIDER_DOWN_CODES, llmErrorCode, llmFailureReason, llmUserError, llmUserMessage } from "./errors";
 export { PROVIDER_NAMES, type ProviderName } from "./config";
-export { EXAM_OUTPUT_MAX_TOKENS, LONG_OUTPUT_MAX_TOKENS, LlmError } from "./types";
+export { EXAM_OUTPUT_MAX_TOKENS, hardTaskEffort, LONG_OUTPUT_MAX_TOKENS, LlmError } from "./types";
 export type { CompleteRequest, CompleteResult, LlmImage, LlmModel, LlmProvider, LlmUsage } from "./types";
