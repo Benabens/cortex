@@ -67,6 +67,11 @@ export type CompleteRequest = {
   images?: LlmImage[];
   /** Annulation coopérative. */
   signal?: AbortSignal;
+  /**
+   * Interne : l'appel est une aide payée (drill, correction). Posé par lib/llm complete() depuis la
+   * preuve d'autorisation, jamais par l'appelant : LLM_ALLOW_OPUS=assist y autorise Opus.
+   */
+  assist?: boolean;
 };
 
 export type LlmUsage = {

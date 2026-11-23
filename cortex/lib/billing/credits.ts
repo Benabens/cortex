@@ -71,8 +71,10 @@ const DEFAULT_COSTS: Record<string, number> = {
   prepare: 2,
   // Appels LLM courts et interactifs (drill, vérification de solution, analyse
   // de faiblesse) : une fraction de crédit. Gratuits, ils offraient ~40 appels
-  // payants par jour et par compte, indéfiniment (audit B5).
-  assist: 0.3,
+  // payants par jour et par compte, indéfiniment (audit B5). 0,5 depuis le 23/11/2026
+  // (0,3 avant) : drill et correction sur Opus 5.5 à l'effort haut, p95 au banc 0,20 $
+  // (cache compté) pour 0,5 × 0,424 $ = 0,21 $ autorisés à 45 % du prix encaissé.
+  assist: 0.5,
 };
 
 /** Coût en CENTIÈMES de crédit d'un type de génération. */

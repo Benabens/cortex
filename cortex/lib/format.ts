@@ -135,7 +135,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
-  const profile = cleanProfile(extractJson<FormatProfile>(await completeText({ prompt, model: "opus", timeoutMs: 300_000 })));
+  const profile = cleanProfile(extractJson<FormatProfile>(await completeText({ prompt, model: "sonnet", timeoutMs: 300_000 })));
   // Mise en page de l'annale (garde, en-tête, numérotation, options…), relevée une fois ici, sans
   // appel au modèle, tant que ses PDF sont là : lib/exam-layout-survey.
   step("Relevé de la mise en page de l'annale…", 85);
@@ -296,7 +296,7 @@ async function detectWithoutAnnales(step: (m: string, p: number) => void): Promi
   step("Lecture des indices de format (LLM, preuves citées)…", 50);
   let raw: Record<string, unknown>;
   try {
-    raw = extractJson<Record<string, unknown>>(await completeText({ prompt, model: "opus", timeoutMs: 300_000, json: { schema: NO_ANNALES_SCHEMA as unknown as object } }));
+    raw = extractJson<Record<string, unknown>>(await completeText({ prompt, model: "sonnet", timeoutMs: 300_000, json: { schema: NO_ANNALES_SCHEMA as unknown as object } }));
   } catch (e) {
     await saveProfile(unknown);
     step(`Lecture des indices de format impossible (${(e as Error).message.slice(0, 60)}) : format inconnu, à déclarer.`, 100);

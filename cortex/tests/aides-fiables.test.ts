@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * AIDES FIABLES (chasse aux bugs du 22/11/2026) — correction (check_answer) et drill :
  *  - la correction pose son budget (12 000 tokens, effort moyen) au lieu du défaut des aides

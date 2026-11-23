@@ -27,12 +27,14 @@ const DRILL_SCHEMA = {
 } as const;
 
 /**
- * Taille de la réponse, réflexion comprise (Sonnet 5 réfléchit par défaut, et sa réflexion compte
- * dans la limite) : à 6000 tokens et à l'effort par défaut, un drill Dijkstra/Bellman-Ford de
- * CS-250 sortait coupé trois fois de suite (21/11/2026). Effort moyen et format compact : la
- * réponse tient largement ; la relance après une coupure demande moins, pas la même chose.
+ * Taille de la réponse, réflexion comprise (sa réflexion compte dans la limite) : à 6000 tokens et
+ * à l'effort par défaut, un drill Dijkstra/Bellman-Ford de CS-250 sortait coupé trois fois de suite
+ * (Sonnet 5, 21/11/2026). Opus 5.5 depuis le 23/11 : au banc (13 drills algo, ML, systèmes), l'effort
+ * haut donne 12 corrigés justes sur 13 sans imprécision (moyen : 10 justes, 2 imprécis) pour 0,14 $
+ * en moyenne ; sa plus longue réponse fait 7 700 tokens, d'où la marge à 12 000. La relance après une
+ * coupure demande moins, pas la même chose.
  */
-const DRILL_LIMITS = { maxTokens: 10_000, effort: "medium" } as const;
+const DRILL_LIMITS = { maxTokens: 12_000, effort: "high" } as const;
 const DRILL_SHORT_LIMITS = { maxTokens: 6_000, effort: "low" } as const;
 
 /** Consignes de longueur : chaque partie dit ce qu'elle contient, rien n'est écrit deux fois. */
