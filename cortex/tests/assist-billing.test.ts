@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * B5 — l'assistance n'est plus gratuite : chaque appel (drill, correction,
  * analyses) RÉSERVE 0,3 crédit avant d'appeler le modèle, atomiquement. Un

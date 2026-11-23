@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * Lot 1b/3 — défense en profondeur côté worker : scripts/run-job.ts installait
  * le cours reçu en argument sans vérifier qu'il appartient encore à

@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * MODE PROPRIÉTAIRE — le compte de CORTEX_OWNER_EMAIL n'est jamais arrêté par
  * les crédits, les quotas du jour ni le plafond de générations simultanées :

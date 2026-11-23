@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * DRILL FIABLE (21/11/2026) — un drill d'algorithmique (Dijkstra, Bellman-Ford) sortait coupé trois
  * fois de suite : la réflexion du modèle et un corrigé-roman dépassaient 6 000 jetons, et chaque

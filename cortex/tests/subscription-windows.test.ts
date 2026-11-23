@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * BUG ARGENT (prod) — la recharge paresseuse au changement de MOIS CALENDAIRE
  * cumulait avec invoice.paid : un mensuel pris le 28/09 recevait 20 le 28/09,

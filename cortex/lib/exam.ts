@@ -622,8 +622,9 @@ const ONE_EX_SCHEMA = {
 } as const;
 
 /** Délai d'un appel qui conçoit des exercices (lot ou régénération) : un lot de 3 << un appel de 6 ;
- *  surchargeable (P3 : « augmente le timeout par lot »). */
-const exerciseTimeoutMs = () => Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000;
+ *  surchargeable (P3 : « augmente le timeout par lot »). 15 min depuis Opus 5.5 en effort high : son
+ *  appel le plus long au banc du 23/11/2026 a duré 554 s, trop près des 10 min d'avant. */
+const exerciseTimeoutMs = () => Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 900_000;
 
 /** Régénère UN exercice ciblé (même catégorie/barème) en corrigeant le diagnostic — boucle de durcissement. */
 export async function regenerateExercise(q: ExamQuestion, diagnostic: string): Promise<ExamQuestion> {

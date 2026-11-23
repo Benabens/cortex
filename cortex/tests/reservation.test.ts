@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * B7 + I6 + I5 + I8 bis — RÉSERVATION ATOMIQUE. Postgres réel (PGlite) : le
  * solde, le quota du jour et le nombre de générations en cours sont décidés et

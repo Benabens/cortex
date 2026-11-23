@@ -75,11 +75,11 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
   });
   delete process.env.LLM_ALLOW_OPUS;
   assert.equal(out.text, '{"topic":"ok"}');
-  assert.equal(out.model, "claude-opus-4-8"); // GEN_MODEL historique préservé (opt-in)
+  assert.equal(out.model, "claude-opus-5-5"); // « opus » sous LLM_ALLOW_OPUS=1 : Opus 5.5
   assert.deepEqual(out.usage, { inputTokens: 21, outputTokens: 9 });
 
   assert.ok(captured);
-  assert.equal(captured!.model, "claude-opus-4-8");
+  assert.equal(captured!.model, "claude-opus-5-5");
   assert.equal(captured!.max_tokens, 2000);
   assert.equal(captured!.stream, true);
   assert.deepEqual(captured!.thinking, { type: "adaptive" });

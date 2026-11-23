@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * SERVEUR MCP — par `POST /mcp`, avec un vrai client MCP v2 dont le fetch appelle
  * la route en mémoire, sur Postgres réel (PGlite) et un faux fournisseur LLM local.
@@ -372,7 +374,7 @@ test("get_account_status : costs_by_type donne le coût de chaque type (QCM comp
   const first = (await call(client, "get_account_status")).structuredContent!;
   assert.deepEqual(first.costs, { mock_exam: 6, drill: 0.3, check_answer: 0.3 }, "costs inchangé");
   assert.deepEqual(first.costs_by_type, { mock_exam: 6, mcq_exam: 4, exercise: 1, prepare_course: 2, exam_format: 1, drill: 0.3, check_answer: 0.3 });
-  process.env.CREDITS_COST_JSON = JSON.stringify({ qcm: 3, prepare: 4, assist: 0.2 });
+  process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 3, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 4, assist: 0.2 });
   try {
     const r = await call(client, "get_account_status");
     const after = r.structuredContent!.costs_by_type as ByType;
@@ -393,7 +395,7 @@ test("get_account_status : costs_by_type donne le coût de chaque type (QCM comp
     leaked.costs.mcq_exam = 3;
     assert.equal(new AjvJsonSchemaValidator().getValidator(older as never)(leaked).valid, false);
   } finally {
-    delete process.env.CREDITS_COST_JSON;
+    process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
   }
   await client.close();
 });
@@ -625,7 +627,7 @@ test("solde insuffisant : refusé dès le devis avec le solde, aucun appel au mo
   }
 });
 
-test("examen blanc : devis au tarif de l'app (6 crédits, +1 au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
+test("examen blanc : devis au tarif de l'app (6 crédits, +3 par tranche au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
   const { access } = await tokenFor(CAROL);
   const { client } = await connect(access);
   const credits = await import("../lib/billing/credits");
@@ -634,7 +636,7 @@ test("examen blanc : devis au tarif de l'app (6 crédits, +1 au-delà de 8 exerc
   assert.equal((base.structuredContent as { confirmation: { cost_credits: number } }).confirmation.cost_credits, 6);
   const big = await call(client, "generate_mock_exam", { exercise_count: 12 });
   const conf = (big.structuredContent as { confirmation: { cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } }).confirmation;
-  assert.equal(conf.cost_credits, 7);
+  assert.equal(conf.cost_credits, 9);
   assert.equal(conf.daily_quota.kind, "generations");
   const before = await balance(CAROL);
   // Cours sans corpus : le pré-check de l'app refuse AVANT toute réservation.

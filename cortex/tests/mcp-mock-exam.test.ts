@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * EXAMEN BLANC SUR UN COURS SANS ANNALES — HUM-285 (27/10/2026) : sans annales, le
  * blueprint n'avait qu'un créneau, et une demande de « ~20 QCM » produisait UN exercice.
