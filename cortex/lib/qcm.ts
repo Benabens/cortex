@@ -30,6 +30,9 @@ import { storage } from "@/lib/storage";
 import { untypesetChars } from "@/lib/tex-escape";
 import { askedFacts, attributedFact, courseFacts, factDuplicates, planFacts, type CourseFact } from "@/lib/qcm-facts";
 import { JUSTIFICATION_SCHEMA, assembleExplanation, distractorIndices, fillRationale, invalidateRationale, permuteRationale, rationaleCheck, rationaleFromModel, storedExplanation, structuredExplanationsEnabled, toStoredRationale, type QcmRationale } from "@/lib/qcm-rationale";
+// import statique : un require() rendait le module vide depuis que exam-latex importe katex (tests/require-esm)
+import { dropSectionCallouts, texToHtml } from "@/lib/exam-latex";
+import { log } from "@/lib/metrics";
 import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmBatchState, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
 
 /**
@@ -1464,8 +1467,6 @@ async function recentQuestions(limit = PREVIOUS_STEMS): Promise<{ topic: string;
  * STUDENTS », ni balises, ni commandes LaTeX. Il ne sert qu'à reconnaître une reprise.
  */
 function openAsStem(concept: string | null, tex: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { dropSectionCallouts } = require("@/lib/exam-latex") as typeof import("@/lib/exam-latex");
   const text = dropSectionCallouts(tex)
     .replace(/<\/?[a-zA-Z][^>]*>/g, " ")
     .replace(/\\[a-zA-Z]+\*?/g, " ")
@@ -2883,11 +2884,13 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
   const rows = await q.all<QcmItemRow>(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   let open: QcmOpenView[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { texToHtml } = require("@/lib/exam-latex") as typeof import("@/lib/exam-latex");
     open = (await q.all<QcmOpenRow>(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`, examId))
       .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? "", { katex: true }), checkStatement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "", { katex: true }) : "" }));
-  } catch {}
+  } catch (e) {
+    // base sans table exam_questions : examen sans partie ouverte. Tout autre échec se voit dans les journaux
+    // (le 23/11 un « texToHtml is not a function » avalé ici masquait toutes les questions ouvertes).
+    log("error", "qcm.open_questions_failed", { examId, error: String(e) });
+  }
   return {
     id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null,
     // Corrigé : seulement s'il a compilé (J — examen 2 de CS-290 : « Énoncé » sans « Corrigé »).
