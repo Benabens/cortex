@@ -156,11 +156,12 @@ test("POST /api/math borne le travail d'une requête : textes trop longs et lot 
   const ok = await post(["Soit $x_1$.", "aucune formule"]);
   assert.match(ok[0]!, /class="katex"/);
   assert.equal(ok[1], null);
-  // une formule géante (« x_1 x_1 … » fusionnés) n'est pas composée ; un lot énorme s'arrête à son budget
-  const t0 = Date.now();
-  const big = await post(Array(60).fill("x_1 ".repeat(1400)));
-  assert.ok(Date.now() - t0 < 3000, `requête bornée (${Date.now() - t0} ms)`);
+  // un lot s'arrête à 40 000 caractères : 7 textes de 5 506 composés, les suivants renvoyés tels quels
+  const big = await post(Array(60).fill(`$x_1$ ${"a".repeat(5500)}`));
   assert.equal(big.length, 60);
-  assert.ok(big.every((h) => h === null));
-  assert.equal((await post(["x_1 ".repeat(2000)]))[0], null, "texte au-delà de la borne : renvoyé tel quel");
+  assert.equal(big.filter((h) => h !== null).length, 7);
+  assert.ok(big.slice(0, 7).every((h) => h !== null));
+  // une formule géante (« x_1 x_1 … » fusionnés, 5 600 caractères) n'est pas composée ; un texte trop long non plus
+  assert.equal((await post(["x_1 ".repeat(1400)]))[0], null);
+  assert.equal((await post([`$x_1$ ${"a".repeat(6000)}`]))[0], null, "texte au-delà de la borne : renvoyé tel quel");
 });
