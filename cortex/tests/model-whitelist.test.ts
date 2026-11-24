@@ -30,7 +30,7 @@ after(() => {
 test("mapModel : un id complet est refusé sur un fournisseur payant, les alias logiques passent", async () => {
   const { mapModel, isLlmModel } = await import("../lib/llm/config");
   delete process.env.LLM_ALLOW_OPUS;
-  assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5-5", "opus → sonnet sans LLM_ALLOW_OPUS");
+  assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5", "opus → sonnet sans LLM_ALLOW_OPUS");
   assert.equal(mapModel("haiku", "anthropic"), "claude-haiku-4-5-20251001");
   assert.throws(() => mapModel("claude-opus-4-8" as never, "anthropic"), /refusé|non autorisé/i);
   assert.throws(() => mapModel("gpt-5" as never, "openai-compatible"), /refusé|non autorisé/i);

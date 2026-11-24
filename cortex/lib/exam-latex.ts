@@ -13,6 +13,7 @@ import { epflLongDate } from "@/lib/exam-layout-epfl";
 import { courseTemplate, courseWords, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
 import { markdownListsTex, wrapBareFormulas, wrapBareFormulasTex } from "@/lib/tex-rich";
+import { formulaHtml } from "@/lib/math-html";
 import { markRightToLeft, rightToLeftScripts, unmarkRightToLeft } from "@/lib/tex-bidi";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
@@ -629,12 +630,14 @@ function tabularToHtml(body: string, renderCell: (tex: string) => string): strin
  * Convertit le LaTeX du modèle en HTML basique LISIBLE. Repli best-effort (PAS un rendu
  * fidèle) : code en <pre>, gras/italique/code inline, listes, sous-questions en titres,
  * notes à la place des figures/grilles. Le vrai rendu reste le PDF.
+ * `katex` : formules sûres composées par KaTeX (questions ouvertes de /mock, affichées par
+ * `SafeHtml math`) ; sans lui, le rendu <em> d'avant (repli HTML autonome de l'examen écrit).
  */
-export function texToHtml(tex: string): string {
-  return renderTex(tex, 0);
+export function texToHtml(tex: string, { katex = false }: { katex?: boolean } = {}): string {
+  return renderTex(tex, 0, katex);
 }
 
-function renderTex(tex: string, level: number): string {
+function renderTex(tex: string, level: number, katex = false): string {
   let t = tex ?? "";
   const stash: string[] = [];
   // sentinelle impossible dans du LaTeX, survit a escHtml -> zero collision. Une par niveau : le rendu
@@ -645,7 +648,7 @@ function renderTex(tex: string, level: number): string {
   // blocs préservés (code, tableaux) ou remplacés par une note (figures/grilles non rendables en HTML)
   t = t.replace(/\\begin\{lstlisting\}(?:\[[^\]]*\])?\n?([\s\S]*?)\\end\{lstlisting\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
   t = t.replace(/\\begin\{verbatim\}\n?([\s\S]*?)\\end\{verbatim\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
-  t = replaceTabulars(t, (body) => keep(tabularToHtml(body, (cell) => renderTex(cell, level + 1))));
+  t = replaceTabulars(t, (body) => keep(tabularToHtml(body, (cell) => renderTex(cell, level + 1, katex))));
   t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ : visible uniquement dans le PDF</div>`));
   t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) : visible uniquement dans le PDF</div>`));
   t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) : à tracer sur papier</div>`));
@@ -653,16 +656,30 @@ function renderTex(tex: string, level: number): string {
   t = t.replace(/\\examinode\b/g, () => keep(`<div class="fig">⬚ Figure : inode v6 (addr[0..7], single/double-indirect → index → data)</div>`));
   t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
   t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) : réponds sur papier</div>`));
+  // KaTeX : une formule sûre est mise de côté composée, détachée ou non ; refusée, elle suit le rendu <em> ci-dessous
+  const composed = (whole: string, m: string, display: boolean) => {
+    const html = katex ? formulaHtml(m, display) : null;
+    return html === null ? whole : keep(html);
+  };
+  // equation/align : une formule détachée par ligne (« \\ »), sans les & d'alignement ; une ligne refusée → tout l'environnement suit le repli
+  t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|displaymath)(\*?)\}([\s\S]*?)\\end\{\1\2\}/g, (w, _e, _s, m: string) => {
+    const lines = m.split(/\\\\(?:\[[^\]]*\])?/).map((l) => l.replace(/(?<!\\)&/g, " ").trim()).filter(Boolean);
+    const html = katex && lines.length ? lines.map((l) => formulaHtml(l, true)) : [null];
+    return html.every((h) => h !== null) ? keep(html.join("")) : w;
+  });
   // formules hors maths et puces Markdown, comme le PDF les compose (lib/tex-rich)
   t = markdownListsTex(wrapBareFormulasTex(t));
   t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
-  t = t.replace(/\\([{}])/g, (_, b: string) => keep(b)); // accolades d'ensemble \{1, 2\} : gardées à l'écran
+  t = t.replace(/\$\$([\s\S]+?)\$\$/g, (w, m: string) => composed(w, m, true));
+  t = t.replace(/(?<!\\)\\\[([\s\S]+?)\\\]/g, (w, m: string) => composed(w, m, true));
   // Maths hors ligne ramenées à $…$ : $$…$$, \[…\], \(…\) et equation/align (sans les & d'alignement).
   // « \\[2pt] » (saut de ligne) n'ouvre pas de maths.
   t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|displaymath|math)(\*?)\}([\s\S]*?)\\end\{\1\2\}/g, (_, _e, _s, m: string) => `$${m.replace(/(?<!\\)&/g, " ")}$`);
   t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m: string) => `$${m}$`);
   t = t.replace(/(?<!\\)\\\[([\s\S]+?)\\\]/g, (_, m: string) => `$${m}$`);
   t = t.replace(/(?<!\\)\\\(([\s\S]+?)\\\)/g, (_, m: string) => `$${m}$`);
+  t = t.replace(/\$([^$]+)\$/g, (w, m: string) => composed(w, m, false));
+  t = t.replace(/\\([{}])/g, (_, b: string) => keep(b)); // accolades d'ensemble \{1, 2\} : gardées à l'écran (après KaTeX, qui les lit)
 
   // échappe le texte courant
   t = escHtml(t);

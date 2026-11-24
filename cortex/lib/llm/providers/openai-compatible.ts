@@ -43,7 +43,7 @@ export const openaiCompatibleProvider: LlmProvider = {
     const root = baseUrl();
     if (!root) throw new LlmError(this.unavailableReason()!, "UNAVAILABLE");
     const url = `${root.replace(/\/+$/, "")}/chat/completions`;
-    const model = mapModel(req.model ?? "opus", "openai-compatible");
+    const model = mapModel(req.model ?? "opus", "openai-compatible", req.assist);
 
     const userContent = req.images?.length
       ? [

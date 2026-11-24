@@ -39,8 +39,8 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test("mapping économe : opus → Sonnet par défaut sur anthropic ; Opus si LLM_ALLOW_OPUS=1 ; claude-code intact", () => {
-  assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5-5");
+test("mapping économe : opus → Sonnet 5 par défaut sur anthropic ; Opus si LLM_ALLOW_OPUS=1 ; claude-code intact", () => {
+  assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5");
   process.env.LLM_ALLOW_OPUS = "1";
   assert.equal(mapModel("opus", "anthropic"), "claude-opus-5-5");
   delete process.env.LLM_ALLOW_OPUS;

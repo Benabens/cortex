@@ -195,8 +195,11 @@ function withRubric(parsed: unknown, rubric: { label: string; points: number }[]
  * (6 000 tokens) à l'effort par défaut, et une trace d'algorithme corrigée sortait coupée ; la
  * relance renvoyait la même demande au même budget, trois fois (même défaut que le drill, #176).
  * Coupée : UNE relance qui demande moins (corrigé et explications abrégés, effort bas).
+ * Opus 5.5 à l'effort haut depuis le 23/11 (étape 1, comme le drill) : au banc, la correction
+ * à l'effort moyen coûtait 0,08 $ au plus ; le haut n'est pas encore mesuré, la borne de 12 000
+ * tokens et le plafond de la réservation tiennent la dépense sous le prix de l'aide.
  */
-const CHECK_LIMITS = { maxTokens: 12_000, effort: "medium" } as const;
+const CHECK_LIMITS = { maxTokens: 12_000, effort: "high" } as const;
 const CHECK_SHORT_LIMITS = { maxTokens: 8_000, effort: "low" } as const;
 const CHECK_SHORT_RULE = `RÉPONSE PRÉCÉDENTE TROP LONGUE, coupée avant la fin : garde le même verdict et le même barème, mais feedback en 3 phrases au plus et correct_solution ABRÉGÉE (les étapes clés et le résultat, 200 mots au plus, une trace en un seul petit tableau).`;
 

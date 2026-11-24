@@ -1,10 +1,13 @@
 /**
- * MODÈLE PAR SITE (décision de Ben du 23/11/2026) : Opus 5.5 pour le difficile (rédiger un énoncé
- * ou un corrigé, corriger une réponse, vérifier), Sonnet 5.5 pour le mécanique (extraction,
- * classement, OCR, plan, analyse d'un point faible). Verrouillé :
- *  - les alias se résolvent vers claude-opus-5-5 et claude-sonnet-5-5 sur l'API ;
- *  - un drill et une correction (aides) partent sur claude-opus-5-5 quand LLM_ALLOW_OPUS=1 —
- *    l'ancienne règle « une aide ne part jamais sur Opus » a coûté deux corrigés faux le 22/11 ;
+ * MODÈLE PAR SITE (décisions de Ben des 23 et 24/11/2026) : Opus 5.5 à l'effort haut pour le
+ * difficile (rédiger un énoncé ou un corrigé, corriger une réponse, vérifier), Sonnet 5.5 pour le
+ * mécanique (extraction, classement, OCR, plan, analyse d'un point faible). Étape 1 (24/11) :
+ * LLM_ALLOW_OPUS=assist, Opus pour le drill et la correction seulement ; étape 2 (01/12, prix
+ * 30 / 18 / 8 / 0,5) : LLM_ALLOW_OPUS=1, Opus sur tous les sites difficiles. Verrouillé :
+ *  - LLM_ALLOW_OPUS=assist : « opus » → claude-opus-5-5 pour une aide, claude-sonnet-5 pour un job ;
+ *    LLM_ALLOW_OPUS=1 : claude-opus-5-5 partout ; absent : claude-sonnet-5 ; « sonnet » → claude-sonnet-5-5 ;
+ *  - un drill et une correction partent sur claude-opus-5-5 à l'effort haut — l'ancienne règle
+ *    « une aide ne part jamais sur Opus » a coûté deux corrigés faux le 22/11 ;
  *  - les sites mécaniques demandent « sonnet », les sites difficiles « opus » ;
  *  - la grille de prix connaît Opus 5.5 et Sonnet 5.5 (sinon : tarif le plus cher, surcompté).
  *
@@ -21,7 +24,7 @@ import { after, before, beforeEach, test } from "node:test";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-modeles-"));
 const ENV: Record<string, string> = {
   CORTEX_DATA_DIR: tmp, DB_DRIVER: "postgres", DATABASE_URL: "pglite://memory",
-  LLM_PROVIDER: "anthropic", LLM_API_KEY: "sk-ant-test", LLM_ALLOW_OPUS: "1", LLM_MAX_RETRIES: "0",
+  LLM_PROVIDER: "anthropic", LLM_API_KEY: "sk-ant-test", LLM_ALLOW_OPUS: "assist", LLM_MAX_RETRIES: "0",
   CORTEX_LLM_TEST_AUTH: "1",
 };
 Object.assign(process.env, ENV);
@@ -81,34 +84,56 @@ const asAssist = async <T,>(fn: () => Promise<T>) => {
   return runWithCourse("cs-202", () => runWithLlmAuthorization({ kind: "assist", ref: "assist:test:1" }, fn));
 };
 
-test("alias : opus → claude-opus-5-5, sonnet → claude-sonnet-5-5 ; sans LLM_ALLOW_OPUS, opus reste sur Sonnet", async () => {
+test("alias : LLM_ALLOW_OPUS=assist n'ouvre Opus qu'aux aides ; =1 partout ; absent : Sonnet 5 ; sonnet → Sonnet 5.5", async () => {
   const { mapModel } = await import("../lib/llm/config");
-  assert.equal(mapModel("opus", "anthropic"), "claude-opus-5-5");
   assert.equal(mapModel("sonnet", "anthropic"), "claude-sonnet-5-5");
-  process.env.LLM_ALLOW_OPUS = "0";
+  assert.equal(mapModel("opus", "anthropic", true), "claude-opus-5-5", "aide : Opus 5.5");
+  assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5", "job : modèle actuel des examens");
   try {
-    assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5-5");
-  } finally { process.env.LLM_ALLOW_OPUS = "1"; }
+    process.env.LLM_ALLOW_OPUS = "1";
+    assert.equal(mapModel("opus", "anthropic"), "claude-opus-5-5");
+    assert.equal(mapModel("opus", "anthropic", true), "claude-opus-5-5");
+    delete process.env.LLM_ALLOW_OPUS;
+    assert.equal(mapModel("opus", "anthropic", true), "claude-sonnet-5");
+    assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5");
+  } finally { process.env.LLM_ALLOW_OPUS = "assist"; }
 });
 
-test("un drill (aide) part sur claude-opus-5-5 quand LLM_ALLOW_OPUS=1", async () => {
+test("un job (examen, QCM, exercice) qui demande « opus » reste sur claude-sonnet-5 avec LLM_ALLOW_OPUS=assist", async () => {
+  reply = "ok";
+  const { complete } = await import("../lib/llm");
+  const { runWithCourse } = await import("../db/client");
+  await runWithCourse("cs-202", () => complete({ prompt: "Énoncé", model: "opus" }));
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].model, "claude-sonnet-5");
+});
+
+test("un drill (aide) part sur claude-opus-5-5 à l'effort haut quand LLM_ALLOW_OPUS=assist", async () => {
   reply = JSON.stringify(DRILL);
   const { generateDrill } = await import("../lib/drill");
   const d = await asAssist(() => generateDrill("Arbre couvrant minimal"));
   assert.equal(d.hints.length, 5);
   assert.ok(bodies.length >= 1);
   assert.equal(bodies[0].model, "claude-opus-5-5", "le drill rédige un corrigé : Opus");
+  assert.equal(bodies[0].output_config?.effort, "high");
   const { ASSIST_MAX_TOKENS_CAP } = await import("../lib/llm");
   assert.ok(bodies[0].max_tokens <= ASSIST_MAX_TOKENS_CAP, `réponse bornée (${bodies[0].max_tokens})`);
 });
 
-test("une correction (check_answer) part sur claude-opus-5-5 quand LLM_ALLOW_OPUS=1", async () => {
+test("une correction (check_answer) part sur claude-opus-5-5 à l'effort haut, avec LLM_ALLOW_OPUS=assist comme =1", async () => {
   reply = JSON.stringify(CHECK);
   const { checkSolution } = await import("../lib/check-solution");
   const r = await asAssist(() => checkSolution({ statement: "<p>Kruskal sur 4 sommets.</p>", answer: "(a,b) puis (b,c)." }));
   assert.equal(r.verdict, "partial");
   assert.equal(bodies.length, 1);
   assert.equal(bodies[0].model, "claude-opus-5-5", "corriger une réponse : Opus");
+  assert.equal(bodies[0].output_config?.effort, "high");
+  bodies.length = 0;
+  process.env.LLM_ALLOW_OPUS = "1";
+  try {
+    await asAssist(() => checkSolution({ statement: "<p>Kruskal sur 4 sommets.</p>", answer: "(a,b) puis (b,c)." }));
+    assert.equal(bodies[0].model, "claude-opus-5-5");
+  } finally { process.env.LLM_ALLOW_OPUS = "assist"; }
 });
 
 test("une aide mécanique (analyse d'un point faible) reste sur Sonnet, même si l'appelant demande Opus", () => {

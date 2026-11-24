@@ -217,7 +217,8 @@ function bareAtoms(s: string): { start: number; end: number }[] {
   return atoms;
 }
 
-type Segment = { math: string } | { text: string };
+/** `math` : le LaTeX à composer ; `content` et `source` : la formule écrite par le modèle, sans et avec ses délimiteurs. */
+type Segment = { math: string; content: string; source: string; display: boolean } | { text: string };
 
 /** Le texte hors délimiteurs, avec ses formules sans délimiteurs. */
 function bareSegments(s: string): Segment[] {
@@ -227,7 +228,8 @@ function bareSegments(s: string): Segment[] {
     const tex = mathTex(s.slice(a.start, a.end));
     if (tex === null) continue;
     if (a.start > last) out.push({ text: s.slice(last, a.start) });
-    out.push({ math: tex });
+    const source = s.slice(a.start, a.end);
+    out.push({ math: tex, content: source, source, display: false });
     last = a.end;
   }
   if (last < s.length) out.push({ text: s.slice(last) });
@@ -246,14 +248,23 @@ function formulaSegments(s: string): Segment[] {
   let last = 0;
   for (const m of s.matchAll(DELIMITED)) {
     const display = m[1] ?? m[2];
-    const tex = mathTex(display ?? m[3] ?? m[4]);
+    const content = display ?? m[3] ?? m[4];
+    const tex = mathTex(content);
     if (tex === null) continue;
     if (m.index > last) out.push(...bareSegments(s.slice(last, m.index)));
-    out.push({ math: display !== undefined ? displayTex(tex) : tex });
+    out.push({ math: display !== undefined ? displayTex(tex) : tex, content, source: m[0], display: display !== undefined });
     last = m.index + m[0].length;
   }
   if (last < s.length) out.push(...bareSegments(s.slice(last)));
   return out;
+}
+
+/**
+ * Le texte du modèle découpé en texte et formules sûres, comme le PDF les compose (cf. en-tête) :
+ * la vue web (lib/math-html) les rend avec la même règle.
+ */
+export function formulaPieces(s: string): ({ text: string } | { formula: string; source: string; display: boolean })[] {
+  return segments(s ?? "").map((g) => ("math" in g ? { formula: g.content, source: g.source, display: g.display } : g));
 }
 
 /** Une ligne de texte du modèle → LaTeX en ligne (option, titre, critère) : formules sûres en maths, le reste par `esc`. */

@@ -66,7 +66,23 @@ export function isLlmModel(v: unknown): v is LlmModel {
   return typeof v === "string" && (LLM_MODELS as readonly string[]).includes(v);
 }
 
-export function mapModel(model: LlmModel, provider: ProviderName): string {
+/**
+ * Modèle d'un site « opus » quand Opus n'y est pas autorisé : Sonnet 5, celui des examens, QCM et
+ * exercices jusqu'à l'étape 2 (01/12/2026, LLM_ALLOW_OPUS=1). Le mécanique est sur Sonnet 5.5
+ * (alias « sonnet »).
+ */
+const OPUS_FALLBACK = "claude-sonnet-5";
+
+/**
+ * LLM_ALLOW_OPUS : « 1 » = Opus 5.5 sur tous les sites « opus » ; « assist » = seulement sur les
+ * aides payées (drill, correction : étape 1) ; absent = Sonnet 5 partout.
+ */
+export function opusAllowed(assist = false): boolean {
+  const v = process.env.LLM_ALLOW_OPUS?.trim();
+  return v === "1" || (assist && v === "assist");
+}
+
+export function mapModel(model: LlmModel, provider: ProviderName, assist = false): string {
   // Un id complet n'est JAMAIS accepté sur un fournisseur PAYANT : il
   // contournerait la règle LLM_ALLOW_OPUS (et le tarif connu). Seul le CLI
   // local (dev, €0) garde son passthrough historique.
@@ -79,10 +95,10 @@ export function mapModel(model: LlmModel, provider: ProviderName): string {
   if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
     // RÈGLE D'OR coûts : sur le provider API PAYANT, l'alias
     // logique « opus » ne se résout vers Opus (2× le prix de Sonnet) que si
-    // EXPLICITEMENT autorisé — LLM_ALLOW_OPUS=1 ou LLM_MODEL_OPUS posé. Sinon
-    // Sonnet : les prix en crédits supposent Opus sur les sites difficiles. Le provider claude-code (dev €0 via le CLI local) garde le
+    // EXPLICITEMENT autorisé — LLM_ALLOW_OPUS (opusAllowed) ou LLM_MODEL_OPUS
+    // posé. Sinon Sonnet 5 (OPUS_FALLBACK). Le provider claude-code (dev €0 via le CLI local) garde le
     // passthrough historique : « opus » y reste opus.
-    if (model === "opus" && process.env.LLM_ALLOW_OPUS !== "1") return ANTHROPIC_DEFAULTS.sonnet;
+    if (model === "opus" && !opusAllowed(assist)) return OPUS_FALLBACK;
     return ANTHROPIC_DEFAULTS[model];
   }
   return model;

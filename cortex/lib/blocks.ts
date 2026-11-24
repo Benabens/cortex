@@ -345,6 +345,9 @@ export function blockSystemPrompt(plan: BlockPlan, n: number, counterExamples: s
       ? `TYPES DE SOUS-QUESTIONS (ceux de l'annale, aucun autre${plan.kinds.length > 1 ? " ; mêle-les : au moins deux d'entre eux" : ""}) :`
       : `TYPES DE SOUS-QUESTIONS (mêle-les : au moins un choix unique et au moins une réponse courte ; une lecture de code quand le thème s'y prête) :`,
     allows("scq") && `  - "scq" — choix unique : exactement ${choiceOptions(plan)} options${plan.sections.some((x) => TRUE_FALSE.test(`${x.name} ${x.description}`)) ? " (sauf consigne VRAI/FAUX dans la demande d'une question)" : ""}, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
+    // Banc rs-composite du 22/11 : 68 choix uniques sur 124 avaient un distracteur que le juge écarte
+    // sans le cours, première cause de rejet des questions composées. Les quatre défauts relevés.
+    allows("scq") && `    Distracteurs (un étudiant qui ignore le cours ne doit en écarter aucun) : (1) les notions du cours les plus PROCHES de la bonne réponse, de même nature et sur le même axe (les classes d'une même typologie, les mesures d'une même famille), celles qu'on confond avec elle ; jamais une notion d'un autre chapitre qui ne répond pas à la question posée (un score de sentiment pour une question de sous-chaîne) ; quand la typologie manque de voisins proches, croise deux de ses dimensions (« menace de sécurité née d'un abus ») ; (2) un distracteur ne contredit jamais un fait donné par le scénario ou l'énoncé (le groupe, la fonction, la valeur demandés) : seul le cours le réfute ; (3) l'énoncé décrit les faits sans reformuler le critère qui définit la bonne réponse (« alors que le système fonctionne comme prévu » désigne l'abus), et une option ne rappelle pas la définition de la notion qu'elle nomme ; (4) aucun mot absolu (« toujours », « jamais », « automatiquement », « garantit »), aucune option qui se réfute elle-même (« cette combinaison n'existe pas ») ; les options ont la même forme et la même longueur que la bonne, qui n'est pas la plus longue.`,
     allows("short") && `  - "short" — réponse courte (1 à 3 phrases) : "answer" = la réponse modèle, conforme au cours ; "criteria" = 1 à 3 critères OBSERVABLES dans une copie (ce que la réponse doit nommer ou justifier), chacun avec ses points entiers, leur somme = "points".`,
     allows("code_output") && `  - "code_output" — lecture de code : "code" = un extrait ${python ? "Python" : codeName(plan.codeLanguage!)} AUTONOME et court (bibliothèque standard${python ? " ; pandas seulement si le cours l'emploie" : ""} ; ni fichier, ni réseau, ni hasard, ni horloge), "prompt" demande ce qu'il affiche, "answer" = sa sortie EXACTE, ligne pour ligne. Jamais d'écriture de code.`,
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
@@ -459,7 +462,18 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   for (const t of Array.isArray(res.trivial_distractors) ? res.trivial_distractors : []) {
     const raw: unknown = t?.options;
     const opts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
-    if (opts.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${opts.slice(0, 3).join(" ; ")}`);
+    // Le juge nomme les options par leur lettre, dans l'ordre MÉLANGÉ après la génération : la relance
+    // les cite par leur texte, sinon le générateur corrige au hasard (banc rs-composite, 22/11).
+    const options = b.parts[t.index]?.options ?? [];
+    const named = opts.map((o) => {
+      // « B », « (B) texte », « B (raison) », « B : raison » ; « A, B — … » reste tel quel.
+      const m = /^\s*\(?([A-H])\)?(?=$|[\s(:.—–-])[\s(:.—–-]*(.*)$/.exec(o);
+      const option = m ? options[LETTER.indexOf(m[1])] : undefined;
+      // La raison perd la parenthèse fermante de « B (raison) ».
+      const reason = m?.[2]?.trim().replace(/\)$/, "").slice(0, 160);
+      return option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : o;
+    });
+    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")}`);
   }
   return issues;
 }

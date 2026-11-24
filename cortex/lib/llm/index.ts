@@ -84,13 +84,14 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   const callSite = callerSite();
   const job = currentJob();
   const proof = currentLlmProof();
-  // Aide sur un fournisseur payant : le modèle est celui du site (Opus pour le drill et la
-  // correction, Sonnet pour une analyse : lib/llm/config), la réponse est bornée — son plafond
-  // par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
+  // Aide sur un fournisseur payant : Opus seulement si le site le demande (drill, correction) ET
+  // que LLM_ALLOW_OPUS l'autorise (lib/llm/config opusAllowed), sinon Sonnet ; réponse bornée — son
+  // plafond par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
   // La taille vient du site d'appel quand il la connaît (un drill ne tient pas dans le défaut
   // d'une correction : coupé 3 fois à 6000 tokens, CS-250 du 21/11) ; sinon ASSIST_MAX_TOKENS.
-  if (proof?.kind === "assist" && isPaidProvider(provider.name)) {
-    req = { ...req, maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
+  req = { ...req, assist: proof?.kind === "assist" };
+  if (req.assist && isPaidProvider(provider.name)) {
+    req = { ...req, model: req.model === "opus" || req.model === "haiku" ? req.model : "sonnet", maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
   }
   const model = req.model ?? "opus";
   const labels = { provider: provider.name, model };
@@ -126,7 +127,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   // répondre (timeout, annulation en vol), retirée s'il a refusé avant de
   // traiter (429, 5xx, auth). Un worker tué en plein appel laisse une trace.
   const tokensInEstimate = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
-  const modelId = mapModel(model, provider.name as ProviderName);
+  const modelId = mapModel(model, provider.name as ProviderName, req.assist);
   try {
     const res = await globalLimiter().run(() =>
       withRetry(async (a) => {

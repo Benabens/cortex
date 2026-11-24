@@ -31,6 +31,8 @@ export function cacheKey(providerName: string, req: CompleteRequest): string {
     prompt: req.prompt,
     system: req.system ?? null,
     model: req.model ?? "opus",
+    // Une aide peut résoudre « opus » autrement qu'un job (LLM_ALLOW_OPUS=assist) : clé à part.
+    ...(req.assist ? { assist: true } : {}),
     maxTokens: req.maxTokens ?? null,
     json: req.json ? { schema: req.json.schema } : null,
     effort: req.effort ?? null,
