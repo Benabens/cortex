@@ -833,7 +833,8 @@ export async function replaceTrivialDistractorsBatch(items: QcmItem[], step: Ste
   return repaired.map((x, k) => (x ? { ...sent[n++], slot: items[k].slot } : items[k]));
 }
 
-type FinalQualityVerdict = { index: number; key: boolean; offCourse: boolean; trivial: number[] };
+/** `fix` : énoncé réécrit par l'audit quand la clé ne tient que sous une hypothèse non écrite (même options, même clé). */
+type FinalQualityVerdict = { index: number; key: boolean; offCourse: boolean; trivial: number[]; fix?: string };
 
 /** Applique les verdicts de l'audit final sans jamais conserver une clé fausse ou du hors-cours. */
 export function applyFinalQualityVerdicts<T extends Pick<QcmItem, "options" | "correct"> & Partial<Pick<QcmItem, "verified" | "judgeOk" | "rejected" | "trivialDistractors">>>(items: T[], verdicts: FinalQualityVerdict[]): (T & Pick<QcmItem, "verified" | "judgeOk" | "rejected" | "trivialDistractors">)[] {
@@ -853,6 +854,7 @@ const FINAL_QUALITY_SCHEMA = {
     verdicts: { type: "array", items: { type: "object", properties: {
       index: { type: "integer" }, key: { type: "boolean" }, offCourse: { type: "boolean" },
       trivial: { type: "array", items: { type: "integer" } },
+      fix: { type: "string" },
     }, required: ["index", "key", "offCourse", "trivial"], additionalProperties: false } },
   }, required: ["verdicts"], additionalProperties: false,
 } as const;
@@ -873,6 +875,10 @@ const AUDIT_JUSTIFICATIONS = {
 /** Consignes de l'audit de sortie, calquées sur la rubrique du banc (audit seul ou revue finale). */
 const AUDIT_RULES = [
   `key : true seulement si la clé est juste et la seule défendable ; false si elle est fausse, si une autre option est au moins aussi défendable ou s'il manque une bonne réponse.`,
+  // Banc du 23/11/2026 (QCM ML, Opus 5.5) : les trois clés contestées étaient justes « selon le cours »
+  // mais pas uniques pour un expert (norme L1 ou L2 non dite, λ non chiffré, « erreur de test grande »).
+  `key, robustesse : juge AUSSI comme un expert de la matière qui n'a pas suivi ce cours. Si la clé n'est la seule défendable que sous une convention ou une hypothèse que l'énoncé n'écrit pas (normalisation, valeur ou ordre de grandeur d'un paramètre, régime asymptotique, choix au point de non-dérivabilité, départage d'une égalité, état initial), ou si une affirmation catégorique de la clé n'est vraie que « en général », key=false.`,
+  `fix : seulement quand key=false pour cette seule raison (la clé devient la seule défendable une fois l'hypothèse écrite) : l'énoncé COMPLET réécrit qui écrit cette hypothèse, même langue, mêmes options dans le même ordre, même clé. Sinon, omets fix.`,
   `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
   `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit ; et toute mauvaise option qui nomme la même notion qu'une autre option du QCM.`,
 ];
@@ -1665,7 +1671,18 @@ const REVIEW_SCHEMA = {
  * et les doublons, null si le contrôle est indisponible : les plafonds par notion s'appliquent seuls.
  * Exporté pour les tests (tests/prompts-formules).
  */
-export async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[]; programme?: string[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
+/**
+ * Énoncé réparé par l'audit final (verdict « fix ») : la clé refusée faute d'une hypothèse écrite
+ * devient une question à revérifier à l'aveugle, mêmes options et même clé. Jamais pour une clé
+ * fausse ou hors cours ; null si la réécriture n'est pas un énoncé plausible.
+ */
+function stemRepair(it: QcmItem, v: FinalQualityVerdict | undefined): QcmItem | null {
+  const fix = typeof v?.fix === "string" ? v.fix.trim() : "";
+  if (!v || v.key || v.offCourse || fix.length < Math.min(40, it.stem.length) || fix === it.stem.trim() || fix.length > it.stem.length * 3 + 400) return null;
+  return { ...it, stem: fix, verified: null, judgeOk: null, rejected: null, judgeIssue: null };
+}
+
+export async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[]; programme?: string[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null; repairs?: (QcmItem | null)[] }> {
   if (!items.length) return { audit: [], dup: null };
   // #113 : cases de justification encore vides (raison oubliée par la conception, effacée par le
   // filet ou non rendue par un remplacement), écrites dans cet appel qui passe de toute façon sur
@@ -1733,7 +1750,8 @@ export async function finalReview(items: QcmItem[], opts: { strict: boolean; pre
   opts.step(`Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel${toJustify ? ` (${justified}/${toJustify} justification(s) complétée(s) au passage)` : ""}`, 79);
   const byIndex = new Map((out.verdicts ?? []).map((v) => [v.index, v]));
   const audit = items.map((it, i) => applyFinalQualityVerdicts([it], byIndex.has(i) ? [{ ...byIndex.get(i)!, index: 0 }] : [])[0] ?? null);
-  return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams, programme }) };
+  const repairs = items.map((it, i) => (audit[i] ? null : stemRepair(it, byIndex.get(i))));
+  return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams, programme }), repairs };
 }
 
 /**
@@ -2365,8 +2383,19 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Les ouvertes déjà construites comptent comme posées (banc rs-mixte du 17/11 : un QCM et
     // une ouverte sur le même résultat d'impossibilité) : un QCM qui en reprend une part.
     const openStems = [...openBySlot.values()].map((oq) => openAsStem(oq.concept, oq.statement_tex ?? "")).filter(Boolean);
-    const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: [...current.map((it) => it.stem), ...openStems], step, facts: shared.facts, programme: programmeLabels });
+    const { audit, dup, repairs } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: [...current.map((it) => it.stem), ...openStems], step, facts: shared.facts, programme: programmeLabels });
     const out = cands.map((it, i) => (audit ? audit[i] : it));
+    // Clé refusée faute d'une hypothèse écrite : l'énoncé réparé par l'audit est revérifié à
+    // l'aveugle et ne remplace le candidat que si la résolution retrouve la clé sans rien relever.
+    const toRepair = (repairs ?? []).map((r, i) => (r && !out[i] ? { r, i } : null)).filter((x): x is { r: QcmItem; i: number } => !!x);
+    if (toRepair.length && !hardStop()) {
+      await verifyGrouped(toRepair.map((x) => x.r));
+      const sound = toRepair.filter(({ r }) => r.verified === 1 && !r.rejected && r.judgeOk !== false);
+      // La version d'origine reste refusée : elle ne revient pas en réserve sous son ancien énoncé.
+      for (const { i } of toRepair) auditRejected.add(cands[i].stem);
+      for (const { r, i } of sound) out[i] = { ...r, judgeOk: true };
+      step(`Revue finale : ${toRepair.length} énoncé(s) réparé(s) (hypothèse écrite) → ${sound.length} confirmé(s) à l'aveugle`, 80);
+    }
     dup?.programme.forEach((p, i) => { if (p && out[i]) out[i]!.programmeNotion = p; });
     cands.forEach((it, i) => { if (!out[i]) auditRejected.add(it.stem); });
     // Même fait testable (lib/qcm-facts) qu'une question déjà retenue ou qu'un candidat avant lui :
