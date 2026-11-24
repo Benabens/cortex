@@ -5,7 +5,7 @@ import { getCourse } from "@/lib/courses";
 import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
 import { arithmeticSlips, missingSubquestions, namesLabel, subquestionLabels } from "@/lib/verify-arith";
-import { verifyV2Enabled } from "@/lib/verif-switches";
+import { repairConfirmEnabled, verifyV2Enabled } from "@/lib/verif-switches";
 import { examsDir } from "@/lib/paths";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import path from "node:path";
@@ -68,6 +68,8 @@ export type VerifyOpts = {
    * d'être livré « gardé (faible) ». Absent : les voies à un seul exercice gardent l'original.
    */
   dropUnfixed?: boolean;
+  /** Interne : contrôle d'un exercice qui vient d'être réparé (CORTEX_VERIFY_CONFIRM=1), « ok » plus strict. */
+  confirmRepair?: boolean;
 };
 
 /**
@@ -147,6 +149,11 @@ async function verifyCompare(q: ExamQuestion, opts: VerifyOpts | undefined, blin
     `1. Compare la réponse du corrigé à celle de la résolution indépendante. Quand elles diffèrent, REFAIS le calcul toi-même pour trancher : ne suis ni l'un ni l'autre par défaut.`,
     `2. Vérifie que chaque conclusion du corrigé découle de SES PROPRES tableaux, traces et calculs (une ligne de tableau qui donne « non » et une conclusion « oui », un goulot qui n'est pas le minimum de son chemin, une valeur recopiée différente de l'énoncé : FAUX), et qu'aucune égalité relevée par les contrôles automatiques ne reste fausse.`,
     `3. Hypothèses : si le corrigé ou la résolution indépendante a besoin d'une hypothèse que l'énoncé ne donne pas, ou si une sous-question admet plusieurs réponses défendables, l'exercice est AMBIGU — même si le corrigé est juste sous son hypothèse.`,
+    ...(opts?.confirmRepair ? [
+      // Banc du 24/11/2026 (CS-202, Opus 5.5) : les 4 clés fausses livrées étaient des réparations
+      // d'énoncé trop faibles (« recv rend au moins un octet ») que ce même contrôle avait acceptées.
+      `4. CONFIRMATION D'UNE RÉPARATION : cet énoncé et ce corrigé viennent d'être réparés après un premier contrôle. "ok" seulement si la résolution indépendante donne, à CHAQUE sous-question, la même réponse que le corrigé, et si aucune de ses HYPOTHÈSES ne change un résultat. Sinon "wrong" ou "ambiguous" : la réparation n'est pas confirmée et l'exercice sera retiré.`,
+    ] : []),
     ``,
     `Verdict :`,
     `- "ok" : énoncé bien posé (une seule réponse défendable par sous-question), corrigé correct et complet, ET difficulté/richesse/piège au niveau des vrais examens.`,
@@ -404,12 +411,19 @@ export async function verifyAndHarden(
     return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };
   };
   const v2 = verifyV2Enabled();
-  const check = async (q: ExamQuestion) => (await verifyOne(q, opts)) ?? (await verifyOne(q, opts));
+  const confirm = repairConfirmEnabled();
+  const check = async (q: ExamQuestion, confirming = false) => {
+    const o = confirming ? { ...opts, confirmRepair: true } : opts;
+    return (await verifyOne(q, o)) ?? (await verifyOne(q, o));
+  };
+  // Réparation confirmée : la 2e résolution à l'aveugle de l'exercice réparé le trouve bien posé et juste.
+  const confirmed = (r: VerifyResult | null) => !!r && r.verdict === "ok" && !r.violates_exclusion;
   const processed = await mapPool(spec.questions, 3, async (q0) => {
     if (!v2) return hardenLegacy(q0);
     let q = q0;
     let attempts = 0;
     let repairs = 0;
+    let unconfirmed = false;
     let res = await check(q);
     while (isInvalid(res) && attempts + repairs < maxAttempts) {
       const r = res!;
@@ -417,7 +431,10 @@ export async function verifyAndHarden(
       if (fix) {
         q = fix;
         repairs++;
-        res = await check(q);
+        res = await check(q, confirm);
+        // Avec confirmation : une réparation que la 2e résolution ne confirme pas n'est ni réparée à
+        // nouveau ni régénérée — l'exercice est retiré (son slot est recomblé).
+        if (confirm && !confirmed(res)) { unconfirmed = true; break; }
         continue;
       }
       const diag = [
@@ -435,9 +452,20 @@ export async function verifyAndHarden(
     }
     let verified: 1 | 0 | null;
     let dropped = false;
-    let fixedSol = repairs > 0 && !!res && !isInvalid(res);
-    const lastFix = res && (res.verdict === "wrong" || res.verdict === "ambiguous") && !res.violates_exclusion ? repairOf(q, res) : null;
-    if (!res) verified = null;
+    let lastFix = !unconfirmed && res && (res.verdict === "wrong" || res.verdict === "ambiguous") && !res.violates_exclusion ? repairOf(q, res) : null;
+    if (confirm && lastFix) {
+      // Réparation du dernier tour : contrôlée elle aussi au lieu d'être acceptée telle quelle.
+      const c = await check(lastFix, true);
+      repairs++;
+      if (confirmed(c)) { q = lastFix; res = c; } else unconfirmed = true;
+      lastFix = null;
+    }
+    let fixedSol = repairs > 0 && !unconfirmed && !!res && !isInvalid(res);
+    if (unconfirmed) {
+      // réparation non confirmée : jamais livrée comme vérifiée ; retirée dans un examen en lots
+      dropped = !!opts?.dropUnfixed;
+      verified = 0;
+    } else if (!res) verified = null;
     else if (res.violates_exclusion) {
       // hors-scope = retiré (dernier recours documenté ; on préfère remplacer)
       dropped = true;
@@ -456,8 +484,8 @@ export async function verifyAndHarden(
       verified = 0;
     }
     done++;
-    const tag = !res ? "non vérifié" : verified === 1 ? (fixedSol ? "corrigé" : "ok") : dropped ? "retiré" : "gardé (faible)";
-    const how = [repairs ? `réparé ×${repairs}` : "", attempts ? `durci ×${attempts}` : ""].filter(Boolean).join(", ");
+    const tag = unconfirmed ? (dropped ? "retiré" : "gardé (faible)") : !res ? "non vérifié" : verified === 1 ? (fixedSol ? "corrigé" : "ok") : dropped ? "retiré" : "gardé (faible)";
+    const how = [repairs ? `réparé ×${repairs}` : "", attempts ? `durci ×${attempts}` : "", unconfirmed ? "réparation non confirmée" : ""].filter(Boolean).join(", ");
     onProgress?.(`Vérif ${done}/${total} — « ${q.concept.slice(0, 48)} » : ${tag}${how ? ` (${how})` : ""}`);
     return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };
   });

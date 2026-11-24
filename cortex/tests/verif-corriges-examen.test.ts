@@ -81,11 +81,11 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { reply = {}; prompts = []; compares = 0; process.env.CORTEX_VERIFY_V2 = "1"; });
+beforeEach(() => { reply = {}; prompts = []; compares = 0; process.env.CORTEX_VERIFY_V2 = "1"; delete process.env.CORTEX_VERIFY_CONFIRM; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MAX_RETRIES", "LLM_BASE_URL", "CORTEX_VERIFY_V2"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MAX_RETRIES", "LLM_BASE_URL", "CORTEX_VERIFY_V2", "CORTEX_VERIFY_CONFIRM"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -205,4 +205,58 @@ test("interrupteur : CORTEX_VERIFY_V2 ne s'active qu'avec « 1 »", async () => 
     await harden();
     assert.ok(!prompts.some((p) => /RÉSOLUTION INDÉPENDANTE/.test(p)), `CORTEX_VERIFY_V2=${JSON.stringify(v)}`);
   }
+});
+
+// CORTEX_VERIFY_CONFIRM=1 — banc du 24/11/2026 (CS-202, Opus 5.5) : les 4 clés fausses livrées étaient des
+// réparations d'énoncé trop faibles, acceptées par le contrôle qui suivait ; une autre, réparée au
+// dernier tour, partait sans aucun contrôle.
+const confirming = (p: string) => /CONFIRMATION D'UNE RÉPARATION/.test(p);
+const ambiguousThenFixed = (p: string) => (/cache ARP est vide/.test(p.split("CORRIGÉ PROPOSÉ")[0]) ? null : {
+  verdict: "ambiguous", issue: "1.1 dépend de l'état du cache ARP", corrected_statement_tex: STATEMENT_FIXED, corrected_solution_tex: FIXED,
+});
+
+test("confirmation : une réparation est revérifiée en mode confirmation et livrée si elle tient", async () => {
+  process.env.CORTEX_VERIFY_CONFIRM = "1";
+  reply.compare = (p) => ambiguousThenFixed(p) ?? { verdict: "ok" };
+  const { spec, report } = await harden(2, { dropUnfixed: true });
+  const compareds = prompts.filter((p) => /CORRIGÉ PROPOSÉ/.test(p));
+  assert.equal(compareds.length, 2);
+  assert.ok(!confirming(compareds[0]) && confirming(compareds[1]), "seul le contrôle de l'exercice réparé est en mode confirmation");
+  assert.equal(spec.questions[0].statement_tex, STATEMENT_FIXED);
+  assert.equal(report.results[0].verified, 1);
+  assert.equal(report.fixed, 1);
+});
+
+test("confirmation : une réparation que la 2e résolution ne confirme pas retire l'exercice, sans nouvelle réparation ni régénération", async () => {
+  process.env.CORTEX_VERIFY_CONFIRM = "1";
+  // Le contrôle de confirmation trouve encore une ambiguïté (hypothèse trop faible) et propose une autre réparation.
+  reply.compare = (p) => ambiguousThenFixed(p) ?? { verdict: "ambiguous", issue: "1.2 : délai de la réponse ARP non donné", corrected_statement_tex: STATEMENT_FIXED + " Chaque réponse arrive après 0,4 ms.", corrected_solution_tex: FIXED };
+  const batch = await harden(2, { dropUnfixed: true });
+  assert.equal(batch.spec.questions.length, 0, "retiré : le slot part au comblement");
+  assert.equal(batch.report.removed, 1);
+  assert.equal(compares, 2, "aucun troisième contrôle");
+  assert.equal(regenerations, 0);
+  compares = 0;
+  const single = await harden(2);
+  assert.equal(single.spec.questions.length, 1, "voie à un seul exercice : gardé");
+  assert.equal(single.report.results[0].verified, 0, "mais jamais compté vérifié");
+});
+
+test("confirmation : la réparation du dernier tour est contrôlée au lieu d'être acceptée telle quelle", async () => {
+  process.env.CORTEX_VERIFY_CONFIRM = "1";
+  reply.compare = (p) => ambiguousThenFixed(p) ?? { verdict: "wrong", issue: "1.2 encore faux" };
+  const { spec, report } = await harden(0, { dropUnfixed: true });
+  assert.equal(compares, 2, "contrôle de la réparation du dernier tour");
+  assert.ok(confirming(prompts.filter((p) => /CORRIGÉ PROPOSÉ/.test(p))[1]));
+  assert.equal(spec.questions.length, 0);
+  assert.equal(report.removed, 1);
+});
+
+test("sans CORTEX_VERIFY_CONFIRM, la réparation du dernier tour est acceptée sans contrôle (comportement de la nouvelle chaîne)", async () => {
+  reply.compare = (p) => ambiguousThenFixed(p) ?? { verdict: "wrong", issue: "1.2 encore faux" };
+  const { spec, report } = await harden(0, { dropUnfixed: true });
+  assert.equal(compares, 1);
+  assert.ok(!prompts.some(confirming));
+  assert.equal(spec.questions[0].statement_tex, STATEMENT_FIXED);
+  assert.equal(report.results[0].verified, 1);
 });

@@ -12,6 +12,9 @@
  *    comparaison, égalités recalculées, hypothèses manquantes, réparation avant régénération, clé
  *    fausse retirée ; audit QCM « expert hors du cours » avec énoncé réparé. COUPÉE par défaut :
  *    gain non démontré au banc (CS-202 7/8 puis 4/8 contre 6/8) ; « 1 » l'active.
+ *  - CORTEX_VERIFY_CONFIRM : dans la nouvelle chaîne seulement, une réparation n'est acceptée que si
+ *    une deuxième résolution à l'aveugle de l'exercice réparé la confirme ; sinon l'exercice est
+ *    retiré. COUPÉE par défaut (en mesure au banc) ; « 1 » l'active.
  */
 
 /** Relecture de check_answer : active sauf CORTEX_CHECK_REVIEW=0. */
@@ -27,4 +30,9 @@ export function drillReviewEnabled(): boolean {
 /** Nouvelle vérification des examens et des QCM : seulement avec CORTEX_VERIFY_V2=1. */
 export function verifyV2Enabled(): boolean {
   return process.env.CORTEX_VERIFY_V2 === "1";
+}
+
+/** Réparation confirmée par une 2e résolution à l'aveugle (nouvelle chaîne) : seulement avec CORTEX_VERIFY_CONFIRM=1. */
+export function repairConfirmEnabled(): boolean {
+  return process.env.CORTEX_VERIFY_CONFIRM === "1";
 }
