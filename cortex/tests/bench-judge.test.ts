@@ -195,6 +195,36 @@ test("questions composées : un verdict rendu par sous-question est redemandé, 
   assert.deepEqual(v.items.map((x) => [x.idx, x.offCourse, x.notion]), [[0, false, "n0"], [1, false, "n1"]]);
 });
 
+test("questions composées : l'arbitre voit les extraits du cours de chaque sous-question, pas seulement ceux du scénario", async () => {
+  // Banc rs-composite du 24/11 (offCourse.leaked = 2) : extraits cherchés sur le seul scénario ;
+  // Gorwa et Deloitte, cités par des sous-questions et présents dans le cours, jugés « absents des extraits ».
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const { judgeExam } = await import("../lib/bench/judge");
+  const GORWA = "Gorwa taxonomy: classification (keywords, sentiment, machine learning) versus matching (perceptual hashing of known content).";
+  await runWithCourse("ml", async () => {
+    ensureFts();
+    for (const t of ["sources", "items"]) await q.ensureTable(t);
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", "Safety 1", "note/safety-1", null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", "Safety 1", GORWA);
+    await indexItemForSearch(iid, sid, "Safety 1", GORWA);
+  });
+  const blocks = {
+    ...run,
+    exam: { id: 4, kind: "blocks", items: [
+      { idx: 0, kind: "block", topic: "Q1", stem: "A forum filters posts before publication.", parts: [
+        { kind: "scq", prompt: "Under Gorwa's taxonomy, which approach does the filter use?", options: ["Classification", "Matching", "Pre-publication review", "Down-ranking"], correct: 0, explanation: "" },
+      ] },
+    ] },
+    rejected: [],
+  } as unknown as BenchRun;
+  const from = prompts.length;
+  await runWithCourse("ml", () => judgeExam(blocks));
+  const adjudication = prompts.slice(from).find((p) => /examinateur exigeant/.test(p)) ?? "";
+  assert.ok(adjudication.includes("perceptual hashing"), "l'extrait du cours cité par la sous-question manque à l'arbitre");
+});
+
 test("un verdict par question du lot : ni numéro étranger, ni question manquante, ni deux verdicts pour la même", async () => {
   const { verdictsCoverBatch } = await import("../lib/bench/judge");
   assert.equal(verdictsCoverBatch([{ q: 4 }, { q: 5 }], [4, 5]), null);

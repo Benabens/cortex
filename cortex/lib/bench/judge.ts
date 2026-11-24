@@ -69,6 +69,14 @@ async function passagesFor(text: string, max = 3): Promise<Passage[]> {
   return out;
 }
 
+/** Extraits d'une question : ceux de son scénario, puis ceux de chaque sous-question (une question
+ *  composée couvre plusieurs notions ; le seul scénario ne ramène pas celles des sous-questions). */
+async function itemPassages(it: BenchItem): Promise<Passage[]> {
+  const out = await passagesFor(`${it.stem} ${(it.options ?? []).join(" ")}`);
+  for (const p of it.parts ?? []) out.push(...(await passagesFor(`${p.prompt} ${(p.options ?? []).join(" ")}`, 2)));
+  return out.filter((x, i) => out.findIndex((y) => y.text === x.text) === i);
+}
+
 function renderItem(it: BenchItem, withKey: boolean): string {
   const head = `Q${it.idx} [${it.kind}] ${sanitizeCorpus(it.stem)}`;
   if (it.options) {
@@ -258,7 +266,7 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
   for (let i = 0; i < items.length; i += BATCH) {
     const batch = items.slice(i, i + BATCH);
     const passages: Passage[] = [];
-    for (const it of batch) passages.push(...(await passagesFor(`${it.stem} ${(it.options ?? []).join(" ")}`)));
+    for (const it of batch) passages.push(...(await itemPassages(it)));
     const solver = await solve(batch, passages);
     const rounds = await Promise.all([0, 1, 2].map(() => adjudicate(batch, passages, solver, run.plan.chapters)));
     for (const it of batch) {
