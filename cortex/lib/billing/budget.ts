@@ -67,10 +67,11 @@ export function aiBudgetFreeUsd(): number {
 
 /**
  * Coût IA ATTENDU d'un job, en dollars, par unité de prix : haut de la fourchette mesurée en
- * prod (QCM 2 à 2,9 $ au 17/11/2026 après #106 ; examen 2,2 $). Surcharge : AI_JOB_COST_USD_JSON.
+ * prod (QCM 2 à 2,9 $ au 17/11/2026 après #106 ; examen 2,2 $) ; aide : p95 du drill Opus 5.5
+ * à l'effort haut au banc du 23/11. Surcharge : AI_JOB_COST_USD_JSON.
  * Inconnu → 1 $.
  */
-const DEFAULT_JOB_COST_USD: Record<string, number> = { qcm: 2.9, exam: 2.2, prepare: 0.15, assist: 0.1 };
+const DEFAULT_JOB_COST_USD: Record<string, number> = { qcm: 2.9, exam: 2.2, prepare: 0.15, assist: 0.21 };
 
 export function expectedJobCostUsd(kind: string, costCenti?: number): number {
   let table = DEFAULT_JOB_COST_USD;

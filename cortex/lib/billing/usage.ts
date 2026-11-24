@@ -36,14 +36,17 @@ import { FREE_TOOL_USER, freeToolLimits } from "@/lib/exam-topics/config";
 
 /** Tarifs USD par MTok {in, out, lecture cache, écriture cache} — préfixe d'id
  *  de modèle → tarif. Source : platform.claude.com/docs pricing, vérifié le
- *  18/09/2026 (⚠ le tarif Sonnet 5 était faux, 3/15 → corrigé à 2/10). Ordre =
- *  du plus spécifique au moins spécifique ; inconnu → tarif opus (on SURestime).
- *  cache : lecture 0,1× de l'entrée, écriture 5 min 1,25× de l'entrée. */
-const PRICING_DATE = "2026-09-18";
+ *  23/11/2026. Ordre = du plus spécifique au moins spécifique (« claude-opus-5-5 »
+ *  avant « claude-opus ») ; inconnu → le tarif le plus cher (on SURestime).
+ *  Écriture du cache 5 min = 1,25× l'entrée ; lecture = 0,1× l'entrée, sauf
+ *  Opus 5.5 et Sonnet 5.5 (0,05×). */
+const PRICING_DATE = "2026-11-23";
 const PRICING: Array<{ prefix: string; inPerM: number; outPerM: number; cacheReadPerM: number; cacheWritePerM: number }> = [
   { prefix: "claude-fable", inPerM: 10, outPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5 },
   { prefix: "claude-mythos", inPerM: 10, outPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5 },
+  { prefix: "claude-opus-5-5", inPerM: 4, outPerM: 20, cacheReadPerM: 0.2, cacheWritePerM: 5 },
   { prefix: "claude-opus", inPerM: 5, outPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25 },
+  { prefix: "claude-sonnet-5-5", inPerM: 2, outPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5 },
   { prefix: "claude-sonnet", inPerM: 2, outPerM: 10, cacheReadPerM: 0.2, cacheWritePerM: 2.5 },
   { prefix: "claude-haiku", inPerM: 1, outPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25 },
 ];

@@ -133,7 +133,7 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
   let raw: RawExo[] = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const text = await completeText({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs });
+      const text = await completeText({ prompt, model: "sonnet", timeoutMs: 600_000, addDirs: dirs });
       const parsed = extractJson<{ exercises?: RawExo[] }>(text);
       raw = parsed?.exercises ?? [];
       if (raw.length) break;

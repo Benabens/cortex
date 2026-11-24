@@ -86,7 +86,7 @@ function Rich({ text, language }: { text: string; language?: string }) {
 /**
  * Examen à QUESTIONS COMPOSÉES (lib/blocks) : par question, le scénario puis ses
  * sous-questions. Choix unique et lecture de code se corrigent d'un coup ; une réponse
- * courte se vérifie critère par critère sur son barème (0,3 crédit), révélé à la correction.
+ * courte se vérifie critère par critère sur son barème (le prix d'une aide), révélé à la correction.
  */
 export function BlockExam({
   exam,

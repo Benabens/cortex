@@ -102,7 +102,7 @@ export async function indexBank(opts: { onStep?: StepCb } = {}): Promise<{ exams
     let raw: RawQ[] = [];
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const parsed = extractJson<{ questions?: RawQ[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs }));
+        const parsed = extractJson<{ questions?: RawQ[] }>(await completeText({ prompt, model: "sonnet", timeoutMs: 600_000, addDirs: dirs }));
         raw = parsed?.questions ?? [];
         if (raw.length) break;
       } catch (e) { step(`${ref.title} : extraction ${attempt}/3 échouée (${(e as Error).message.slice(0, 40)})`, prog); }
@@ -154,7 +154,7 @@ export async function assignLectureRanks(opts: { onStep?: StepCb } = {}): Promis
   ].join("\n");
   step("Mappage sujet → ordre du cours…", 90);
   let ranks: { topic: string; lecture_rank?: number }[] = [];
-  try { ranks = extractJson<{ ranks?: { topic: string; lecture_rank?: number }[] }>(await completeText({ prompt, model: "opus", timeoutMs: 180_000 }))?.ranks ?? []; } catch {}
+  try { ranks = extractJson<{ ranks?: { topic: string; lecture_rank?: number }[] }>(await completeText({ prompt, model: "sonnet", timeoutMs: 180_000 }))?.ranks ?? []; } catch {}
   const map = new Map<string, number>();
   for (const r of ranks) if (r.topic) map.set(r.topic.trim().toLowerCase(), Math.max(1, Math.round(Number(r.lecture_rank) || 99)));
   let done = 0;

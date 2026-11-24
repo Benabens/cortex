@@ -23,7 +23,7 @@ import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-erro
  */
 export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done" | "error" | "canceled";
 /**
- * « drill » et « check » : des aides (0,3 crédit) lancées par le connecteur, exécutées en job pour ne
+ * « drill » et « check » : des aides (prix d'une aide) lancées par le connecteur, exécutées en job pour ne
  * pas faire attendre le client (lib/drill-job, lib/check-job).
  */
 export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill" | "check";
@@ -67,6 +67,16 @@ export async function createJob(type: JobType, target?: string): Promise<number>
     `INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`,
     type, target ?? null,
   );
+}
+
+/**
+ * Sérialise, dans la transaction en cours, les créations d'un même type de job dans un même cours.
+ * Sans verrou, deux transactions READ COMMITTED voient toutes deux « aucun job actif » et insèrent
+ * chacune le leur : 4 clics simultanés avaient lancé 3 examens identiques (audit generation-ux du
+ * 24/11). SQLite sérialise déjà les transactions (mutex par connexion). Le verrou tombe au COMMIT.
+ */
+async function lockJobCreation(type: JobType): Promise<void> {
+  if (dbDriverName() === "postgres") await q.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `cortex:job:${currentUser()}:${currentCourse()}:${type}`);
 }
 
 /**
@@ -129,6 +139,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   // transaction (deux POST concurrents pouvaient spawner 2 workers). Si un
   // autre job a été créé pendant la réservation, celle-ci est rendue.
   const res = await q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(activeSql, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(
@@ -147,12 +158,13 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
 
 /**
  * Insertion EXCLUSIVE d'un job dont la réservation est déjà faite par l'appelant (aide en job,
- * lib/drill-job : 0,3 crédit réservé comme une aide, pas comme une génération). Le job actif du
+ * lib/drill-job : le prix d'une aide réservé comme une aide, pas comme une génération). Le job actif du
  * même type est re-vérifié dans la transaction ; s'il existe, l'appelant rend sa réservation.
  */
 export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
   return q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(`SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(

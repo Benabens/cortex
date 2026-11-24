@@ -6,7 +6,7 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
 import { Segmented } from "@/components/ui/Segmented";
-import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
+import { useCourse, useJob, JOB_ACTIVE, jobEnd, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
 import { LocalImportNote } from "@/components/sources/OriginalsNotes";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
@@ -111,8 +111,12 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     const unread = ingestProblems(job.report, locale);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- la fin du job publie son rapport dans l'état du panneau
     if (job.report) setUnreadFiles(unread);
-    if (job.status === "error" || job.status === "failed") {
+    const end = jobEnd(job.status);
+    if (end === "failed") {
       setError(asText(job.error) ?? t("jobFailed"));
+    } else if (end === "canceled") {
+      setUploadedMsg(t("jobCanceled"));
+      onChanged();
     } else {
       const skipped = unread.length ? t("unreadSuffix", { count: unread.length }) : "";
       setUploadedMsg(

@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * CONCURRENCE SUR UN VRAI POSTGRES (connexions réellement parallèles), activée
  * par CORTEX_TEST_PG_URL — sautée sinon. PGlite sérialise tout sur une seule
@@ -162,6 +164,22 @@ test("jobs : 8 createJobExclusive parallèles avec de quoi payer UN examen → u
   const id = [...ids][0];
   const wins = await inCourse(user, "cs-202", () => Promise.all(Array.from({ length: N }, () => jobs.claimJobStart(id))));
   assert.equal(wins.filter(Boolean).length, 1);
+});
+
+test("jobs : 8 createJobExclusive parallèles avec de quoi en payer 8 → un seul job, un seul débit, les autres réservations rendues", { skip }, async () => {
+  const jobs = await import("../lib/jobs");
+  const credits = await import("../lib/billing/credits");
+  const user = "pg_jobs_riche";
+  // Deux clics, deux onglets : chaque réservation passe (le solde suffit), seule l'insertion
+  // départage. Sans verrou, chaque transaction voyait « aucun job actif » et insérait le sien.
+  await credits.addTransaction(user, 5000, "test", `test:${user}:topup`);
+  const before = await credits.getBalanceCenti(user);
+  const results = await inCourse(user, "cs-202", () => Promise.all(Array.from({ length: N }, () => jobs.createJobExclusive("exam"))));
+  const ids = new Set(results.map((r) => r.id));
+  assert.equal(ids.size, 1, `jobs distincts : ${[...ids].join(",")}`);
+  assert.equal(results.filter((r) => !r.existing).length, 1);
+  const spent = before - (await credits.getBalanceCenti(user));
+  assert.equal(spent, results.find((r) => !r.existing)!.costCenti);
 });
 
 test("reprise Stripe : remboursement ET litige simultanés sur le même paiement → une seule reprise", { skip }, async () => {

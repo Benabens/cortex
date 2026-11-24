@@ -314,7 +314,7 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   ].join("\n");
 
   step("Classification des exercices par type via le LLM (+ vision)…", 35);
-  const text = await completeText({ prompt, model: "opus", timeoutMs: 360_000 });
+  const text = await completeText({ prompt, model: "sonnet", timeoutMs: 360_000 });
   const parsed = extractJson<{ topics?: RawTopic[] } | RawTopic[]>(text);
   const raw: RawTopic[] = Array.isArray(parsed) ? parsed : parsed?.topics ?? [];
   const cleaned = raw.filter((t) => t && t.label && t.label.trim());
@@ -434,7 +434,7 @@ export async function clusterIndexLabels(rawCount: Map<string, number>, opts: Cl
     `${target} Labels canoniques en ${lang}. Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
     JSON.stringify(CLUSTER_SCHEMA, null, 2),
   ].join("\n");
-  const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: opts.model ?? "opus", timeoutMs: opts.timeoutMs ?? 600_000 }));
+  const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: opts.model ?? "sonnet", timeoutMs: opts.timeoutMs ?? 600_000 }));
   return (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
 }
 

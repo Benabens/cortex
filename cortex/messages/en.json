@@ -1436,7 +1436,8 @@
     "sliderLabel": "Number of {label}",
     "unitExercises": "Exercises",
     "unitTopics": "Topics",
-    "unitQuestions": "Questions"
+    "unitQuestions": "Questions",
+    "canceled": "Generation canceled: no exam was created."
   },
   "reportButton": {
     "reasonWrong": "Incorrect answer",
@@ -1661,7 +1662,8 @@
     "removeFromCourse": "Remove from course",
     "refusedItem": "<name>{fileName}</name>: {reason}",
     "debitedSuffix": ": {debited}",
-    "loadingCourse": "Loading course…"
+    "loadingCourse": "Loading course…",
+    "jobCanceled": "Canceled."
   },
   "sourceViewer": {
     "found": "⟵ Cortex · found here",

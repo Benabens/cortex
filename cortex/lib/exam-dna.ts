@@ -173,7 +173,7 @@ export async function classifyMolds(step: Step = () => {}): Promise<{ classified
     // ses propres relances suffisent ; ce lot en ajoutait une seconde série, à l'identique.
     try {
       const parsed = await completeJson<{ classified?: RawClassified[] }>(
-        { prompt, model: "opus", timeoutMs: 300_000 },
+        { prompt, model: "sonnet", timeoutMs: 300_000 },
         { attempts: 2, check: (v) => (Array.isArray(v?.classified) && v.classified.length ? null : "« classified » manque ou est vide : classe CHACUN des ids") },
       );
       raw = parsed.classified ?? [];
@@ -274,7 +274,7 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
     // seconde série de relances à l'identique (jusqu'à deux fois trois appels de 10 min par annale).
     try {
       const parsed = await completeJson<{ figures?: RawFig[] }>(
-        { prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs },
+        { prompt, model: "sonnet", timeoutMs: 600_000, addDirs: dirs },
         { attempts: 2, check: (v) => (Array.isArray(v?.figures) ? null : "« figures » (tableau, vide si aucune figure) manque") },
       );
       figs = (parsed.figures ?? [])
@@ -384,7 +384,7 @@ export async function aggregateDna(step: Step = () => {}): Promise<ExamDna> {
         JSON.stringify(DIFF_SCHEMA, null, 2),
       ].join("\n");
       const parsed = extractJson<{ summary?: string; non_round_numbers?: boolean; staircase_subquestions?: boolean; typical_traps?: string[] }>(
-        await completeText({ prompt, model: "opus", timeoutMs: 240_000 })
+        await completeText({ prompt, model: "sonnet", timeoutMs: 240_000 })
       );
       if (parsed?.summary) {
         dna.difficulty = {

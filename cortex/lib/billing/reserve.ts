@@ -270,7 +270,7 @@ export class AssistRefused extends UserFacingError {
 const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", ...BAD_OUTPUT_CODES]);
 
 /**
- * Réserve 0,3 crédit, exécute l'appel, et REMBOURSE si l'appel a été refusé par
+ * Réserve le prix d'une aide, exécute l'appel, et REMBOURSE si l'appel a été refusé par
  * nos propres gardes avant d'être envoyé. Lève AssistRefused si la réservation
  * elle-même est refusée ; laisse remonter les autres erreurs telles quelles.
  */
