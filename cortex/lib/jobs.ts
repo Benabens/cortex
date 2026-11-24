@@ -69,6 +69,16 @@ export async function createJob(type: JobType, target?: string): Promise<number>
 }
 
 /**
+ * Sérialise, dans la transaction en cours, les créations d'un même type de job dans un même cours.
+ * Sans verrou, deux transactions READ COMMITTED voient toutes deux « aucun job actif » et insèrent
+ * chacune le leur : 4 clics simultanés avaient lancé 3 examens identiques (audit generation-ux du
+ * 24/11). SQLite sérialise déjà les transactions (mutex par connexion). Le verrou tombe au COMMIT.
+ */
+async function lockJobCreation(type: JobType): Promise<void> {
+  if (dbDriverName() === "postgres") await q.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `cortex:job:${currentUser()}:${currentCourse()}:${type}`);
+}
+
+/**
  * Création EXCLUSIVE (anti double-exécution) : re-vérifie le job actif du même
  * type DANS une transaction (le check `activeJob` des routes est un TOCTOU —
  * deux POST concurrents pouvaient spawner 2 workers). Renvoie le job existant
@@ -128,6 +138,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   // transaction (deux POST concurrents pouvaient spawner 2 workers). Si un
   // autre job a été créé pendant la réservation, celle-ci est rendue.
   const res = await q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(activeSql, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(
@@ -152,6 +163,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
 export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
   return q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(`SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(

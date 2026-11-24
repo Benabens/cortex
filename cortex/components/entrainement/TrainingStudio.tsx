@@ -23,7 +23,7 @@ import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { MathText } from "@/components/ui/MathText";
 import { WeightBar } from "@/components/viz/WeightBar";
-import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
+import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, jobEnd, asText, type ApiError, engineDown } from "@/lib/ux/api";
 import {
   FEEDBACK_OPTIONS,
   examLinkFromResultPath,
@@ -63,8 +63,10 @@ export function TrainingStudio() {
   const [launching, setLaunching] = useState(false);
   const job = useJob(jobId);
   const jobRunning = launching || (job != null && JOB_ACTIVE.includes(job.status));
-  const jobDone = job != null && !JOB_ACTIVE.includes(job.status) && job.status !== "error" && job.status !== "failed";
-  const jobFailed = job != null && (job.status === "error" || job.status === "failed");
+  // Un exercice annulé n'est ni prêt ni en échec : le panneau revient à son état d'avant.
+  const end = job ? jobEnd(job.status) : null;
+  const jobDone = end === "done";
+  const jobFailed = end === "failed";
 
   const [error, setError] = useState<{ offline: boolean; message: string } | null>(null);
   const [fbSent, setFbSent] = useState<string | null>(null);

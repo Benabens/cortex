@@ -8,7 +8,7 @@ import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronD
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
-import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineCode, engineDown } from "@/lib/ux/api";
+import { apiPost, useCourse, useJob, JOB_ACTIVE, jobEnd, asText, type ApiError, engineCode, engineDown } from "@/lib/ux/api";
 import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
@@ -63,6 +63,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   const [launching, setLaunching] = useState(false);
   const [genError, setGenError] = useState<{ message: string; command?: string; paywall?: boolean; code?: string | null } | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
+  const [canceledMsg, setCanceledMsg] = useState<string | null>(null);
   const [doneHref, setDoneHref] = useState<string | null>(null);
   // Sur le site ou en PDF : le même examen, au même prix (le PDF est compilé à la génération).
   const [output, chooseOutput] = useExamOutput();
@@ -85,6 +86,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     setJobId(null);
     setGenError(null);
     setDoneMsg(null);
+    setCanceledMsg(null);
     setDoneHref(null);
     notified.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -95,8 +97,11 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
     setJobId(null);
-    if (job.status === "error" || job.status === "failed") {
+    const end = jobEnd(job.status);
+    if (end === "failed") {
       setGenError({ message: asText(job.error) ?? t("generationFailed") });
+    } else if (end === "canceled") {
+      setCanceledMsg(t("canceled"));
     } else {
       // Examen incomplet : le worker termine son étape par « ⚠ <n questions manquantes, crédits rendus> ».
       const step = asText(job.currentStep) ?? "";
@@ -119,6 +124,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     if (running) return;
     setGenError(null);
     setDoneMsg(null);
+    setCanceledMsg(null);
     setDoneHref(null);
     notified.current = false;
     if (isQcm && nQcm === 0 && nOpen === 0) {
@@ -252,6 +258,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             {!running && <Play className="size-4" strokeWidth={2.5} fill="currentColor" />}
             {running ? t("generating") : t("generate")}
           </Button>
+          {canceledMsg && <span className="text-[0.82rem] text-ink-2" aria-live="polite">{canceledMsg}</span>}
           {doneMsg && (
             <span className="inline-flex items-center gap-1.5 text-[0.82rem] text-emerald-hi" aria-live="polite">
               <Check className="size-4" strokeWidth={2.5} /> {doneMsg}

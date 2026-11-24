@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { asText, useJob, useCourse, JOB_ACTIVE, type Job } from "@/lib/ux/api";
+import { asText, useJob, useCourse, jobEnd, type Job } from "@/lib/ux/api";
 import { JobProgress } from "@/components/dashboard/JobProgress";
 import { useTranslations } from "use-intl/react";
 
@@ -22,8 +22,10 @@ export function JobBanner({
   const current: Pick<Job, "status" | "progress"> & { type: unknown; currentStep: unknown } =
     job ?? initial;
 
-  const terminal = !!job && !JOB_ACTIVE.includes(job.status);
-  const failed = terminal && job!.status !== "done"; // "error" | "canceled"
+  const end = job ? jobEnd(job.status) : null;
+  const terminal = end !== null;
+  // Une annulation n'est pas un échec : le bandeau disparaît comme après un succès.
+  const failed = end === "failed";
 
   const doneNotified = useRef(false);
   useEffect(() => {
@@ -37,7 +39,7 @@ export function JobBanner({
   const [retrying, setRetrying] = useState(false);
 
   if (dismissed) return null;
-  // Succès → la bannière disparaît (comportement historique). Un ÉCHEC reste
+  // Succès ou annulation → la bannière disparaît (comportement historique). Un ÉCHEC reste
   // visible avec son message : avant, le job échouait en silence.
   if (terminal && !failed) return null;
 

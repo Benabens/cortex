@@ -1436,7 +1436,8 @@
     "sliderLabel": "Nombre de {label}",
     "unitExercises": "Exercices",
     "unitTopics": "Sujets",
-    "unitQuestions": "Questions"
+    "unitQuestions": "Questions",
+    "canceled": "Génération annulée : aucun examen n’a été créé."
   },
   "reportButton": {
     "reasonWrong": "Réponse fausse",
@@ -1661,7 +1662,8 @@
     "removeFromCourse": "Retirer du cours",
     "refusedItem": "<name>{fileName}</name> : {reason}",
     "debitedSuffix": " : {debited}",
-    "loadingCourse": "Chargement du cours…"
+    "loadingCourse": "Chargement du cours…",
+    "jobCanceled": "Opération annulée."
   },
   "sourceViewer": {
     "found": "⟵ Cortex · trouvé ici",
