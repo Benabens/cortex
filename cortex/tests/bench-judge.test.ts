@@ -27,7 +27,15 @@ let llm: http.Server;
 /** Réponse du faux modèle selon le rôle demandé par le juge. */
 function reply(prompt: string): unknown {
   if (/Tu ne vois ni la clé/.test(prompt)) return { answers: [{ q: 0, chosen: [1] }, { q: 1, chosen: [0] }] };
+  if (/examinateur exigeant/.test(prompt) && /BLOCS-SOUS-QUESTIONS/.test(prompt)) {
+    const v = (q: number, off: boolean) => ({ q, key: "right", explanation: "consistent", definition: "conform", off_course: off, distractors: 3, trivial: [], chapter: 1, notion: `n${q}`, code: null, evidence: [] });
+    // Banc rs-composite du 23/11 : un verdict par SOUS-question (q 0 à 3 pour deux questions de deux
+    // sous-questions), le hors cours de la sous-question B de Q0 portant le numéro de Q1.
+    return /ATTENTION \(essai/.test(prompt) ? { items: [v(0, false), v(1, false)] } : { items: [v(0, false), v(1, true), v(2, false), v(3, false)] };
+  }
   if (/examinateur exigeant/.test(prompt)) {
+    // Un verdict par question montrée (Q0 à Q3 pour l'examen QCM, Q0 seule pour l'exercice).
+    const shown = (x: { q: number }) => new RegExp(`^Q${x.q} \\[`, "m").test(prompt);
     return {
       items: [
         // Indices hors bornes, non entiers ou en chaîne (sortie non garantie) : jamais comptés.
@@ -35,7 +43,7 @@ function reply(prompt: string): unknown {
         { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" }, evidence: [{ criterion: "key", option: 1, source: "Question", passage: "2 + 2" }] },
         { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" }, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "première ligne" }] },
         { q: 3, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "randint", code: { language: "python", source: "import random\nstop = random.randint(2, 4)\nprint(list(range(2, stop)) + [stop])", stdin: "", expected: "[2], [2, 3], [2, 3, 4]" }, evidence: [{ criterion: "key", option: 3, source: "Question", passage: "randint inclut 4" }] },
-      ],
+      ].filter(shown),
     };
   }
   if (/doublons/.test(prompt)) return { intra: [[0, 1], [1, 1]], previous: [1] };
@@ -166,4 +174,23 @@ test("exercice au long corrigé : l'arbitre le lit jusqu'au bout", async () => {
   await runWithCourse("ml", () => judgeExam(written));
   assert.ok(solution.length > 6000);
   assert.match(prompts.find((p) => /examinateur exigeant/.test(p)) ?? "", /FIN-DU-CORRIGÉ-1\.6/);
+});
+
+test("questions composées : un verdict rendu par sous-question est redemandé, jamais rangé sur la question du même numéro", async () => {
+  // Banc rs-composite du 23/11 (offCourse.leaked = 1) : deux arbitres sur trois ont numéroté les
+  // sous-questions (q 0 à 24 pour cinq questions) ; la sous-question (e) de Q1, hors cours pour eux,
+  // portait le numéro de Q5, comptée « livrée hors cours ».
+  const { runWithCourse } = await import("../db/client");
+  const { judgeExam } = await import("../lib/bench/judge");
+  const part = (prompt: string) => ({ kind: "scq", prompt, options: ["Deontology", "Utilitarianism", "Virtue ethics", "Care ethics"], correct: 0, explanation: "" });
+  const blocks = {
+    ...run,
+    exam: { id: 3, kind: "blocks", items: [
+      { idx: 0, kind: "block", topic: "Q1", stem: "BLOCS-SOUS-QUESTIONS HelperBot in the corridor.", parts: [part("Which theory?"), part("Which value notion?")] },
+      { idx: 1, kind: "block", topic: "Q2", stem: "Lakeside admissions score.", parts: [part("Which parity?"), part("Which bias?")] },
+    ] },
+    rejected: [],
+  } as unknown as BenchRun;
+  const v = await runWithCourse("ml", () => judgeExam(blocks));
+  assert.deepEqual(v.items.map((x) => [x.idx, x.offCourse, x.notion]), [[0, false, "n0"], [1, false, "n1"]]);
 });

@@ -128,14 +128,27 @@ const ITEM_SCHEMA = {
   required: ["items"],
 } as const;
 
+/**
+ * Un verdict par question du lot, et aucun autre. Banc rs-composite du 23/11 : deux arbitres sur
+ * trois ont rendu un verdict par SOUS-question (q 0 à 24 pour cinq questions composées) ; la
+ * sous-question (e) de Q1 portait le numéro de Q5, comptée « livrée hors cours » (offCourse.leaked).
+ */
+function verdictsCoverBatch(items: unknown, ids: number[]): string | null {
+  const qs = Array.isArray(items) ? items.map((x) => (x as { q?: unknown })?.q) : [];
+  if (ids.every((id) => qs.includes(id)) && qs.every((q) => ids.includes(q as number))) return null;
+  return `il faut un verdict pour chacune des ${ids.length} questions (q = ${ids.join(", ")}), un seul par question, jamais un par sous-question`;
+}
+
 async function adjudicate(batch: BenchItem[], passages: Passage[], solver: Map<number, number[]>, chapters: BenchRun["plan"]["chapters"]): Promise<RawVerdict[]> {
+  const ids = batch.map((it) => it.idx);
   const plan = chapters.map((c) => `${c.id} : ${sanitizeCorpus(c.title)}`).join("\n") || "(aucun plan)";
   const body = batch.map((it) => `${renderItem(it, true)}${solver.has(it.idx) ? `\n   SOLVEUR INDÉPENDANT : ${solver.get(it.idx)!.join(", ") || "aucune"}` : ""}`).join("\n\n");
   const out = await ask<{ items: RawVerdict[] }>({
     model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: ITEM_SCHEMA },
     prompt: [ITEM_RULES, DATA_RULE, dataBlock("EXTRAITS DU COURS", passages), "", "═══ PLAN DU COURS (id : titre) ═══", plan, "", "═══ QUESTIONS À JUGER ═══", body, "",
-      `Réponds UNIQUEMENT avec l'objet JSON { "items": [ un objet par question, avec q, key, explanation, definition, off_course, distractors, trivial, chapter, notion, code, evidence ] }.`].join("\n"),
-  }, { check: (v) => (Array.isArray(v?.items) && v.items.length >= batch.length ? null : `il faut un verdict pour chacune des ${batch.length} questions`) });
+      `Réponds UNIQUEMENT avec l'objet JSON { "items": [ un objet par question, avec q, key, explanation, definition, off_course, distractors, trivial, chapter, notion, code, evidence ] }.`,
+      `Un objet par question Q, jamais par sous-question : q vaut le numéro de la question (${ids.join(", ")}), une question composée reçoit un seul verdict pour toutes ses sous-questions.`].join("\n"),
+  }, { check: (v) => verdictsCoverBatch(v?.items, ids) });
   return out.items;
 }
 
