@@ -4,6 +4,7 @@ import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
+import { findTexHazards } from "@/lib/tex-guard";
 import { arithmeticSlips, missingSubquestions, namesLabel, subquestionLabels } from "@/lib/verify-arith";
 import { verifyV2Enabled } from "@/lib/verif-switches";
 import { examsDir } from "@/lib/paths";
@@ -320,8 +321,11 @@ const isInvalid = (r: VerifyResult | null) =>
  * Une correction du vérificateur ne remplace le corrigé que si elle est COMPLÈTE : chaque
  * sous-question de l'énoncé y figure et rien ne renvoie à des parties « inchangées » du corrigé
  * proposé. Banc du 16/11 (ex9) : correction partielle substituée → corrigé livré réduit à 3.4.
+ * Ni aucune primitive que lib/tex-guard refuse : banc du 24/11, un corrigé réparé écrivait « \read »
+ * (l'appel système) et l'examen entier échouait au rendu du PDF.
  */
 function isCompleteCorrection(corrected: string, statement: string): boolean {
+  if (findTexHazards(corrected).length) return false;
   if (/inchang|unchanged|sans changement|identiques? (?:au|à|to)|cf\.? (?:le )?corrigé/i.test(corrected)) return false;
   return subquestionLabels(statement).every((l) => namesLabel(corrected, l));
 }
@@ -337,7 +341,7 @@ function repairOf(q: ExamQuestion, r: VerifyResult): ExamQuestion | null {
   if (r.verdict === "wrong") return isCompleteCorrection(sol, q.statement_tex) ? { ...q, solution_tex: sol } : null;
   if (r.verdict !== "ambiguous") return null;
   const st = r.corrected_statement_tex?.trim() ?? "";
-  if (st.length < q.statement_tex.length / 2) return null;
+  if (st.length < q.statement_tex.length / 2 || findTexHazards(st).length) return null;
   if (subquestionLabels(st).join("|") !== subquestionLabels(q.statement_tex).join("|")) return null;
   return isCompleteCorrection(sol, st) ? { ...q, statement_tex: st, solution_tex: sol } : null;
 }
