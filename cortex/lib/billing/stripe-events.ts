@@ -421,7 +421,12 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
     }
     log("info", "stripe.free_session_allowed", { session: s.id, promotionCode: promo });
   }
-  const credits = Number(s.metadata?.credits ?? 0);
+  const asked = Number(s.metadata?.credits ?? 0);
+  // Un code gratuit de la liste blanche offre le pack de 10, quel que soit le pack choisi : le coupon live
+  // (100 %, tous produits) offrirait sinon 40 crédits sur le pack de 40 (25/11/2026).
+  const freeCap = PLANS.credits_10.credits!;
+  const credits = free && asked > freeCap ? freeCap : asked;
+  if (credits !== asked) log("warn", "stripe.free_session_capped", { session: s.id, asked, credited: credits });
   if (!userId || !(credits > 0)) return { ok: false, action: "pack", error: "métadonnées manquantes" };
   // Idempotence par SESSION (+ lignes créditées par l'ancien code sous l'id d'événement).
   const legacy = await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, eventId);

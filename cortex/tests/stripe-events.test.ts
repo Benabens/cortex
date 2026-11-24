@@ -223,6 +223,10 @@ test("code promo à 0 € : crédité seulement si son id promo_ est dans STRIPE
     assert.equal(await credits.getBalance("promo-user"), 10);
     assert.equal((await handleStripeEvent(freeSession("evt_promo_5", "cs_promo_5", "promo-user", [{ promotion_code: { id: "promo_AUTRE" } }]))).credited, true);
     assert.equal(await credits.getBalance("promo-user"), 20);
+    // Pack de 40 à 0 € par le même code (coupon 100 % sur tous les produits) : le cadeau reste le pack de 10.
+    const pack40 = ev("evt_promo_6", "checkout.session.completed", { id: "cs_promo_6", mode: "payment", payment_status: "no_payment_required", amount_total: 0, payment_intent: null, discounts: [{ promotion_code: "promo_TEST0" }], metadata: { app: "cortex", cortexUserId: "promo40", plan: "credits_40", credits: "40" } });
+    assert.equal((await handleStripeEvent(pack40)).credited, true);
+    assert.equal(await credits.getBalance("promo40"), 10, "10 offerts, pas 40");
   } finally {
     if (prev === undefined) delete process.env.STRIPE_FREE_PROMO_CODES; else process.env.STRIPE_FREE_PROMO_CODES = prev;
   }
