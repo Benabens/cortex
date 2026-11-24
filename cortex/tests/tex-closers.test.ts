@@ -74,6 +74,13 @@ test("l'exercice garde son identité quand rien n'est à réparer", () => {
   assert.equal(r.solution_tex, "\\textbf{oui} (");
 });
 
+test("une ligne pathologique (des milliers de \\emph{ ouverts) reste rapide", () => {
+  const line = "\\emph{aaa ".repeat(20_000) + "*";
+  const t = Date.now();
+  repairMarkdownClosers(line);
+  assert.ok(Date.now() - t < 500, `${Date.now() - t} ms`);
+});
+
 // ---- Intégration : la régénération rend un exercice déjà réparé, avant toute vérification ----
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-tex-closers-"));

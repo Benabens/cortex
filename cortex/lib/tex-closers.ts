@@ -11,6 +11,8 @@
 /** Commandes de texte dont l'argument tient sur une ligne. */
 const TEXT_COMMAND = /\\(?:emph|textbf|textit|texttt|textsc|textsf|textrm|underline)\{/g;
 
+const MAX_OPENS_PER_LINE = 64;
+
 /** Environnements dont le contenu est du code : jamais touchés. */
 const VERBATIM = /\\begin\{(lstlisting|verbatim|Verbatim|minted)\}[\s\S]*?\\end\{\1\}|\\(?:verb|lstinline)(\S)[\s\S]*?\2/g;
 
@@ -30,7 +32,7 @@ export function braceBalance(tex: string): number {
 }
 
 /**
- * Position de la marque qui ferme l'argument ouvert en `open` sur sa ligne, ou -1 si l'argument se
+ * Position de la marque qui ferme l'argument ouvert en `open` sur sa ligne, ou null si l'argument se
  * ferme normalement, ou si aucune marque n'a la forme d'une fermeture : collée à un mot (pas après
  * l'accolade ni une espace, ce qui écarte `\texttt{*p}`) et suivie d'une espace, d'une ponctuation
  * ou de la fin de ligne.
@@ -70,8 +72,10 @@ export function repairMarkdownClosers(tex: string): string {
   for (const line of tex.split("\n")) {
     let fixed = line;
     if (missing > 0 && !inVerbatim(lineStart)) {
-      // De droite à gauche : une réparation ne décale pas les positions encore à lire.
-      const opens = [...line.matchAll(TEXT_COMMAND)].map((m) => m.index! + m[0].length - 1).reverse();
+      // De droite à gauche : une réparation ne décale pas les positions encore à lire. Chaque argument
+      // se lit jusqu'en fin de ligne : borné à MAX_OPENS_PER_LINE commandes (une ligne réelle en a
+      // moins de 10), sinon une ligne pathologique coûte des secondes au worker.
+      const opens = [...line.matchAll(TEXT_COMMAND)].slice(0, MAX_OPENS_PER_LINE).map((m) => m.index! + m[0].length - 1).reverse();
       for (const open of opens) {
         if (missing <= 0) break;
         const c = markdownCloser(fixed, open);
