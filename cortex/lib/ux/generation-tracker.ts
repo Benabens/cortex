@@ -46,6 +46,9 @@ const TOAST_LIMIT = 3;
 /** Une page a montré la fin du job : pas de notification en double dans ce délai. */
 const RECENTLY_SHOWN_MS = 20_000;
 const unshownAt = new Map<string, number>();
+/** Jobs qu'une page a vus finir avant le tracker (annulés depuis le suivi) : un sondage parti avant ne les remet pas. */
+const ENDED_MS = 30_000;
+const endedAt = new Map<string, number>();
 
 export const jobKey = (course: string, id: number) => `${course}:${id}`;
 
@@ -98,7 +101,8 @@ async function poll(): Promise<void> {
   if (deps.isHidden() && !state.jobs.length) { timer = null; return; } // reprend au retour au premier plan
   polling = true;
   try {
-    const jobs = await deps.fetchRunning();
+    for (const [key, at] of endedAt) if (deps.now() - at > ENDED_MS) endedAt.delete(key);
+    const jobs = (await deps.fetchRunning()).filter((j) => !endedAt.has(jobKey(j.course, j.id)));
     const now = new Set(jobs.map((j) => jobKey(j.course, j.id)));
     const gone = state.jobs.filter((j) => !now.has(jobKey(j.course, j.id)));
     emit({ jobs });
@@ -176,6 +180,13 @@ export function showJob(course: string, id: number): (endShown: boolean) => void
   };
 }
 
+/** Une page vient de finir ce job (annulé depuis son suivi) : la pastille le lâche tout de suite. */
+export function jobEnded(course: string, id: number): void {
+  const key = jobKey(course, id);
+  endedAt.set(key, deps.now());
+  emit({ jobs: state.jobs.filter((j) => jobKey(j.course, j.id) !== key) });
+}
+
 export function dismissToast(key: string): void {
   emit({ toasts: state.toasts.filter((t) => t.key !== key) });
 }
@@ -187,5 +198,6 @@ export function configureTracker(d: Partial<TrackerDeps>): void {
   deps = { ...browserDeps, ...d };
   state = { jobs: [], toasts: [], shown: new Set() };
   unshownAt.clear();
+  endedAt.clear();
   again = false;
 }

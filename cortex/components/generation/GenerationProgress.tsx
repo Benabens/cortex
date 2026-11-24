@@ -6,6 +6,7 @@ import { useTranslations } from "use-intl/react";
 import { Orb } from "./Orb";
 import { useCourse, withCourse, JOB_ACTIVE, type Job } from "@/lib/ux/api";
 import { useShowJob } from "./useShowJob";
+import { jobEnded } from "@/lib/ux/generation-tracker";
 import { barValue, cancelOutcome, elapsedMinutes, orbStateFor, rangeText, stageOf } from "@/lib/ux/generation";
 import { cn } from "@/lib/ux/cn";
 
@@ -141,6 +142,7 @@ function CancelButton({ job, courseId, onCanceled }: { job: Job; courseId: strin
     try {
       const res = await fetch(withCourse(`/api/jobs/${job.id}/cancel`, courseId), { method: "POST" });
       if (!res.ok) throw new Error(String(res.status));
+      jobEnded(courseId, job.id);
       setConfirming(false);
       onCanceled?.();
     } catch {

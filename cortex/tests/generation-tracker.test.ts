@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ACTIVE_POLL_MS, HIDDEN_POLL_MS, IDLE_POLL_MS, configureTracker, dismissToast, notifyJobStarted, showJob, subscribeTracker, trackerState, type RunningJob } from "../lib/ux/generation-tracker";
+import { ACTIVE_POLL_MS, HIDDEN_POLL_MS, IDLE_POLL_MS, configureTracker, dismissToast, jobEnded, notifyJobStarted, showJob, subscribeTracker, trackerState, type RunningJob } from "../lib/ux/generation-tracker";
 
 const running = (id: number, course = "algo"): RunningJob => ({
   id, course, courseLabel: "Algorithmique", type: "qcm", status: "running", progress: 40,
@@ -160,5 +160,19 @@ test("une page lance un job pendant un tour : un second tour suit, le job n'atte
   await flush(); await flush(); await flush();
   assert.equal(h.calls, 2);
   assert.equal(trackerState().jobs.length, 1);
+  off();
+});
+
+test("annulé depuis la page : la pastille le lâche aussitôt, un sondage parti avant ne le remet pas", async () => {
+  const h = harness();
+  h.list = [running(7), running(8)];
+  const off = subscribeTracker(() => {});
+  await flush(); await flush();
+  jobEnded("algo", 7);
+  assert.deepEqual(trackerState().jobs.map((j) => j.id), [8]);
+  // Le serveur répond encore avec le job (sondage parti avant l'annulation).
+  await tick(h);
+  assert.deepEqual(trackerState().jobs.map((j) => j.id), [8]);
+  assert.equal(trackerState().toasts.length, 0, "une annulation ne notifie rien");
   off();
 });
