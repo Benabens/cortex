@@ -7,6 +7,7 @@ import { Check, AlertTriangle, X } from "lucide-react";
 import { Orb } from "./Orb";
 import { dismissToast, jobKey, subscribeTracker, trackerState, type GenerationToast } from "@/lib/ux/generation-tracker";
 import { orbStateFor, pageOfJob } from "@/lib/ux/generation";
+import { useCourse } from "@/lib/ux/api";
 
 const SERVER_STATE = { jobs: [], toasts: [], shown: new Set<string>() };
 const useTracker = () => useSyncExternalStore(subscribeTracker, trackerState, () => SERVER_STATE);
@@ -16,10 +17,12 @@ const useTracker = () => useSyncExternalStore(subscribeTracker, trackerState, ()
  * son étape et son avancement, un clic pour revenir à son suivi. Masquée quand la page montre
  * déjà ce job. Dans la barre du haut dès 640 px ; en dessous la barre est pleine (à 320 px le
  * menu sortait de l'écran), elle se pose en bas, à portée du pouce, avec les notifications.
+ * Job d'un autre cours que celui affiché : son code d'abord, sinon on croit suivre le cours ouvert.
  */
 export function GenerationPill({ placement }: { placement: "topbar" | "dock" }) {
   const t = useTranslations("generation");
   const { jobs, shown } = useTracker();
+  const { courseId, courses } = useCourse();
   const visible = jobs.filter((j) => !shown.has(jobKey(j.course, j.id)));
   if (!visible.length) return null;
   const job = visible[0];
@@ -29,6 +32,8 @@ export function GenerationPill({ placement }: { placement: "topbar" | "dock" }) 
   // Le nom accessible reprend le texte visible (étape, pourcentage), puis le cours et l'action.
   const name = t("pill.open", { step: pct ? `${step} ${pct}` : step, course: job.courseLabel });
   const dock = placement === "dock";
+  const other = job.course !== courseId ? courses.find((c) => c.id === job.course) : undefined;
+  const tag = other ? other.code || other.short : null;
   return (
     <Link
       href={href}
@@ -38,6 +43,7 @@ export function GenerationPill({ placement }: { placement: "topbar" | "dock" }) 
       aria-label={name}
     >
       <Orb state={orbStateFor(job)} size={20} className="rounded-full" />
+      {tag && <span className="shrink-0 whitespace-nowrap font-data text-ink-3">{tag}</span>}
       <span className={dock ? "min-w-0 truncate text-ink-2" : "hidden min-w-0 truncate text-ink-2 md:inline"}>{step}</span>
       {pct && <span className="whitespace-nowrap font-data font-semibold tabular-nums text-ink-1">{pct}</span>}
       {visible.length > 1 && <span className="font-data text-ink-3">{t("pill.more", { count: visible.length - 1 })}</span>}
