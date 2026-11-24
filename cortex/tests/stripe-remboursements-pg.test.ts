@@ -1,3 +1,5 @@
+// Mécanique écrite avec le Pro à 20 crédits/mois (défaut avant le 25/11/2026, 30 depuis) : figé ici.
+process.env.SUBSCRIPTION_MONTHLY_CREDITS = "20";
 /**
  * REMBOURSEMENTS D'ABONNEMENT EN VRAI POSTGRES : remboursements et litige du
  * même paiement livrés EN MÊME TEMPS (Stripe rejoue, plusieurs instances) sur
