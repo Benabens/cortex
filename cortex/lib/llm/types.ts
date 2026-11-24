@@ -157,9 +157,23 @@ export const EXAM_OUTPUT_MAX_TOKENS = 64_000;
  * garde le défaut.
  */
 export const HARD_TASK_EFFORT_DEFAULT: LlmEffort = "high";
-export function hardTaskEffort(): LlmEffort {
+const isEffort = (v: string | undefined): v is "low" | "medium" | "high" => v === "low" || v === "medium" || v === "high";
+
+/**
+ * `site` (nom de la fonction appelante, celui des bandes du banc) permet de régler une seule étape :
+ * LLM_EFFORT_BY_SITE="reviseFromAudit=medium,designTrap=medium" passe avant LLM_HARD_EFFORT. Sans
+ * cette variable, rien ne change ; un site absent ou une valeur inconnue garde l'effort commun.
+ */
+export function hardTaskEffort(site?: string): LlmEffort {
+  if (site) {
+    for (const pair of (process.env.LLM_EFFORT_BY_SITE ?? "").split(",")) {
+      const [k, v] = pair.split("=").map((x) => x.trim());
+      const level = v?.toLowerCase();
+      if (k === site && isEffort(level)) return level;
+    }
+  }
   const v = process.env.LLM_HARD_EFFORT?.trim().toLowerCase();
-  return v === "low" || v === "medium" || v === "high" ? v : HARD_TASK_EFFORT_DEFAULT;
+  return isEffort(v) ? v : HARD_TASK_EFFORT_DEFAULT;
 }
 
 export interface LlmProvider {

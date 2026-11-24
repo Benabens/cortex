@@ -195,3 +195,25 @@ test("effort des sites difficiles : défaut du code, LLM_HARD_EFFORT le règle, 
     if (prev === undefined) delete process.env.LLM_HARD_EFFORT; else process.env.LLM_HARD_EFFORT = prev;
   }
 });
+
+test("effort par étape : LLM_EFFORT_BY_SITE règle un seul site et passe avant LLM_HARD_EFFORT", async () => {
+  const { hardTaskEffort, HARD_TASK_EFFORT_DEFAULT } = await import("../lib/llm/types");
+  const prev = { by: process.env.LLM_EFFORT_BY_SITE, hard: process.env.LLM_HARD_EFFORT };
+  try {
+    delete process.env.LLM_HARD_EFFORT;
+    delete process.env.LLM_EFFORT_BY_SITE;
+    assert.equal(hardTaskEffort("reviseFromAudit"), HARD_TASK_EFFORT_DEFAULT, "sans la variable, rien ne change");
+    process.env.LLM_EFFORT_BY_SITE = " reviseFromAudit = Medium , designTrap=low,generateBatch=max";
+    assert.equal(hardTaskEffort("reviseFromAudit"), "medium");
+    assert.equal(hardTaskEffort("designTrap"), "low");
+    assert.equal(hardTaskEffort("generateBatch"), HARD_TASK_EFFORT_DEFAULT, "valeur inconnue : effort commun");
+    assert.equal(hardTaskEffort("writeFromDesign"), HARD_TASK_EFFORT_DEFAULT, "site absent : effort commun");
+    assert.equal(hardTaskEffort(), HARD_TASK_EFFORT_DEFAULT);
+    process.env.LLM_HARD_EFFORT = "low";
+    assert.equal(hardTaskEffort("writeFromDesign"), "low");
+    assert.equal(hardTaskEffort("reviseFromAudit"), "medium", "le réglage par site passe avant le réglage commun");
+  } finally {
+    if (prev.by === undefined) delete process.env.LLM_EFFORT_BY_SITE; else process.env.LLM_EFFORT_BY_SITE = prev.by;
+    if (prev.hard === undefined) delete process.env.LLM_HARD_EFFORT; else process.env.LLM_HARD_EFFORT = prev.hard;
+  }
+});

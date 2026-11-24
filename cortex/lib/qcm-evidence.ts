@@ -218,7 +218,7 @@ function rewriteBlock<T extends RewriteQuestion>(questions: T[], oldMax: number,
 async function requestRewrites(prompt: string, n: number): Promise<(string | null)[]> {
   try {
     const r = await completeJson<{ explanations: { index: number; explanation?: string }[] }>(
-      { prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
+      { prompt, model: "opus", effort: hardTaskEffort("requestRewrites"), timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
       { check: (v) => (Array.isArray(v?.explanations) ? null : "le champ « explanations » (tableau) manque") },
     );
     const byIndex = new Map(r.explanations.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.explanation === "string" ? x.explanation.trim() : ""]));
@@ -324,7 +324,7 @@ export async function writeJustifications(targets: JustificationTarget[], langua
   ].join("\n");
   try {
     const r = await completeJson<{ justifications: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] }>(
-      { prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 300_000, json: { schema: JUSTIFICATIONS_SCHEMA } },
+      { prompt, model: "opus", effort: hardTaskEffort("writeJustifications"), timeoutMs: 300_000, json: { schema: JUSTIFICATIONS_SCHEMA } },
       { check: (v) => (Array.isArray(v?.justifications) ? null : "le champ « justifications » (tableau) manque") },
     );
     const byIndex = new Map(r.justifications.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, x]));
