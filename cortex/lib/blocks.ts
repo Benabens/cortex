@@ -104,6 +104,24 @@ const BLOCK_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * Ce qui trahit un distracteur à qui ne connaît pas le cours : les marqueurs de la rubrique du banc
+ * (lib/bench/rubric), plus le fait du scénario contredit (consigne (2) du générateur), et ce que la
+ * relance demande d'y faire. Banc rs-composite du 23/11 : 12 rejets sur 15 de Q1-Q3 pour des
+ * distracteurs « éliminables sans le cours », les mêmes étiquettes de la typologie du cours rejetées
+ * puis acceptées telles quelles ; et, relancé sur l'option seule, le générateur lui ajoutait une
+ * justification que le scénario dément, aussitôt rejetée.
+ */
+const TELLS: Record<string, string> = {
+  absurde: "absurde ou réfutable par le bon sens : remplace-la par une notion du cours de même nature",
+  hors_sujet: "ne répond pas à la question posée : remplace-la par une notion du cours de même nature, sur le même axe",
+  absolu: "un mot absolu la trahit : retire-le",
+  grammaire: "ne s'accorde pas avec l'énoncé : accorde-la",
+  longueur: "sa forme ou sa longueur la trahit : aligne-la sur la bonne réponse",
+  contredit_enonce: "contredit un fait du scénario ou de l'énoncé : seul le cours doit la réfuter, n'y ajoute aucune justification que le scénario dément",
+};
+const tellOf = (x: unknown) => (typeof x === "string" ? x.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/[\s'-]+/g, "_") : "");
+
 const VERDICT_SCHEMA = {
   type: "object",
   properties: {
@@ -126,7 +144,7 @@ const VERDICT_SCHEMA = {
     trivial_distractors: {
       type: "array",
       description: "Choix unique : les options qu'un étudiant élimine sans connaître le cours.",
-      items: { type: "object", properties: { index: { type: "integer" }, options: { type: "array", items: { type: "string" } } }, required: ["index", "options"], additionalProperties: false },
+      items: { type: "object", properties: { index: { type: "integer" }, options: { type: "array", items: { type: "string" } }, tell: { type: "string", enum: Object.keys(TELLS) } }, required: ["index", "options", "tell"], additionalProperties: false },
     },
   },
   required: ["verdicts", "off_course", "definition_mismatch", "trivial_distractors"],
@@ -411,6 +429,23 @@ async function runCodeParts(b: ExamBlock, language: string | undefined): Promise
   return issues;
 }
 
+/**
+ * Ce que le juge relève dans « off_course » ou « definition_mismatch », vide s'il ne relève rien.
+ * Banc rs-composite (22/11 et 23/11) : 100 % des verdicts les rendaient en TABLEAU, une entrée par
+ * sous-question ({ index, notion | issue | note | options }), et seule une chaîne était lue : ces deux
+ * contrôles ne rejetaient jamais (d8c07f17 : un bloc livré malgré « taxonomie absente des extraits »).
+ * Une entrée vide (« options: [] ») ou un « none » ne relève rien.
+ */
+export function flagText(x: unknown): string {
+  if (typeof x === "string") return NO_FLAG.test(x.trim()) ? "" : x.trim();
+  if (Array.isArray(x)) return x.map(flagText).filter(Boolean).join(" ; ");
+  if (!x || typeof x !== "object") return "";
+  const { index, ...rest } = x as Record<string, unknown>;
+  const said = Object.values(rest).map(flagText).filter(Boolean).join(", ");
+  const at = Number.isInteger(index) ? LETTER[index as number]?.toLowerCase() : typeof index === "string" && /^[a-h]$/i.test(index) ? index.toLowerCase() : null;
+  return said && at ? `(${at}) ${said}` : said;
+}
+
 /** Juge à l'aveugle (sans clé ni barème) : ce qu'il reproche au bloc, vide s'il passe. null : juge indisponible. */
 async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[], language: string | undefined): Promise<string[] | null> {
   const body = b.parts.map((p, i) => [
@@ -421,7 +456,8 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   const system = [
     `Tu es un correcteur indépendant. Résous chaque sous-question de cette question d'examen composée, SANS corrigé, avec les DÉFINITIONS DES EXTRAITS DU COURS (jamais celles d'une autre source).`,
     `Pour chaque sous-question (index 0 = a) : "answer" = la lettre de l'option juste (scq), la sortie exacte du code (code_output), ou ta réponse en une ou deux phrases (short) ; ok=false si elle est ambiguë, sans réponse unique, ou contraire au cours, et dis pourquoi dans "issue".`,
-    `off_course : toute notion employée absente des extraits. definition_mismatch : une définition employée (scénario, énoncés, options) plus étroite (une condition ajoutée) ou plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues. trivial_distractors : les options qu'on élimine sans connaître le cours.`,
+    `off_course : toute notion employée absente des extraits. definition_mismatch : une définition employée (scénario, énoncés, options) plus étroite (une condition ajoutée) ou plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues.`,
+    `trivial_distractors : les options fausses qu'un étudiant qui ne connaît PAS le cours élimine quand même, chacune avec le marqueur qui la trahit ("tell") : absurde (réfutable par le bon sens), hors_sujet (ne répond pas à la question posée, notion d'un autre chapitre), absolu (« toujours », « jamais », « garantit »…), grammaire (ne s'accorde pas avec l'énoncé), longueur (forme ou longueur qui la distingue des autres), contredit_enonce (contredit un fait donné par le scénario ou l'énoncé). Une notion du cours de même nature que la bonne réponse, qu'on n'écarte qu'en appliquant sa définition au scénario, n'est PAS triviale : c'est ce que la question évalue. Sans marqueur, ne la cite pas.`,
     `Réponds UNIQUEMENT avec un objet JSON {"verdicts":[{"index","answer","ok","issue"}],"off_course","definition_mismatch","trivial_distractors":[{"index","options"}]}.`,
   ].join("\n");
   const prompt = [
@@ -429,7 +465,7 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
     `SCÉNARIO :\n${b.scenario}`,
     `SOUS-QUESTIONS :\n${body}`,
   ].join("\n\n");
-  let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: string; definition_mismatch?: string; trivial_distractors?: { index: number; options: string[] }[] };
+  let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: unknown; definition_mismatch?: unknown; trivial_distractors?: { index: number; options: string[]; tell?: unknown }[] };
   try {
     // Un verdict par sous-question, sinon rien n'est vérifié (jamais de faux « vérifié »).
     const covers = (v: typeof res) => b.parts.every((_, i) => v.verdicts?.some((x) => x.index === i));
@@ -440,7 +476,7 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
     return null;
   }
   const issues: string[] = [];
-  const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
+  const said = (x: unknown) => (passages.length ? flagText(x) : "");
   for (const [i, p] of b.parts.entries()) {
     const v = res.verdicts!.find((x) => x.index === i)!;
     const at = `(${LETTER[i].toLowerCase()})`;
@@ -460,6 +496,9 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   // Sortie du modèle non garantie : banc du 04/11 (CS-290 composite), « options » rendu en chaîne a
   // fait planter tout l'examen (« t.options.slice(...).join is not a function »).
   for (const t of Array.isArray(res.trivial_distractors) ? res.trivial_distractors : []) {
+    // Sans marqueur concret, l'avis ne tient pas d'une version à l'autre (c519f840) : il ne rejette rien.
+    const tell = tellOf(t?.tell);
+    if (!Object.hasOwn(TELLS, tell)) continue;
     const raw: unknown = t?.options;
     const opts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
     // Le juge nomme les options par leur lettre, dans l'ordre MÉLANGÉ après la génération : la relance
@@ -473,7 +512,7 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
       const reason = m?.[2]?.trim().replace(/\)$/, "").slice(0, 160);
       return option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : o;
     });
-    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")}`);
+    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")} — ${TELLS[tell]} ; les options gardent la même forme (un nom de notion reste un nom seul)`);
   }
   return issues;
 }
