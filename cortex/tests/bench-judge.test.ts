@@ -196,13 +196,15 @@ test("questions composées : un verdict rendu par sous-question est redemandé, 
 });
 
 test("questions composées : l'arbitre voit les extraits du cours de chaque sous-question, pas seulement ceux du scénario", async () => {
-  // Banc rs-composite du 24/11 (offCourse.leaked = 2) : extraits cherchés sur le seul scénario ;
-  // Gorwa et Deloitte, cités par des sous-questions et présents dans le cours, jugés « absents des extraits ».
+  // Banc rs-composite du 24/11 (offCourse.leaked = 2) : extraits cherchés sur le seul scénario, et
+  // coupés aux 900 premiers caractères d'un support de 6 000 ; Gorwa (position 4 033) et Deloitte,
+  // cités par des sous-questions et présents dans le cours, jugés « absents des extraits ».
   const { runWithCourse, ensureFts } = await import("../db/client");
   const { q } = await import("../db/q");
   const { indexItemForSearch } = await import("../lib/search");
   const { judgeExam } = await import("../lib/bench/judge");
-  const GORWA = "Gorwa taxonomy: classification (keywords, sentiment, machine learning) versus matching (perceptual hashing of known content).";
+  const intro = Array.from({ length: 40 }, (_, i) => `Moderation goal ${i}: protect online communities while preserving expression.`).join(" ");
+  const GORWA = `${intro} Gorwa taxonomy: classification (keywords, sentiment, machine learning) versus matching (perceptual hashing of known content).`;
   await runWithCourse("ml", async () => {
     ensureFts();
     for (const t of ["sources", "items"]) await q.ensureTable(t);

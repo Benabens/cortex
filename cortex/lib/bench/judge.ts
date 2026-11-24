@@ -70,11 +70,15 @@ async function passagesFor(text: string, max = 3): Promise<Passage[]> {
 }
 
 /** Extraits d'une question : ceux de son scénario, puis ceux de chaque sous-question (une question
- *  composée couvre plusieurs notions ; le seul scénario ne ramène pas celles des sous-questions). */
+ *  composée couvre plusieurs notions ; le seul scénario ne ramène pas celles des sous-questions),
+ *  en fenêtres centrées sur leurs mots, comme les preuves du moteur : un support de cours fait
+ *  plusieurs milliers de caractères et ses 900 premiers ne portent pas la notion cherchée. */
 async function itemPassages(it: BenchItem): Promise<Passage[]> {
-  const out = await passagesFor(`${it.stem} ${(it.options ?? []).join(" ")}`);
-  for (const p of it.parts ?? []) out.push(...(await passagesFor(`${p.prompt} ${(p.options ?? []).join(" ")}`, 2)));
-  return out.filter((x, i) => out.findIndex((y) => y.text === x.text) === i);
+  const { evidencePassages } = await import("@/lib/course-grounding");
+  const clean = (x: string) => x.replace(/\\[a-z]+\{[^}]*\}/g, " ").replace(/<[^>]+>/g, " ");
+  const queries = [`${it.stem} ${(it.options ?? []).join(" ")}`, ...(it.parts ?? []).map((p) => `${p.prompt} ${(p.options ?? []).join(" ")}`)].map(clean);
+  const found = await evidencePassages(queries, { perQuery: 1, cap: 1200, budget: 7200 }).catch(() => []);
+  return found.map((p) => ({ src: p.src, text: p.text.replace(/\s+/g, " ") }));
 }
 
 function renderItem(it: BenchItem, withKey: boolean): string {
