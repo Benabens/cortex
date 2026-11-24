@@ -118,7 +118,7 @@ function load(file: string): Loaded {
  * de son appel — le suivi d'un job (étapes, avancement, temps restant) se regarde alors comme en
  * vrai, dix fois plus vite. Absent ou 0 : réponse immédiate (banc, CI).
  */
-export function replayDelayMs(recordedMs: number, env: NodeJS.ProcessEnv = process.env): number {
+export function replayDelayMs(recordedMs: number, env: Record<string, string | undefined> = process.env): number {
   const pace = Number(env.LLM_TAPE_PACE ?? 0);
   return Number.isFinite(pace) && pace > 0 && recordedMs > 0 ? Math.round(recordedMs * pace) : 0;
 }

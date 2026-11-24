@@ -54,15 +54,20 @@ test("réessai après une coupure : estimé sur ce qui reste à faire, pas sur l
   assert.match(queued.label, /En file : environ 10 min une fois lancé/);
 });
 
-test("rendu du suivi : avancement, étape et temps restant", async () => {
-  const { JobProgress } = await import("../components/dashboard/JobProgress");
-  const html = renderIntl(createElement(JobProgress, { label: "qcm", progress: 50, queued: false, step: "Vérification à l'aveugle…", eta: "≈ 5 min restantes" }));
-  assert.match(html, /Génération en cours · qcm/);
-  assert.match(html, /50 %/);
-  assert.match(html, /≈ 5 min restantes/);
-  assert.match(html, /Vérification à l&#x27;aveugle…/);
-  const noEta = renderIntl(createElement(JobProgress, { label: "qcm", progress: 0, queued: true, step: null, eta: null }));
-  assert.match(noEta, /En file/);
+test("rendu du suivi (components/generation) : étape, barre, fourchette, file d'attente", async () => {
+  const { GenerationProgress } = await import("../components/generation/GenerationProgress");
+  const { CourseProvider } = await import("../lib/ux/api");
+  const job = { id: 1, type: "qcm", status: "running", progress: 50, currentStep: "Vérification des questions · 8/20 QCM prêts", resultPath: null, etaRange: { lowMs: 3 * MIN, highMs: 7 * MIN } };
+  const html = renderIntl(createElement(CourseProvider, null, createElement(GenerationProgress, { job })));
+  assert.match(html, /Vérification des questions · 8\/20 QCM prêts/);
+  assert.match(html, /Encore 3 à 7 min/);
+  assert.match(html, /aria-valuenow="50"/);
+  assert.match(html, /scaleX\(0\.5\)/);
+  const queued = renderIntl(createElement(CourseProvider, null, createElement(GenerationProgress, { job: { ...job, status: "queued", progress: 0, currentStep: null } })));
+  assert.match(queued, /En file d’attente/);
+  assert.match(queued, /3 à 7 min une fois lancée/);
+  const late = renderIntl(createElement(CourseProvider, null, createElement(GenerationProgress, { job: { ...job, etaRange: null, etaLate: true } })));
+  assert.match(late, /Plus long que d’habitude/);
 });
 
 test("jobEta lit l'historique du cours : durée des derniers jobs terminés du même type", async () => {

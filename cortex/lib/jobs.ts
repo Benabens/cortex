@@ -974,6 +974,17 @@ function orderedUnits(target: string | null): number | null {
 }
 
 /**
+ * Les générations en cours du cours courant (pastille de suivi, /api/jobs/running), sans les aides
+ * en job (drill, check) : lancées depuis un assistant, aucune page de l'app ne les montre.
+ */
+export async function listActiveJobs(limit = 4): Promise<Job[]> {
+  await ensureJobsSchema();
+  await reconcileStaleJobs();
+  const notAssist = ASSIST_JOB_TYPES.map(() => "?").join(",");
+  return (await q.all<JobRow>(`SELECT * FROM jobs WHERE status IN ${ACTIVE_STATES} AND type NOT IN (${notAssist}) ORDER BY id DESC LIMIT ?`, ...ASSIST_JOB_TYPES, limit)).map(rowToJob);
+}
+
+/**
  * Le job actif le plus récent (pour réafficher la progression au reload). Sans type : les
  * générations du cours, sans les aides en job (drill) — ni bandeau de l'Accueil, ni attente.
  */

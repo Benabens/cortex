@@ -6,6 +6,7 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { Segmented } from "@/components/ui/Segmented";
 import { apiPost, useCourse, useJob } from "@/lib/ux/api";
+import { useShowJob } from "@/components/generation/useShowJob";
 import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
 import { cn } from "@/lib/ux/cn";
 import { apiDelete } from "@/lib/ux/write";
@@ -34,6 +35,8 @@ export function useReindex(refetch: () => void): Reindex {
   const [notice, setNotice] = useState<string | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const job = useJob(jobId);
+  // Le reclassement est suivi ici : la pastille ne le répète pas, sa fin n'est pas notifiée en double.
+  useShowJob(jobId, !job || JOB_RUNNING.has(job.status));
 
   // Fin du job : la liste se recharge depuis le corpus refait.
   useEffect(() => {

@@ -114,3 +114,11 @@ export function estimateRemaining(i: EtaInput): Eta {
   const remaining = Math.max(expected * (1 - progress / 100), expected - i.elapsedMs, 0);
   return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}`, kind: "remaining", minutes: Math.round(remaining / MIN), ...range(remaining) };
 }
+
+/**
+ * Ce que l'interface lit du temps restant (GET /api/jobs/[id], /api/jobs/running) : la fourchette,
+ * absente en retard, et le retard lui-même (« plus long que d'habitude »).
+ */
+export function etaFields(eta: Pick<Eta, "late" | "lowMs" | "highMs"> | null): { etaRange: { lowMs: number | null; highMs: number | null } | null; etaLate: boolean } {
+  return { etaRange: eta && !eta.late ? { lowMs: eta.lowMs, highMs: eta.highMs } : null, etaLate: !!eta?.late };
+}

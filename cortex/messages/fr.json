@@ -536,8 +536,6 @@
     "generationFailedLabel": "Échec de génération",
     "generationFailed": "Génération échouée{type, select, empty {} other { · {type}}}",
     "retrying": "Relance…",
-    "generationRunning": "Génération en cours{label, select, empty {} other { · {label}}}",
-    "generationRunningLabel": "Génération en cours",
     "queued": "En file",
     "jobNotFound": "Traitement introuvable. Actualise la page avant de le relancer.",
     "jobConnectionLost": "Connexion perdue pendant le suivi du traitement. Actualise la page pour vérifier son état.",
@@ -1437,7 +1435,8 @@
     "unitExercises": "Exercices",
     "unitTopics": "Sujets",
     "unitQuestions": "Questions",
-    "canceled": "Génération annulée : aucun examen n’a été créé."
+    "canceled": "Génération annulée : aucun examen n’a été créé.",
+    "retry": "Relancer la génération"
   },
   "reportButton": {
     "reasonWrong": "Réponse fausse",
@@ -1836,5 +1835,71 @@
     "cta3": "Utilisable depuis Claude grâce à son connecteur MCP",
     "ctaButton": "Essayer Cortex",
     "fileSize": "{mb} Mo"
+  },
+  "generation": {
+    "label": "Suivi de la génération",
+    "launching": "Lancement…",
+    "queued": "En file d’attente",
+    "running": "Génération en cours",
+    "etaRange": "Encore {low} à {high} min",
+    "etaAbout": "Encore environ {minutes} min",
+    "etaUnder": "Moins d’une minute",
+    "etaQueuedRange": "{low} à {high} min une fois lancée",
+    "etaQueuedAbout": "Environ {minutes} min une fois lancée",
+    "etaLate": "Plus long que d’habitude, la génération continue",
+    "elapsed": "{minutes, plural, =0 {Lancée à l’instant} other {Lancée il y a # min}}",
+    "leaveHint": "Tu peux changer de page : la génération continue.",
+    "progress": "Avancement de la génération",
+    "progressText": "{value} %, {step}",
+    "phase": {
+      "read": "Lecture de tes documents",
+      "format": "Lecture du format d’examen",
+      "program": "Analyse du programme",
+      "plan": "Choix des notions à tester",
+      "write": "Rédaction des questions",
+      "check": "Vérification des questions",
+      "refill": "Remplacement des questions écartées",
+      "review": "Relecture finale",
+      "render": "Mise en page du PDF"
+    },
+    "meanwhile": "En attendant :",
+    "meanwhileLink": {
+      "weak": "Revoir tes points faibles",
+      "train": "T’entraîner"
+    },
+    "cancel": "Annuler",
+    "cancelKeep": "Continuer",
+    "cancelConfirm": "Arrêter la génération",
+    "canceling": "Arrêt…",
+    "cancelFailed": "L’annulation n’a pas abouti. Réessaie dans un instant.",
+    "cancelOutcome": {
+      "refunded": "Rien n’est perdu : tes crédits sont rendus.",
+      "keepsReady": "Les questions déjà prêtes restent dans un examen, le reste t’est rendu.",
+      "notRefunded": "La génération est déjà bien avancée : les crédits ne sont pas rendus.",
+      "free": "Arrêter ne te coûte rien.",
+      "keepsReadyFree": "Les questions déjà prêtes restent dans un examen."
+    },
+    "wait": {
+      "drill": "Écriture de ton exercice…",
+      "check": "Correction de ta réponse…"
+    },
+    "waitTypical": {
+      "drill": "D’habitude 1 à 3 min",
+      "check": "D’habitude 1 à 2 min"
+    },
+    "pill": {
+      "label": "{count, plural, one {Une génération en cours} other {# générations en cours}}",
+      "open": "{step}, {course}. Ouvrir le suivi.",
+      "more": "+{count}"
+    },
+    "toast": {
+      "done": "{type, select, qcm {Ton examen QCM est prêt} exam {Ton examen est prêt} prepare {Ton cours est prêt} ingest {Tes documents sont lus} format {Le format d’examen est lu} blueprint {Le programme est analysé} exercise {Ton exercice est prêt} other {C’est prêt}}",
+      "failed": "{type, select, qcm {L’examen QCM n’a pas pu être généré} exam {L’examen n’a pas pu être généré} prepare {La préparation du cours a échoué} other {La génération a échoué}}",
+      "open": "Ouvrir",
+      "see": "Relancer",
+      "close": "Fermer",
+      "region": "Notifications de génération",
+      "tabTitle": "{count, plural, one {Génération terminée} other {# générations terminées}}"
+    }
   }
 }

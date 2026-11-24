@@ -5,6 +5,7 @@ import { SafeHtml } from "@/components/ui/SafeHtml";
 import { MathText } from "@/components/ui/MathText";
 import type { CheckResult } from "@/lib/check-solution";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
+import { GenerationWait } from "@/components/generation/GenerationProgress";
 import { useTranslations } from "use-intl/react";
 
 export function OpenResponse({ questionId, statement, courseId, graded, solution, solutionContent, part, onChecked, language }: {
@@ -26,6 +27,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
   const [answer, setAnswer] = useState("");
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [checkStartedAt, setCheckStartedAt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const instanceId = useId();
   const textareaId = `open-response-${questionId}-${instanceId}`;
@@ -39,6 +41,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
   async function verifyAnswer() {
     if (!answer.trim() || checking) return;
     setChecking(true);
+    setCheckStartedAt(Date.now());
     setError(null);
     try {
       const response = await fetch(`/api/check-solution?course=${encodeURIComponent(courseId)}`, {
@@ -87,6 +90,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
           <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>{t("criteriaHint")}</span>
         </div>
       )}
+      {checking && <GenerationWait kind="check" startedAt={checkStartedAt} className="mt-3" />}
       {showUsage && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
       {error && <p role="alert" className="mt-2 text-[12px]" style={{ color: "var(--red-ink)" }}>{error}</p>}
       {check && (

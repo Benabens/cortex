@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { UploadCloud, Check, Sparkles, FolderInput, AlertTriangle } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
-import { WeightBar } from "@/components/viz/WeightBar";
+import { GenerationProgress } from "@/components/generation/GenerationProgress";
+import { useJobError } from "@/components/generation/useJobError";
+import { notifyJobStarted } from "@/lib/ux/generation-tracker";
 import { Segmented } from "@/components/ui/Segmented";
-import { useCourse, useJob, JOB_ACTIVE, jobEnd, asText, type ApiError } from "@/lib/ux/api";
+import { useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
 import { LocalImportNote } from "@/components/sources/OriginalsNotes";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
@@ -72,6 +74,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobKind, setJobKind] = useState<JobKind | null>(null);
   const job = useJob(jobId);
+  const jobError = useJobError();
   const running = jobId != null && (!job || JOB_ACTIVE.includes(job.status));
   // Même verdict que POST /api/prepare : le bouton est coupé avant le clic, raison à l'appui.
   const launch = useLaunchUsage("prepare");
@@ -101,6 +104,16 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     setFormatCharged(0);
     setUnreadFiles([]);
     notified.current = false;
+    // Une préparation, une lecture ou une détection lancée avant (page quittée, rechargement) : son suivi reprend ici.
+    let alive = true;
+    if (courseId) {
+      void findActiveJob(courseId, ["prepare", "ingest", "format"]).then((j) => {
+        if (!alive || !j) return;
+        setJobId(j.id);
+        setJobKind(j.type as JobKind);
+      });
+    }
+    return () => { alive = false; };
   }, [courseId]);
 
   useEffect(() => {
@@ -113,7 +126,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     if (job.report) setUnreadFiles(unread);
     const end = jobEnd(job.status);
     if (end === "failed") {
-      setError(asText(job.error) ?? t("jobFailed"));
+      setError(jobError(job.error) ?? t("jobFailed"));
     } else if (end === "canceled") {
       setUploadedMsg(t("jobCanceled"));
       onChanged();
@@ -131,7 +144,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       onChanged();
     }
     setJobKind(null);
-  }, [job, jobKind, onChanged, formatCharged, t, locale]);
+  }, [job, jobKind, onChanged, formatCharged, t, locale, jobError]);
 
   /** Un fichier non lu ne compte nulle part : le retirer libère la place et allège la liste. */
   const removeUnread = async (item: IngestProblem) => {
@@ -148,6 +161,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     if (kind !== "format") setUnreadFiles([]);
     setJobId(id);
     setJobKind(kind);
+    notifyJobStarted();
   };
 
   const upload = async (files: FileList | File[]) => {
@@ -460,17 +474,13 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
 
       {/* progression de job (format / ingest / prepare) */}
       {paywall && <PaywallNotice credits={2} code={paywall.code} />}
-      {running && job && (
-        <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3" aria-live="polite">
-          <div className="mb-2 flex items-center justify-between text-[0.78rem]">
-            <span className="text-ink-2">
-              {asText(job.currentStep) ??
-                (jobKind === "prepare" ? t("preparing") : jobKind === "ingest" ? t("ingesting") : t("detecting"))}
-            </span>
-            <span className="font-data font-semibold text-ink-1">{job.status === "queued" ? "" : `${job.progress} %`}</span>
-          </div>
-          <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={5} />
-        </div>
+      {running && (
+        <GenerationProgress
+          job={job && { ...job, currentStep: asText(job.currentStep) ?? (jobKind === "prepare" ? t("preparing") : jobKind === "ingest" || jobKind === "scan" ? t("ingesting") : t("detecting")) }}
+          // Seule la préparation est payante et longue : l'annuler rend les crédits selon l'avancement.
+          cancelable={jobKind === "prepare"}
+          meanwhile={false}
+        />
       )}
 
       {uploadedMsg && (
