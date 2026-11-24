@@ -24,7 +24,7 @@ import type { AccountPayment } from "@/lib/billing/invoices";
  */
 
 type Offer = {
-  plan: "pro_monthly" | "pro_yearly" | "credits_10";
+  plan: "pro_monthly" | "pro_yearly" | "credits_40" | "credits_10";
   kind: "subscription" | "pack";
   label: string;
   credits: number;
@@ -345,7 +345,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             <p role="status" className="mt-1.5 text-[0.85rem] text-warning">{data.purchase.reason}</p>
           )}
         </div>
-        <ul className="grid gap-3 p-4 lg:grid-cols-3">
+        <ul className="grid gap-3 p-4 md:grid-cols-2 2xl:grid-cols-4">
           {data.offers.map((o) => {
             const isSub = o.kind === "subscription";
             // `busy` couvre TOUTES les offres : pendant une redirection vers Stripe,

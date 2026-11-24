@@ -68,7 +68,7 @@ export function isLlmModel(v: unknown): v is LlmModel {
 
 /**
  * Modèle d'un site « opus » quand Opus n'y est pas autorisé : Sonnet 5, celui des examens, QCM et
- * exercices jusqu'à l'étape 2 (01/12/2026, LLM_ALLOW_OPUS=1). Le mécanique est sur Sonnet 5.5
+ * exercices jusqu'à l'étape 2 (25/11/2026, LLM_ALLOW_OPUS=1). Le mécanique est sur Sonnet 5.5
  * (alias « sonnet »).
  */
 const OPUS_FALLBACK = "claude-sonnet-5";

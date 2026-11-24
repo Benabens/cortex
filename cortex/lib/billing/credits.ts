@@ -255,9 +255,9 @@ const ACTIVATE_IF_NEWER = `status = CASE WHEN ${NEWER} THEN 'active' ELSE status
         status_at = CASE WHEN ${NEWER} THEN ? ELSE status_at END`;
 const activateParams = (at: string) => [at, at, at, at];
 
-/** Crédits Pro accordés chaque mois, en centièmes (SUBSCRIPTION_MONTHLY_CREDITS, en crédits, défaut 20). */
+/** Crédits Pro accordés chaque mois, en centièmes (SUBSCRIPTION_MONTHLY_CREDITS, en crédits, défaut 30 depuis le 25/11/2026 : un examen blanc complet). */
 export function subscriptionMonthlyCreditsCenti(): number {
-  return toCenti(envNum("SUBSCRIPTION_MONTHLY_CREDITS", 20));
+  return toCenti(envNum("SUBSCRIPTION_MONTHLY_CREDITS", 30));
 }
 
 export async function getSubscription(userId = currentUser()): Promise<SubRow | undefined> {

@@ -1,3 +1,5 @@
+// Mécanique écrite avec le Pro à 20 crédits/mois (défaut avant le 25/11/2026, 30 depuis) : figé ici.
+process.env.SUBSCRIPTION_MONTHLY_CREDITS = "20";
 /**
  * STRIPE — attribution et reprise des crédits par le webhook (c'est de l'argent).
  * Charges d'événements SIMULÉES, traitées par handleStripeEvent (sans signature —
@@ -69,6 +71,11 @@ test("pack → +10 crédits (permanents)", async () => {
 test("rejeu du même événement pack → PAS de double attribution", async () => {
   await handleStripeEvent(checkoutPack("evt_pack_1", "buyer")); // même id
   assert.equal(await credits.getBalance("buyer"), 10, "toujours 10, pas 20");
+});
+
+test("pack de 40 → +40 crédits (permanents), pris sur la métadonnée de la session", async () => {
+  await handleStripeEvent(ev("evt_pack40_1", "checkout.session.completed", { id: "cs_pack40_1", mode: "payment", payment_status: "paid", payment_intent: "pi_pack40_1", metadata: { cortexUserId: "buyer40", plan: "credits_40", credits: "40" } }));
+  assert.equal(await credits.getBalance("buyer40"), 40);
 });
 
 test("abonnement : checkout (lien) + invoice.paid → +20 crédits du mois", async () => {

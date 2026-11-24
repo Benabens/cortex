@@ -16,10 +16,11 @@ import { dropReceipt, queueReceipt } from "./receipts";
  * cohérence livemode/clé, puis appelle `handleStripeEvent(event)`.
  *
  * OFFRES, référencées par LOOKUP_KEY (aucun id en dur → bascule test/live sans code) :
- *  - cortex_pro_monthly / cortex_pro_yearly → abonnement Pro (20 crédits/mois,
- *    non reportables, attribués par facture payée : l'annuel reçoit 20/mois par
- *    recharge paresseuse) ;
- *  - cortex_credits_10 → pack unique de 10 crédits, permanents.
+ *  - cortex_pro_monthly / cortex_pro_yearly → abonnement Pro (30 crédits/mois depuis le
+ *    25/11/2026, SUBSCRIPTION_MONTHLY_CREDITS ; non reportables, attribués par facture payée :
+ *    l'annuel reçoit ses crédits du mois par recharge paresseuse) ;
+ *  - cortex_credits_40 / cortex_credits_10 → packs uniques de 40 et de 10 crédits, permanents
+ *    (même prix du crédit, 0,90 €).
  *
  * IDEMPOTENCE, trois remparts : `processed_events` (event.id) ; la référence
  * de l'objet métier (`stripe:cs:<session>` pour un pack, `stripe_invoices`
@@ -80,12 +81,14 @@ export type StripeLookup = {
 };
 export type HandleOptions = { lookup?: StripeLookup };
 
-export type PlanKey = "pro_monthly" | "pro_yearly" | "credits_10";
+export type PlanKey = "pro_monthly" | "pro_yearly" | "credits_40" | "credits_10";
 export type PlanSpec = { lookupKey: string; mode: "subscription" | "payment"; credits?: number; label: string };
 
 export const PLANS: Record<PlanKey, PlanSpec> = {
   pro_monthly: { lookupKey: "cortex_pro_monthly", mode: "subscription", label: "Pro mensuel" },
   pro_yearly: { lookupKey: "cortex_pro_yearly", mode: "subscription", label: "Pro annuel" },
+  // Pack de 40 (36 €, 25/11/2026) : un examen blanc complet coûte 30 crédits, le pack de 10 n'en paie plus un.
+  credits_40: { lookupKey: "cortex_credits_40", mode: "payment", credits: 40, label: "Pack de 40 crédits" },
   credits_10: { lookupKey: "cortex_credits_10", mode: "payment", credits: 10, label: "Pack de 10 crédits" },
 };
 

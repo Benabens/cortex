@@ -795,7 +795,8 @@
       "plans": {
         "pro_monthly": "Pro mensuel",
         "pro_yearly": "Pro annuel",
-        "credits_10": "Pack de 10 crédits"
+        "credits_10": "Pack de 10 crédits",
+        "credits_40": "Pack de 40 crédits"
       }
     },
     "usage": {
@@ -1706,6 +1707,7 @@
   "order": {
     "product": {
       "credits_10": "Pack de 10 crédits",
+      "credits_40": "Pack de 40 crédits",
       "pro_monthly": "Cortex Pro mensuel",
       "pro_yearly": "Cortex Pro annuel"
     },
@@ -1715,6 +1717,7 @@
   "receipt": {
     "subject": {
       "credits_10": "Votre reçu Cortex : pack de 10 crédits",
+      "credits_40": "Votre reçu Cortex : pack de 40 crédits",
       "pro_monthly": "Votre reçu Cortex : abonnement Pro mensuel",
       "pro_yearly": "Votre reçu Cortex : abonnement Pro annuel"
     },
