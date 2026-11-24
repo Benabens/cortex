@@ -1703,7 +1703,19 @@
     "stepFailed": "Failed",
     "shortfall": "{missing, plural, one {# question of {requested} couldn’t be generated} other {# questions of {requested} couldn’t be generated}}",
     "shortfallBack": "{shortfall}: {credits} {back, plural, one {credit returned} other {credits returned}}",
-    "errorBack": "{error} ({credits} {back, plural, one {credit returned} other {credits returned}})."
+    "errorBack": "{error} ({credits} {back, plural, one {credit returned} other {credits returned}}).",
+    "stage": {
+      "read": "Reading your documents",
+      "format": "Reading the exam format",
+      "program": "Analysing the syllabus",
+      "plan": "Choosing what to test",
+      "write": "Writing the questions",
+      "check": "Checking the questions",
+      "refill": "Replacing rejected questions",
+      "review": "Final review",
+      "render": "Laying out the PDF"
+    },
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {MCQs ready} lot {batches ready} other {questions ready}}"
   },
   "order": {
     "product": {

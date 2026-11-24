@@ -668,6 +668,8 @@ export async function generateBlockExam(
     if (r.block) {
       built.set(i, r.block);
       slotAt.set(i, s);
+      // Le compte que suit l'interface (lib/job-stage) : « Question composée 3/7 » est la dernière commencée.
+      step(`${built.size}/${n} questions composées prêtes`, 0);
     }
     else failed.push({ i, why: r.why });
   });
@@ -686,6 +688,7 @@ export async function generateBlockExam(
       if (r.block) {
         built.set(f.i, r.block);
         slotAt.set(f.i, spare);
+        step(`${built.size}/${n} questions composées prêtes`, 0);
         break;
       }
     }

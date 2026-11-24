@@ -162,3 +162,12 @@ test("prompts retouchés ET rejoués dans un autre ordre : chacun reçoit la ré
     delete process.env.LLM_TAPE_LOG;
   }
 });
+
+test("rejeu au rythme enregistré : LLM_TAPE_PACE multiplie la durée de l'appel, 0 ou absent = immédiat", async () => {
+  const { replayDelayMs } = await import("../lib/llm/tape");
+  assert.equal(replayDelayMs(40_000, {}), 0);
+  assert.equal(replayDelayMs(40_000, { LLM_TAPE_PACE: "0" }), 0);
+  assert.equal(replayDelayMs(40_000, { LLM_TAPE_PACE: "0.25" }), 10_000);
+  assert.equal(replayDelayMs(40_000, { LLM_TAPE_PACE: "abc" }), 0);
+  assert.equal(replayDelayMs(0, { LLM_TAPE_PACE: "1" }), 0);
+});

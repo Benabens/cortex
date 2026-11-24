@@ -32,6 +32,12 @@ export type Eta = {
   kind: "queued" | "resumed" | "late" | "remaining";
   /** Minutes arrondies annoncées (durée totale une fois lancé, en file) ; 0 = moins d'une minute ; null si en retard. */
   minutes: number | null;
+  /**
+   * Fourchette du même reste (ms), pour l'interface : la dispersion des derniers jobs du type
+   * (au moins 3), sinon large faute de mesure. null si en retard. Le libellé n'en dit rien (MCP).
+   */
+  lowMs: number | null;
+  highMs: number | null;
 };
 
 const MIN = 60_000;
@@ -44,6 +50,20 @@ const DEFAULT_MS: Record<string, number> = { qcm: 12 * MIN, exam: 15 * MIN, exer
 const DEFAULT_UNIT_MS: Record<string, number> = { qcm: 80_000, exam: 3 * MIN };
 /** Au-delà de la durée attendue × ce facteur, le job est « en retard » : plus d'estimation chiffrée. */
 const LATE_FACTOR = 1.25;
+/**
+ * Sans assez d'historique, la fourchette autour de l'attendu : les durées mesurées au banc varient
+ * du simple au double d'un cours à l'autre (examen écrit : 8 à 35 min).
+ */
+const DEFAULT_SPREAD: [number, number] = [0.6, 1.8];
+
+/** Facteurs bas et haut autour de la médiane, lus sur les derniers jobs (≥ 3), bornés pour rester utiles. */
+function spreadOf(history: number[]): [number, number] {
+  if (history.length < 3) return DEFAULT_SPREAD;
+  const m = median(history);
+  const low = Math.min(...history) / m;
+  const high = Math.max(...history) / m;
+  return [Math.min(0.9, Math.max(0.5, low)), Math.min(2.5, Math.max(1.15, high))];
+}
 
 function median(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
@@ -71,24 +91,26 @@ export function estimateRemaining(i: EtaInput): Eta {
       : units && DEFAULT_UNIT_MS[i.type] ? DEFAULT_UNIT_MS[i.type] * units : DEFAULT_MS[i.type] ?? 10 * MIN;
   const suffix = basis === "default" ? " (estimation sans historique)" : "";
   const progress = Math.min(100, Math.max(0, i.progress));
+  const [lowF, highF] = spreadOf(history);
+  const range = (ms: number) => ({ lowMs: Math.round(ms * lowF), highMs: Math.round(ms * highF) });
 
   if (i.status === "queued") {
     const once = Math.max(1, Math.round(expected / MIN));
-    return { remainingMs: expected, late: false, basis, label: `En file : environ ${once} min une fois lancé${suffix}`, kind: "queued", minutes: once };
+    return { remainingMs: expected, late: false, basis, label: `En file : environ ${once} min une fois lancé${suffix}`, kind: "queued", minutes: once, ...range(expected) };
   }
   // Repris après une coupure : le temps écoulé depuis le PREMIER départ ne dit plus rien ; la
   // reprise repart du dernier point sauvegardé, il reste la part non faite.
   if (i.attempts > 0) {
     const remaining = expected * (1 - progress / 100);
-    return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)} (reprise)${suffix}`, kind: "resumed", minutes: Math.round(remaining / MIN) };
+    return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)} (reprise)${suffix}`, kind: "resumed", minutes: Math.round(remaining / MIN), ...range(remaining) };
   }
   if (i.elapsedMs > expected * LATE_FACTOR && progress < 95) {
-    return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude, la génération continue", kind: "late", minutes: null };
+    return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude, la génération continue", kind: "late", minutes: null, lowMs: null, highMs: null };
   }
   // L'avancement peut être provisoirement haut avant que les contrôles ajoutent leurs lots de
   // reprise. Il ne doit donc jamais annoncer moins que le simple compte à rebours historique.
   // Les deux bornes décroissent à état constant ; seule l'ajout explicite d'un réessai peut faire
   // remonter la composante liée à l'avancement (lib/progress).
   const remaining = Math.max(expected * (1 - progress / 100), expected - i.elapsedMs, 0);
-  return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}`, kind: "remaining", minutes: Math.round(remaining / MIN) };
+  return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}`, kind: "remaining", minutes: Math.round(remaining / MIN), ...range(remaining) };
 }

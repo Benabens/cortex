@@ -1703,7 +1703,19 @@
     "stepFailed": "Échec",
     "shortfall": "{missing, plural, one {# question sur {requested} n’a pas pu être générée} other {# questions sur {requested} n’ont pas pu être générées}}",
     "shortfallBack": "{shortfall} : {credits} {back, plural, one {crédit rendu} other {crédits rendus}}",
-    "errorBack": "{error} ({credits} {back, plural, one {crédit rendu} other {crédits rendus}})."
+    "errorBack": "{error} ({credits} {back, plural, one {crédit rendu} other {crédits rendus}}).",
+    "stage": {
+      "read": "Lecture de tes documents",
+      "format": "Lecture du format d’examen",
+      "program": "Analyse du programme",
+      "plan": "Choix des notions à tester",
+      "write": "Rédaction des questions",
+      "check": "Vérification des questions",
+      "refill": "Remplacement des questions écartées",
+      "review": "Relecture finale",
+      "render": "Mise en page du PDF"
+    },
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {QCM prêts} lot {lots prêts} other {questions prêtes}}"
   },
   "order": {
     "product": {

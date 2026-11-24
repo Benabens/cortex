@@ -48,9 +48,15 @@ const credits = (centi: number) => centi / 100;
  * « generic » (interface) : l'étape générique, ou « La génération a échoué ». « raw » (connecteur
  * MCP) : la phrase d'origine, que le modèle reformule pour l'étudiant sans perdre le détail.
  */
+const JOB_RUNNING = ["running", "verifying", "compiling"];
+
 export function localizeJob(job: LocalizableJob, eta: Eta | null, locale: Locale, opts: { fallback?: "generic" | "raw" } = {}): LocalizedJobText {
-  if (locale === "fr") return { currentStep: job.currentStep, error: job.error, eta: eta?.label ?? null };
   const generic = (opts.fallback ?? "generic") === "generic";
+  if (locale === "fr") {
+    // L'interface montre l'étape lisible (lib/job-stage) ; le connecteur (« raw ») garde la phrase du moteur.
+    const stage = generic && job.stepInfo?.key === "stage" && JOB_RUNNING.includes(job.status) ? stageText(job.stepInfo, locale) : null;
+    return { currentStep: stage ?? job.currentStep, error: job.error, eta: eta?.label ?? null };
+  }
   return {
     currentStep: stepText(job, locale, generic),
     error: errorOf(job, locale, generic),
@@ -85,8 +91,6 @@ function stepText(job: LocalizableJob, locale: Locale, generic: boolean): string
     default: return t("jobText.stepFailed");
   }
 }
-
-const JOB_RUNNING = ["running", "verifying", "compiling"];
 
 /** L'étape lisible dans la langue du lecteur, avec son compteur (« Rédaction des questions · 4/7 prêtes »). */
 export function stageText(info: StageInfo, locale: Locale): string {

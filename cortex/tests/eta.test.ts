@@ -176,3 +176,23 @@ test("jobEta lit la taille de chaque commande dans la cible des jobs (count + op
     assert.equal(eta?.label, "≈ 20 min restantes");
   });
 });
+
+test("fourchette : large sans historique, lue sur la dispersion des derniers jobs, absente en retard", async () => {
+  const { estimateRemaining } = await import("../lib/eta");
+  const none = estimateRemaining({ type: "exam", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [] });
+  assert.ok(none.lowMs! < none.remainingMs! && none.remainingMs! < none.highMs!, JSON.stringify(none));
+  assert.ok(none.highMs! / none.lowMs! >= 2.5, "sans mesure, la fourchette ne fait pas semblant d'être précise");
+  // Trois jobs serrés autour de 10 min : fourchette serrée.
+  const tight = estimateRemaining({ type: "exam", status: "running", progress: 50, elapsedMs: 5 * MIN, attempts: 0, historyMs: [9.5 * MIN, 10 * MIN, 10.5 * MIN] });
+  assert.ok(tight.highMs! / tight.lowMs! < 1.6, JSON.stringify(tight));
+  assert.ok(tight.lowMs! <= tight.remainingMs! && tight.remainingMs! <= tight.highMs!);
+  // Dispersés (6 à 30 min) : fourchette large, bornée.
+  const wide = estimateRemaining({ type: "exam", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [6 * MIN, 12 * MIN, 30 * MIN] });
+  assert.ok(wide.highMs! <= 2.5 * wide.remainingMs! && wide.lowMs! >= 0.5 * wide.remainingMs!, JSON.stringify(wide));
+  // Le libellé du connecteur ne change pas.
+  assert.match(tight.label, /^≈ \d+ min restantes$/);
+  const late = estimateRemaining({ type: "exam", status: "running", progress: 30, elapsedMs: 60 * MIN, attempts: 0, historyMs: [10 * MIN, 10 * MIN, 10 * MIN] });
+  assert.equal(late.late, true);
+  assert.equal(late.lowMs, null);
+  assert.equal(late.highMs, null);
+});
