@@ -54,15 +54,20 @@ test("réessai après une coupure : estimé sur ce qui reste à faire, pas sur l
   assert.match(queued.label, /En file : environ 10 min une fois lancé/);
 });
 
-test("rendu du suivi : avancement, étape et temps restant", async () => {
-  const { JobProgress } = await import("../components/dashboard/JobProgress");
-  const html = renderIntl(createElement(JobProgress, { label: "qcm", progress: 50, queued: false, step: "Vérification à l'aveugle…", eta: "≈ 5 min restantes" }));
-  assert.match(html, /Génération en cours · qcm/);
-  assert.match(html, /50 %/);
-  assert.match(html, /≈ 5 min restantes/);
-  assert.match(html, /Vérification à l&#x27;aveugle…/);
-  const noEta = renderIntl(createElement(JobProgress, { label: "qcm", progress: 0, queued: true, step: null, eta: null }));
-  assert.match(noEta, /En file/);
+test("rendu du suivi (components/generation) : étape, barre, fourchette, file d'attente", async () => {
+  const { GenerationProgress } = await import("../components/generation/GenerationProgress");
+  const { CourseProvider } = await import("../lib/ux/api");
+  const job = { id: 1, type: "qcm", status: "running", progress: 50, currentStep: "Vérification des questions · 8/20 QCM prêts", resultPath: null, etaRange: { lowMs: 3 * MIN, highMs: 7 * MIN } };
+  const html = renderIntl(createElement(CourseProvider, null, createElement(GenerationProgress, { job })));
+  assert.match(html, /Vérification des questions · 8\/20 QCM prêts/);
+  assert.match(html, /Encore 3 à 7 min/);
+  assert.match(html, /aria-valuenow="50"/);
+  assert.match(html, /scaleX\(0\.5\)/);
+  const queued = renderIntl(createElement(CourseProvider, null, createElement(GenerationProgress, { job: { ...job, status: "queued", progress: 0, currentStep: null } })));
+  assert.match(queued, /En file d’attente/);
+  assert.match(queued, /3 à 7 min une fois lancée/);
+  const late = renderIntl(createElement(CourseProvider, null, createElement(GenerationProgress, { job: { ...job, etaRange: null, etaLate: true } })));
+  assert.match(late, /Plus long que d’habitude/);
 });
 
 test("jobEta lit l'historique du cours : durée des derniers jobs terminés du même type", async () => {
@@ -175,4 +180,24 @@ test("jobEta lit la taille de chaque commande dans la cible des jobs (count + op
     // 10 questions en 10 min → 1 min par question → 20 min pour 20 questions.
     assert.equal(eta?.label, "≈ 20 min restantes");
   });
+});
+
+test("fourchette : large sans historique, lue sur la dispersion des derniers jobs, absente en retard", async () => {
+  const { estimateRemaining } = await import("../lib/eta");
+  const none = estimateRemaining({ type: "exam", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [] });
+  assert.ok(none.lowMs! < none.remainingMs! && none.remainingMs! < none.highMs!, JSON.stringify(none));
+  assert.ok(none.highMs! / none.lowMs! >= 2.5, "sans mesure, la fourchette ne fait pas semblant d'être précise");
+  // Trois jobs serrés autour de 10 min : fourchette serrée.
+  const tight = estimateRemaining({ type: "exam", status: "running", progress: 50, elapsedMs: 5 * MIN, attempts: 0, historyMs: [9.5 * MIN, 10 * MIN, 10.5 * MIN] });
+  assert.ok(tight.highMs! / tight.lowMs! < 1.6, JSON.stringify(tight));
+  assert.ok(tight.lowMs! <= tight.remainingMs! && tight.remainingMs! <= tight.highMs!);
+  // Dispersés (6 à 30 min) : fourchette large, bornée.
+  const wide = estimateRemaining({ type: "exam", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [6 * MIN, 12 * MIN, 30 * MIN] });
+  assert.ok(wide.highMs! <= 2.5 * wide.remainingMs! && wide.lowMs! >= 0.5 * wide.remainingMs!, JSON.stringify(wide));
+  // Le libellé du connecteur ne change pas.
+  assert.match(tight.label, /^≈ \d+ min restantes$/);
+  const late = estimateRemaining({ type: "exam", status: "running", progress: 30, elapsedMs: 60 * MIN, attempts: 0, historyMs: [10 * MIN, 10 * MIN, 10 * MIN] });
+  assert.equal(late.late, true);
+  assert.equal(late.lowMs, null);
+  assert.equal(late.highMs, null);
 });

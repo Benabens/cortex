@@ -13,6 +13,7 @@ import path from "node:path";
 import { storage } from "@/lib/storage";
 import type { IngestReport } from "@/lib/ingest-report";
 import type { JobError, JobStepInfo } from "@/lib/i18n/job-text";
+import { stageTracker, type StageInfo } from "@/lib/job-stage";
 import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
 
 /**
@@ -25,7 +26,9 @@ export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done
  * « drill » et « check » : des aides (prix d'une aide) lancées par le connecteur, exécutées en job pour ne
  * pas faire attendre le client (lib/drill-job, lib/check-job).
  */
-export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill" | "check";
+export const JOB_TYPES = ["exam", "exercise", "ingest", "blueprint", "lab-exercise", "qcm", "format", "prepare", "drill", "check"] as const;
+export type JobType = (typeof JOB_TYPES)[number];
+export const isJobType = (s: unknown): s is JobType => typeof s === "string" && (JOB_TYPES as readonly string[]).includes(s);
 
 /** Aides du connecteur exécutées en job : file à part, sans fichiers du cours, jamais relancées par « réessayer ». */
 export const ASSIST_JOB_TYPES: readonly JobType[] = ["drill", "check"];
@@ -66,6 +69,16 @@ export async function createJob(type: JobType, target?: string): Promise<number>
     `INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`,
     type, target ?? null,
   );
+}
+
+/**
+ * Sérialise, dans la transaction en cours, les créations d'un même type de job dans un même cours.
+ * Sans verrou, deux transactions READ COMMITTED voient toutes deux « aucun job actif » et insèrent
+ * chacune le leur : 4 clics simultanés avaient lancé 3 examens identiques (audit generation-ux du
+ * 24/11). SQLite sérialise déjà les transactions (mutex par connexion). Le verrou tombe au COMMIT.
+ */
+async function lockJobCreation(type: JobType): Promise<void> {
+  if (dbDriverName() === "postgres") await q.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `cortex:job:${currentUser()}:${currentCourse()}:${type}`);
 }
 
 /**
@@ -128,6 +141,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   // transaction (deux POST concurrents pouvaient spawner 2 workers). Si un
   // autre job a été créé pendant la réservation, celle-ci est rendue.
   const res = await q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(activeSql, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(
@@ -152,6 +166,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
 export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
   return q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(`SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(
@@ -303,10 +318,29 @@ export async function heartbeatJob(id: number): Promise<void> {
 
 const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
 
+/**
+ * L'étape lisible de chaque phrase écrite par le worker (lib/job-stage). Un suivi par job, dans
+ * le process qui l'écrit : il garde l'étape et le compteur d'une phrase à l'autre. La promesse
+ * est mise en cache tout de suite, pour que des étapes émises sans await gardent leur ordre.
+ */
+const stageTrackers = new Map<number, Promise<((step: string) => StageInfo | null) | null>>();
+async function stageOf(id: number, step: string): Promise<StageInfo | null> {
+  let tracker = stageTrackers.get(id);
+  if (!tracker) {
+    // Le process web n'écrit que des étapes de service (annulation, reprise) : borne la mémoire.
+    if (stageTrackers.size > 200) stageTrackers.clear();
+    tracker = q.get<{ type: string }>(`SELECT type FROM jobs WHERE id = ?`, id).then((r) => (r ? stageTracker(r.type) : null)).catch(() => null);
+    stageTrackers.set(id, tracker);
+  }
+  const track = await tracker;
+  return track ? track(step) : null;
+}
+
 export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number; errorInfo: JobError; stepInfo: JobStepInfo | null }>): Promise<void> {
   const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid", errorInfo: "error_json", stepInfo: "step_json" };
-  // Une étape écrite sans sa forme sans langue efface la précédente : elle ne la décrit plus.
-  const fieldsWithStep = fields.currentStep !== undefined && !("stepInfo" in fields) ? { ...fields, stepInfo: null } : fields;
+  // Une étape écrite sans sa forme sans langue prend son étape lisible (lib/job-stage), sinon
+  // efface la précédente : elle ne la décrit plus.
+  const fieldsWithStep = fields.currentStep !== undefined && !("stepInfo" in fields) ? { ...fields, stepInfo: await stageOf(id, fields.currentStep) } : fields;
   const sets: string[] = [];
   const vals: (string | number | null)[] = [];
   for (const [k, v] of Object.entries(fieldsWithStep)) {
@@ -326,6 +360,7 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?${stillOpen}`, ...vals, id);
   // État terminal : la place « génération en cours » du compte est libérée, et celle de l'instance.
   if (finishing) {
+    stageTrackers.delete(id);
     const { releaseJob } = await import("@/lib/job-queue");
     await releaseJob(currentUser(), currentCourse(), id);
     try {
@@ -942,13 +977,26 @@ function orderedUnits(target: string | null): number | null {
 }
 
 /**
+ * Les générations en cours du cours courant (pastille de suivi, /api/jobs/running), sans les aides
+ * en job (drill, check) : lancées depuis un assistant, aucune page de l'app ne les montre.
+ */
+export async function listActiveJobs(limit = 4): Promise<Job[]> {
+  await ensureJobsSchema();
+  await reconcileStaleJobs();
+  const notAssist = ASSIST_JOB_TYPES.map(() => "?").join(",");
+  return (await q.all<JobRow>(`SELECT * FROM jobs WHERE status IN ${ACTIVE_STATES} AND type NOT IN (${notAssist}) ORDER BY id DESC LIMIT ?`, ...ASSIST_JOB_TYPES, limit)).map(rowToJob);
+}
+
+/**
  * Le job actif le plus récent (pour réafficher la progression au reload). Sans type : les
  * générations du cours, sans les aides en job (drill) — ni bandeau de l'Accueil, ni attente.
  */
 export async function activeJob(type?: JobType): Promise<Job | null> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  const where = type ? `AND type = '${type}'` : `AND type NOT IN (${ASSIST_JOB_TYPES.map((t) => `'${t}'`).join(",")})`;
-  const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`);
+  // Paramétré : `type` vient parfois d'une requête (GET /api/jobs?type=), une valeur collée dans
+  // le SQL lisait n'importe quel job, et en Postgres les tables des autres schémas.
+  const where = type ? `AND type = ?` : `AND type NOT IN (${ASSIST_JOB_TYPES.map(() => "?").join(",")})`;
+  const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`, ...(type ? [type] : ASSIST_JOB_TYPES));
   return r ? rowToJob(r) : null;
 }

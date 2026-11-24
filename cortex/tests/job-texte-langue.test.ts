@@ -3,7 +3,8 @@
  * est traduite (#150), mais l'étape, le temps restant et l'erreur d'un job sont des phrases
  * françaises écrites par le worker, renvoyées telles quelles : un étudiant anglophone suivait
  * son examen avec « En file : environ 12 min une fois lancé » et lisait son échec en français.
- * Un lecteur français garde les phrases détaillées du worker, inchangées.
+ * Un lecteur français garde les phrases détaillées du worker, sauf pendant la génération : l'interface
+ * montre alors l'étape lisible (lib/job-stage), le connecteur garde la phrase du moteur.
  */
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
@@ -134,11 +135,33 @@ test("une étape écrite sans forme sans langue efface la précédente : jamais 
 test("reprise automatique, temps restant sans historique : phrases anglaises", async () => {
   const { localizeJob } = await import("../lib/i18n/job-text");
   const job = { type: "qcm", status: "queued", currentStep: "Worker interrompu, reprise automatique (tentative 2/2), progression conservée.", error: null, stepInfo: { key: "resumed" as const, attempt: 2, max: 2 } };
-  const eta = { remainingMs: 300_000, late: false, basis: "default" as const, label: "≈ 5 min restantes (reprise) (estimation sans historique)", kind: "resumed" as const, minutes: 5 };
+  const eta = { remainingMs: 300_000, late: false, basis: "default" as const, label: "≈ 5 min restantes (reprise) (estimation sans historique)", kind: "resumed" as const, minutes: 5, lowMs: 180_000, highMs: 540_000 };
   assert.deepEqual(localizeJob(job, eta, "en"), {
     currentStep: "Worker interrupted, resuming automatically (attempt 2/2), progress kept.",
     error: null,
     eta: "≈ 5 min left (resumed) (estimate without history)",
   });
   assert.deepEqual(localizeJob(job, eta, "fr"), { currentStep: job.currentStep, error: null, eta: eta.label });
+});
+
+test("pendant la génération : l'étape lisible dans les deux langues, la phrase du moteur pour le connecteur", async () => {
+  const jobs = await import("../lib/jobs");
+  const engine = "Génération de 4 QCM (architecte · moules + idées fausses)…";
+  const id = await inCourse(async () => {
+    const id = await jobs.createJob("qcm");
+    await jobs.setJob(id, { status: "running", currentStep: "8/20 QCM construits + vérifiés…", progress: 40 });
+    await jobs.setJob(id, { currentStep: engine });
+    return id;
+  });
+  const fr = await readJob(id, "fr");
+  assert.equal(fr.currentStep, "Rédaction des questions · 8/20 QCM prêts");
+  const en = await readJob(id, "en");
+  assert.equal(en.currentStep, "Writing the questions · 8/20 MCQs ready");
+  const { localizeJob } = await import("../lib/i18n/job-text");
+  const job = (await inCourse(() => jobs.getJob(id)))!;
+  assert.equal(localizeJob(job, null, "en", { fallback: "raw" }).currentStep, engine);
+  assert.equal(localizeJob(job, null, "fr", { fallback: "raw" }).currentStep, engine);
+  // Fini : la phrase de fin, plus l'étape.
+  await inCourse(() => jobs.setJob(id, { status: "done", progress: 100, ...jobs.doneStep(null) }));
+  assert.equal((await readJob(id, "fr")).currentStep, "Terminé ✓");
 });

@@ -7,8 +7,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
-import { WeightBar } from "@/components/viz/WeightBar";
-import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineCode, engineDown } from "@/lib/ux/api";
+import { GenerationProgress } from "@/components/generation/GenerationProgress";
+import { useJobError } from "@/components/generation/useJobError";
+import { notifyJobStarted } from "@/lib/ux/generation-tracker";
+import { apiPost, useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, asText, type ApiError, engineCode, engineDown } from "@/lib/ux/api";
 import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
@@ -42,8 +44,8 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   const t = useTranslations("examComposer");
   const to = useTranslations("examOutput");
   const apiT = useTranslations("api");
-  const commonT = useTranslations("common");
   const { courseId, course } = useCourse();
+  const jobError = useJobError();
   const isQcm = plan.kind === "qcm";
   const q = plan as PlanQcm;
   const unit = plan.kind === "exam" ? plan.unit ?? "exercice" : "exercice";
@@ -63,6 +65,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   const [launching, setLaunching] = useState(false);
   const [genError, setGenError] = useState<{ message: string; command?: string; paywall?: boolean; code?: string | null } | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
+  const [canceledMsg, setCanceledMsg] = useState<string | null>(null);
   const [doneHref, setDoneHref] = useState<string | null>(null);
   // Sur le site ou en PDF : le même examen, au même prix (le PDF est compilé à la génération).
   const [output, chooseOutput] = useExamOutput();
@@ -85,8 +88,13 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     setJobId(null);
     setGenError(null);
     setDoneMsg(null);
+    setCanceledMsg(null);
     setDoneHref(null);
     notified.current = false;
+    // Une génération lancée avant (autre onglet, page quittée, rechargement) : son suivi reprend ici.
+    let alive = true;
+    if (courseId) void findActiveJob(courseId, [isQcm ? "qcm" : "exam"]).then((j) => { if (alive && j) setJobId(j.id); });
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, plan.kind]);
 
@@ -95,8 +103,11 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
     setJobId(null);
-    if (job.status === "error" || job.status === "failed") {
-      setGenError({ message: asText(job.error) ?? t("generationFailed") });
+    const end = jobEnd(job.status);
+    if (end === "failed") {
+      setGenError({ message: jobError(job.error) ?? t("generationFailed") });
+    } else if (end === "canceled") {
+      setCanceledMsg(t("canceled"));
     } else {
       // Examen incomplet : le worker termine son étape par « ⚠ <n questions manquantes, crédits rendus> ».
       const step = asText(job.currentStep) ?? "";
@@ -107,7 +118,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
       setDoneHref(examHref(job.resultPath, output, courseId));
       onGenerated();
     }
-  }, [job, onGenerated, output, courseId, t]);
+  }, [job, onGenerated, output, courseId, t, jobError]);
 
   const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
   // Même verdict que la route de génération, pour la composition affichée.
@@ -119,6 +130,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     if (running) return;
     setGenError(null);
     setDoneMsg(null);
+    setCanceledMsg(null);
     setDoneHref(null);
     notified.current = false;
     if (isQcm && nQcm === 0 && nOpen === 0) {
@@ -132,6 +144,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
         ? await apiPost<{ ok: boolean; jobId: number }>("/api/qcm/generate", courseId, { count: nQcm, openCount: nOpen, focus: foc }, (status) => apiT("httpError", { status }))
         : await apiPost<{ ok: boolean; jobId: number }>("/api/exams/generate", courseId, { count: nExos, focus: foc }, (status) => apiT("httpError", { status }));
       setJobId(d.jobId);
+      notifyJobStarted();
     } catch (e) {
       const err = e as ApiError & { command?: string };
       setGenError({
@@ -235,23 +248,18 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             : to("siteHint")}
         </p>
 
-        {/* progression du job */}
-        {running && job && (
-          <div className="mt-4 rounded-lg border border-line bg-surface-2/30 px-4 py-3" aria-live="polite">
-            <div className="mb-2 flex items-center justify-between text-[0.8rem]">
-              <span className="text-ink-2">{job.status === "queued" ? t("queued") : asText(job.currentStep) ?? t("running")}</span>
-              <span className="font-data font-semibold text-ink-1">{job.status === "queued" ? "" : commonT("percent", { value: job.progress })}</span>
-            </div>
-            <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={6} />
-          </div>
-        )}
+        {/* suivi de la génération (composant unique, components/generation) */}
+        {running && <GenerationProgress job={job} className="mt-5" />}
 
-        {/* action unique */}
+        {/* action unique, remplacée par le suivi pendant la génération */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
-          <Button variant="primary" onClick={generate} loading={running} disabled={!running && !launch.allowed}>
-            {!running && <Play className="size-4" strokeWidth={2.5} fill="currentColor" />}
-            {running ? t("generating") : t("generate")}
-          </Button>
+          {!running && (
+            <Button variant="primary" onClick={generate} disabled={!launch.allowed}>
+              <Play className="size-4" strokeWidth={2.5} fill="currentColor" />
+              {genError && !genError.paywall ? t("retry") : t("generate")}
+            </Button>
+          )}
+          {canceledMsg && <span className="text-[0.82rem] text-ink-2" aria-live="polite">{canceledMsg}</span>}
           {doneMsg && (
             <span className="inline-flex items-center gap-1.5 text-[0.82rem] text-emerald-hi" aria-live="polite">
               <Check className="size-4" strokeWidth={2.5} /> {doneMsg}

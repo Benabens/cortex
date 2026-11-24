@@ -22,8 +22,10 @@ import { Button } from "@/components/ui/Button";
 import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { MathText } from "@/components/ui/MathText";
-import { WeightBar } from "@/components/viz/WeightBar";
-import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
+import { GenerationProgress, GenerationWait } from "@/components/generation/GenerationProgress";
+import { useJobError } from "@/components/generation/useJobError";
+import { notifyJobStarted } from "@/lib/ux/generation-tracker";
+import { apiPost, useApi, useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, type ApiError, engineDown } from "@/lib/ux/api";
 import {
   FEEDBACK_OPTIONS,
   examLinkFromResultPath,
@@ -45,7 +47,6 @@ import { useTranslations } from "use-intl/react";
 export function TrainingStudio() {
   const t = useTranslations("trainingStudio");
   const apiT = useTranslations("api");
-  const commonT = useTranslations("common");
   const { courseId, course } = useCourse();
   const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   const list = useApi<DrillListResp>("/api/drill");
@@ -56,15 +57,19 @@ export function TrainingStudio() {
 
   const [drill, setDrill] = useState<Drill | null>(null);
   const [drilling, setDrilling] = useState(false);
+  const [drillStartedAt, setDrillStartedAt] = useState(0);
   const [shownHints, setShownHints] = useState(0);
   const [showSolution, setShowSolution] = useState(false);
 
   const [jobId, setJobId] = useState<number | null>(null);
   const [launching, setLaunching] = useState(false);
   const job = useJob(jobId);
+  const jobError = useJobError();
   const jobRunning = launching || (job != null && JOB_ACTIVE.includes(job.status));
-  const jobDone = job != null && !JOB_ACTIVE.includes(job.status) && job.status !== "error" && job.status !== "failed";
-  const jobFailed = job != null && (job.status === "error" || job.status === "failed");
+  // Un exercice annulé n'est ni prêt ni en échec : le panneau revient à son état d'avant.
+  const end = job ? jobEnd(job.status) : null;
+  const jobDone = end === "done";
+  const jobFailed = end === "failed";
 
   const [error, setError] = useState<{ offline: boolean; message: string } | null>(null);
   const [fbSent, setFbSent] = useState<string | null>(null);
@@ -82,6 +87,10 @@ export function TrainingStudio() {
   // l'input ici écraserait le pré-remplissage ?prefill= (déposé au montage). Le × / l'édition suffisent.
   useEffect(() => {
     setDrill(null); setJobId(null); setError(null); setFbSent(null); setFbError(null); setShownHints(0); setShowSolution(false);
+    // Un exercice lancé avant (page quittée, rechargement) : son suivi reprend ici.
+    let alive = true;
+    if (courseId) void findActiveJob(courseId, ["exercise"]).then((j) => { if (alive && j) setJobId(j.id); });
+    return () => { alive = false; };
   }, [courseId]);
 
   // Deep-link ?prefill=<concept> (bouton « S'entraîner » des Faiblesses ; legacy ?drill= toléré).
@@ -104,6 +113,7 @@ export function TrainingStudio() {
     setError(null); setDrill(null); setJobId(null); setFbSent(null); setFbError(null);
     setShownHints(0); setShowSolution(false);
     setDrilling(true);
+    setDrillStartedAt(Date.now());
     try {
       const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen }, (status) => apiT("httpError", { status }));
       setDrill(d.drill);
@@ -132,6 +142,7 @@ export function TrainingStudio() {
       const d = await res.json().catch(() => null);
       if (!res.ok) throw { status: res.status, message: d?.error ?? apiT("httpError", { status: res.status }), code: typeof d?.code === "string" ? d.code : null, params: d?.params } as ApiError;
       setJobId(d.jobId);
+      notifyJobStarted();
     } catch (e) {
       const err = e as ApiError;
       setError({
@@ -307,19 +318,19 @@ export function TrainingStudio() {
             </div>
             <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
           </>
-        ) : waiting ? (
-          <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
-            <p className="text-[0.9rem] font-medium text-ink-1">{t("generatingExercise")}</p>
-            <div className="skeleton h-4 w-11/12" />
-            <div className="skeleton h-4 w-4/5" />
-            <div className="skeleton h-4 w-2/3" />
+        ) : drilling ? (
+          // Un seul appel au modèle, sans étapes à compter : ce qui se passe et la durée habituelle.
+          <div className="flex flex-1 flex-col justify-center gap-4">
+            <GenerationWait kind="drill" startedAt={drillStartedAt} />
+            <div className="flex flex-col gap-3" aria-hidden="true">
+              <div className="skeleton h-4 w-11/12" />
+              <div className="skeleton h-4 w-4/5" />
+              <div className="skeleton h-4 w-2/3" />
+            </div>
           </div>
-        ) : jobRunning && job ? (
-          <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
-            <p className="text-[0.9rem] font-medium text-ink-1">{job.status === "queued" ? t("queued") : t("generatingExercise")}</p>
-            {asText(job.currentStep) && <p className="text-[0.82rem] text-ink-3">{asText(job.currentStep)}</p>}
-            <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={6} />
-            <p className="font-data text-[0.82rem] font-semibold text-ink-2">{job.status === "queued" ? "" : commonT("percent", { value: job.progress })}</p>
+        ) : waiting || (jobRunning && job) ? (
+          <div className="flex flex-1 flex-col justify-center">
+            <GenerationProgress job={job} meanwhile={false} />
           </div>
         ) : jobDone ? (
           <>
@@ -343,7 +354,7 @@ export function TrainingStudio() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle className="size-6 text-danger-hi" strokeWidth={2} />
             <p className="text-[0.9rem] font-medium text-ink-1">{t("failedTitle")}</p>
-            <p role="alert" className="max-w-xs text-sm text-ink-3">{asText(job?.error) ?? t("failedHint")}</p>
+            <p role="alert" className="max-w-xs text-sm text-ink-3">{jobError(job?.error) ?? t("failedHint")}</p>
             <Button variant="secondary" onClick={submit}>{t("retryGeneration")}</Button>
           </div>
         ) : null}

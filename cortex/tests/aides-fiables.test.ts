@@ -24,7 +24,8 @@ const ENV: Record<string, string> = {
   DAILY_ASSIST_QUOTA: "unlimited", RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited",
   // Aucune place pour un worker détaché : le job drill reste en file et le test l'exécute lui-même.
   MAX_GLOBAL_ASSIST_JOBS: "0",
-  LLM_PROVIDER: "openai-compatible", LLM_API_KEY: "test", LLM_MODEL_OPUS: "claude-sonnet-5", LLM_MAX_RETRIES: "0",
+  // Relecture de check_answer coupée : ces tests rejouent une file de réponses dans l'ordre (relecture : tests/aides-relecture).
+  CORTEX_CHECK_REVIEW: "0", LLM_PROVIDER: "openai-compatible", LLM_API_KEY: "test", LLM_MODEL_OPUS: "claude-sonnet-5", LLM_MAX_RETRIES: "0",
 };
 Object.assign(process.env, ENV);
 

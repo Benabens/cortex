@@ -39,6 +39,10 @@ let trivialEvery = 3;
 let contestedEvery = 5;
 /** Verdict « clé fausse » de l'audit final, par énoncé (vide : tout passe). */
 let auditRejects: (stem: string, call: number) => boolean = () => false;
+/** Énoncé réparé que rend l'audit final pour une clé refusée (hypothèse écrite), par énoncé. */
+let auditFix: (stem: string) => string | undefined = () => undefined;
+/** Prompts de la revue finale. */
+const reviewPrompts: string[] = [];
 /** L'audit final répond hors format (aucun verdict lisible). */
 let auditUnreadable = false;
 /** Paires en doublon rendues par le contrôle de fin d'examen, par appel. */
@@ -100,7 +104,7 @@ function repair(prompt: string): string {
 
 function audit(prompt: string): string {
   return JSON.stringify({ verdicts: blocks(prompt).map(({ index, body }) => ({
-    index, key: !auditRejects(body, calls.audit), offCourse: false,
+    index, key: !auditRejects(body, calls.audit), offCourse: false, ...(auditRejects(body, calls.audit) && auditFix(body) ? { fix: auditFix(body) } : {}),
     trivial: [...body.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => m[2].startsWith(TRIVIAL) || m[2].startsWith(RESIDUE)).map((m) => Number(m[1])),
   })) });
 }
@@ -125,6 +129,7 @@ before(async () => {
       else if (/"duplicates"/.test(content) && /"offCourse"/.test(content)) {
         // Revue finale : audit et doublons dans le même appel.
         calls.review++;
+        reviewPrompts.push(content);
         auditedStems.push(blocks(content).map((b) => b.body.split("\n")[0]));
         const verdicts = auditUnreadable ? "ok" : (JSON.parse(audit(content)) as { verdicts: unknown }).verdicts;
         text = JSON.stringify({ verdicts, notions: [], duplicates: dedupe(calls.review, content), repeats: [] });
@@ -146,14 +151,15 @@ before(async () => {
 
 beforeEach(() => {
   designed = 0; trivialEvery = 3; contestedEvery = 5; residueEvery = 0; mismatchEvery = 0; repaired = 0;
-  auditRejects = () => false; auditUnreadable = false; dedupe = () => [];
+  auditRejects = () => false; auditUnreadable = false; dedupe = () => []; auditFix = () => undefined; reviewPrompts.length = 0;
+  delete process.env.CORTEX_VERIFY_V2;
   for (const k of Object.keys(calls) as (keyof typeof calls)[]) calls[k] = 0;
   auditedStems.length = 0;
 });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER", "CORTEX_VERIFY_V2"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -251,4 +257,42 @@ test("HUM-285 simulé (20 QCM, banc du 15/11) : au plus 8 appels, 20/20 livrées
   assert.ok(total() <= 8, `appels par examen de 20 QCM : ${detail}`);
   // Le distracteur qui déforme une définition fait son rôle : pas de second regard pour lui.
   assert.equal(calls.secondLook, 0, detail);
+});
+
+test("audit final : clé juste sous une hypothèse non écrite → énoncé réparé, livré seulement s'il est confirmé à l'aveugle", async (t) => {
+  // Banc du 23/11/2026 (QCM ML, Opus 5.5) : clés justes « selon le cours » mais pas uniques pour un
+  // expert (norme L1/L2 non dite, λ non chiffré). La revue réécrit l'énoncé avec l'hypothèse ;
+  // la résolution à l'aveugle doit retrouver la clé, sinon la question part comme avant.
+  process.env.CORTEX_VERIFY_V2 = "1";
+  contestedEvery = 0; trivialEvery = 0;
+  auditRejects = (stem) => /Question (4|9) /.test(stem) && !/hypothèse écrite/.test(stem);
+  auditFix = (stem) => {
+    const head = /Question (\d+) : [^\n]*/.exec(stem)?.[0] ?? "";
+    // Question 9 : la réécriture change la question (la résolution trouve une autre option).
+    return /Question 9 /.test(head) ? `${head} (hypothèse écrite : vecteurs normalisés en norme L2) (variante B)` : `${head} (hypothèse écrite : vecteurs normalisés en norme L2)`;
+  };
+  const { r, items } = await exam(15);
+  t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)} → ${total()} appels`);
+  assert.match(reviewPrompts[0] ?? "", /expert de la matière qui n'a pas suivi ce cours/, "l'audit juge aussi hors du cours");
+  assert.equal(r.count, 15, JSON.stringify(calls));
+  const q4 = items.filter((it) => /Question 4 /.test(it.stem));
+  assert.equal(q4.length, 1, "la question 4 réparée est livrée");
+  assert.match(q4[0].stem, /hypothèse écrite/, "sous son énoncé réparé");
+  assert.ok(!items.some((it) => /Question 9 /.test(it.stem)), "une réparation que la résolution à l'aveugle contredit n'est jamais livrée");
+  assert.ok(!items.some((it) => /Question 4 /.test(it.stem) && !/hypothèse écrite/.test(it.stem)), "l'énoncé d'origine ne revient pas en réserve");
+});
+
+test("interrupteur : sans CORTEX_VERIFY_V2, l'audit final reste celui d'avant — ni règle d'expert, ni énoncé réparé", async (t) => {
+  contestedEvery = 0; trivialEvery = 0;
+  auditRejects = (stem) => /Question 4 /.test(stem) && !/hypothèse écrite/.test(stem);
+  auditFix = (stem) => `${/Question (\d+) : [^\n]*/.exec(stem)?.[0] ?? ""} (hypothèse écrite : vecteurs normalisés en norme L2)`;
+  const { r, items } = await exam(15);
+  t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)}`);
+  assert.ok(reviewPrompts.length > 0);
+  for (const p of reviewPrompts) {
+    assert.doesNotMatch(p, /expert de la matière qui n'a pas suivi ce cours/);
+    assert.doesNotMatch(p, /"fix"/, "le schéma n'offre pas de champ « fix »");
+  }
+  assert.ok(!items.some((it) => /hypothèse écrite/.test(it.stem)), "aucun énoncé réparé par l'audit n'est livré");
+  assert.ok(!items.some((it) => /Question 4 /.test(it.stem)), "la clé refusée est écartée, comme avant");
 });

@@ -45,7 +45,9 @@ const CHECK = {
 
 let server: http.Server;
 let reply = JSON.stringify(DRILL);
-const bodies: Array<{ model: string; max_tokens: number; output_config?: { effort?: string } }> = [];
+const bodies: Array<{ model: string; max_tokens: number; output_config?: { effort?: string }; messages?: { content: unknown }[] }> = [];
+/** Appel de correction (hors relecture, lib/assist-review) parmi les appels reçus. */
+const grading = () => bodies.filter((b) => /VOICI LA QUESTION D'EXAMEN/.test(JSON.stringify(b.messages ?? [])) && !/CONTRÔLE D'UNE PREMIÈRE CORRECTION/.test(JSON.stringify(b.messages ?? [])));
 
 function sse(res: http.ServerResponse, text: string) {
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -125,14 +127,16 @@ test("une correction (check_answer) part sur claude-opus-5-5 à l'effort haut, a
   const { checkSolution } = await import("../lib/check-solution");
   const r = await asAssist(() => checkSolution({ statement: "<p>Kruskal sur 4 sommets.</p>", answer: "(a,b) puis (b,c)." }));
   assert.equal(r.verdict, "partial");
-  assert.equal(bodies.length, 1);
-  assert.equal(bodies[0].model, "claude-opus-5-5", "corriger une réponse : Opus");
-  assert.equal(bodies[0].output_config?.effort, "high");
+  assert.equal(grading().length, 1);
+  assert.equal(grading()[0].model, "claude-opus-5-5", "corriger une réponse : Opus");
+  assert.equal(grading()[0].output_config?.effort, "high");
+  // Relecture (re-résolution sans la réponse, comparaison) : Opus aussi, à l'effort moyen.
+  assert.ok(bodies.length > 1 && bodies.every((b) => b.model === "claude-opus-5-5"), JSON.stringify(bodies.map((b) => b.model)));
   bodies.length = 0;
   process.env.LLM_ALLOW_OPUS = "1";
   try {
     await asAssist(() => checkSolution({ statement: "<p>Kruskal sur 4 sommets.</p>", answer: "(a,b) puis (b,c)." }));
-    assert.equal(bodies[0].model, "claude-opus-5-5");
+    assert.equal(grading()[0].model, "claude-opus-5-5");
   } finally { process.env.LLM_ALLOW_OPUS = "assist"; }
 });
 

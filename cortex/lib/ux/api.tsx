@@ -196,7 +196,7 @@ function apiErrorFromBody(status: number, fallback: string, body: ApiErrorBody |
   };
 }
 
-function withCourse(path: string, courseId: string): string {
+export function withCourse(path: string, courseId: string): string {
   return `${path}${path.includes("?") ? "&" : "?"}course=${encodeURIComponent(courseId)}`;
 }
 
@@ -318,8 +318,21 @@ export function asText(v: unknown): string | null {
 
 /* -------------------------------------------------------------------- jobs */
 
+/**
+ * Le job actif le plus récent du cours parmi ces types (GET /api/jobs?type=) : une génération
+ * lancée avant (page quittée, rechargement, autre onglet) dont la page reprend le suivi.
+ */
+export async function findActiveJob(courseId: string, types: readonly string[]): Promise<{ id: number; type: string } | null> {
+  const found = await Promise.all(types.map((type) =>
+    fetch(withCourse(`/api/jobs?type=${encodeURIComponent(type)}`, courseId))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { active?: { id: number; type: string } | null } | null) => d?.active ?? null)
+      .catch(() => null)));
+  return found.filter((j) => j !== null).sort((a, b) => b.id - a.id)[0] ?? null;
+}
+
 export type { Job } from "./job-status";
-export { JOB_ACTIVE } from "./job-status";
+export { JOB_ACTIVE, jobEnd, type JobEnd } from "./job-status";
 
 /**
  * État d'un job, via le sondeur PARTAGÉ (lib/ux/job-watch) : un seul appel par

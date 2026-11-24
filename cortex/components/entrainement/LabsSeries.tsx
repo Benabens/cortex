@@ -6,8 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import { FlaskConical, Sparkles, ExternalLink, AlertTriangle, RotateCw } from "lucide-react";
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
-import { WeightBar } from "@/components/viz/WeightBar";
-import { useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
+import { GenerationProgress } from "@/components/generation/GenerationProgress";
+import { useApi, useCourse, useJob, JOB_ACTIVE, jobEnd, type ApiError, engineDown } from "@/lib/ux/api";
+import { useJobError } from "@/components/generation/useJobError";
 import { examLinkFromResultPath, type LabsResp } from "@/lib/ux/training";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { useTranslations } from "use-intl/react";
@@ -26,6 +27,7 @@ export function LabsSeries() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
   const job = useJob(jobId);
+  const jobError = useJobError();
   const running = jobId != null && (!job || JOB_ACTIVE.includes(job.status));
   const notified = useRef(false);
   // Même verdict que POST /api/labs/generate, pour tous les boutons « Générer » de la série.
@@ -36,14 +38,18 @@ export function LabsSeries() {
   useEffect(() => {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
-    if (job.status === "error" || job.status === "failed") {
-      setGenError(asText(job.error) ?? t("jobFailed"));
+    const end = jobEnd(job.status);
+    if (end === "failed") {
+      setGenError(jobError(job.error) ?? t("jobFailed"));
+      setJobId(null);
+      setActiveLab(null);
+    } else if (end === "canceled") {
       setJobId(null);
       setActiveLab(null);
     } else {
       refetch();
     }
-  }, [job, refetch, t]);
+  }, [job, refetch, t, jobError]);
 
   const generate = async (labId: string) => {
     if (running) return;
@@ -131,14 +137,7 @@ export function LabsSeries() {
                     {t("generate")}
                   </Button>
                 </div>
-                {isActive && running && job && (
-                  <div aria-live="polite">
-                    <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={5} />
-                    {asText(job.currentStep) && (
-                      <p className="mt-1.5 text-[0.74rem] text-ink-3">{asText(job.currentStep)}</p>
-                    )}
-                  </div>
-                )}
+                {isActive && running && <GenerationProgress job={job} meanwhile={false} />}
                 {isActive && doneLink && (
                   <a
                     href={doneLink}

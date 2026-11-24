@@ -1,6 +1,10 @@
+import { billingEnabled } from "@/lib/billing/credits";
+import { isOwner } from "@/lib/billing/owner";
+import { etaFields } from "@/lib/eta";
 import { apiError, requestLocale } from "@/lib/i18n/api-error";
 import { localizeJob } from "@/lib/i18n/job-text";
 import { cancelJob, getJob, jobEta } from "@/lib/jobs";
+import { JOB_ACTIVE } from "@/lib/ux/job-status";
 import { redactMessage } from "@/lib/observability";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -25,7 +29,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     error: job.error ? redactMessage(job.error) : job.error,
     currentStep: job.currentStep ? redactMessage(job.currentStep) : job.currentStep,
   };
-  return NextResponse.json({ ...redacted, ...localizeJob(redacted, eta, requestLocale(req)) });
+  // Le suivi dit ce qu'une annulation rend : sans facturation, ou pour le propriétaire, rien n'est
+  // débité, on ne lui promet pas de crédits. Lu seulement tant que le job tourne (bouton Annuler).
+  const charged = JOB_ACTIVE.includes(job.status) ? billingEnabled() && !(await isOwner()) : undefined;
+  // La fourchette du temps restant (lib/eta) : la barre de suivi l'affiche, le libellé reste celui d'avant.
+  return NextResponse.json({ ...redacted, ...localizeJob(redacted, eta, requestLocale(req)), ...etaFields(eta), charged });
 }
 
 /** Annulation (alias historique de /cancel) : tue réellement le worker et ses enfants. */

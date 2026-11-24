@@ -64,12 +64,22 @@ before(async () => {
         text = JSON.stringify({
           // Juge muet : aucun verdict rendu.
           verdicts: /SILENT/.test(content) ? [] : verdicts,
-          off_course: "",
-          definition_mismatch: /NARROW/.test(content) ? "feedback loop : la question la réduit aux boucles positives ; le cours : renforçante OU équilibrante" : "",
+          // Banc rs-composite (22/11 et 23/11) : le juge rend ces deux champs en TABLEAU, une entrée par
+          // sous-question, vide (« options: [] ») quand il n'a rien relevé.
+          off_course: /OFFLIST/.test(content) ? [{ index: 1, notion: "Schwartz value coexistence is defined in none of the extracts" }]
+            : /EMPTYLIST/.test(content) ? [{ index: 0, options: [] }, { index: 1, notes: "" }] : "",
+          definition_mismatch: /NARROW/.test(content) ? "feedback loop : la question la réduit aux boucles positives ; le cours : renforçante OU équilibrante"
+            : /MISLIST/.test(content) ? [{ index: 0, issue: "reinforcing loop only; the course: reinforcing OR balancing" }]
+            : /EMPTYLIST/.test(content) ? [{ index: 0, options: [] }] : "",
           // Banc du 04/11 (CS-290 composite) : le juge a rendu les options en CHAÎNE, l'examen entier plantait.
-          trivial_distractors: /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse" }]
+          trivial_distractors: /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse", tell: "longueur" }]
             // Banc rs-composite du 22/11 : le juge nomme les options par leur LETTRE dans l'ordre mélangé.
-            : /TRIVIAL/.test(content) && /^ {2}B\. /m.test(content) ? [{ index: 0, options: ["B"] }] : [],
+            : /TRIVIAL/.test(content) && /^ {2}B\. /m.test(content) ? [{ index: 0, options: ["B"], tell: "contredit_enonce" }]
+            // Banc rs-composite du 23/11 : une notion sœur de la typologie signalée sans marqueur qui la trahisse.
+            : /TELLESS/.test(content) ? [{ index: 0, options: ["B", "C"] }, { index: 0, options: ["D"], tell: "plausible sans le cours" }]
+            // Run du 24/11 (claude-code, schéma non imposé) : le marqueur rangé DANS chaque option.
+            : /TELLOBJ/.test(content) ? [{ index: 0, options: [{ option: "B", tell: "contredit_enonce : the scenario says the post IS flagged" }] }]
+            : /TELLSTR/.test(content) ? [{ index: 0, options: ["C: hors_sujet (sentiment score, another chapter)", "D: absolu/contredit_enonce (« guarantees »)"] }] : [],
         });
       } else if (/"parts"/.test(content) && /"scenario"/.test(content)) {
         prompts.push(content);
@@ -663,4 +673,80 @@ test("C × distracteurs éliminables (banc rs-composite 22/11, 68 choix uniques 
   // Consigne de génération des options : les défauts relevés par le juge sur le corpus réel.
   const system = prompts[0];
   for (const rule of [/autre chapitre/, /contredit jamais un fait/, /critère/, /absolu/]) assert.match(system, rule);
+});
+
+test("C × hors cours en tableau (banc rs-composite : 100 % des verdicts réels) : la notion relevée rejette le bloc, une entrée vide ne rejette rien", async () => {
+  // d8c07f17 (22/11) : un bloc livré alors que le juge écrivait « taxonomie absente des extraits » ;
+  // off_course et definition_mismatch n'étaient lus qu'en chaîne, jamais en tableau.
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")], "OFFLIST: a robot in a corridor."), block("A2", [scq("A2"), short("A2"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")], "MISLIST: a filter."), block("B2", [scq("B2"), short("B2"), code("[1, 2]")])],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")], "EMPTYLIST: a feed.")],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  assert.ok(steps.some((s) => /rejetée : hors cours : \(b\) Schwartz value coexistence/.test(s)), steps.join("\n"));
+  assert.ok(steps.some((s) => /rejetée : définition différente du cours : \(a\) reinforcing loop only/.test(s)), steps.join("\n"));
+  assert.ok(!steps.some((s) => /Question composée \d rejetée[^\n]*(hors cours|définition différente) : $/.test(s)), steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id)))!;
+  assert.ok(!exam.blocks.some((b) => /OFFLIST|MISLIST/.test(b.scenario)), "un bloc relevé hors cours n'est pas livré");
+  assert.ok(exam.blocks.some((b) => /EMPTYLIST/.test(b.scenario)), "une entrée vide ne rejette rien");
+});
+
+test("C × distracteurs éliminables (banc rs-composite 23/11, Q1-Q3) : seul un marqueur concret rejette, et la relance dit comment le corriger", async () => {
+  // c519f840 : 12 rejets sur 15 de Q1-Q3 pour des distracteurs « éliminables » ; les mêmes étiquettes
+  // de la typologie du cours (Utilitarianism / Virtue ethics / Care ethics ; Abuse / Misuse /
+  // Malfunction / Intended use) rejetées puis acceptées telles quelles d'une version à l'autre.
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")], "TELLESS: a robot in a corridor."), block("A2", [scq("A2"), short("A2"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")], "TRIVIAL: a moderation team."), block("B2", [scq("B2"), short("B2"), code("[1, 2]")])],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  prompts.length = 0;
+  judged.length = 0;
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id)))!;
+  assert.ok(exam.blocks.some((b) => /TELLESS/.test(b.scenario)), `un signalement sans marqueur concret ne rejette pas :\n${steps.join("\n")}`);
+  assert.ok(!steps.some((s) => /Question composée 1 rejetée/.test(s)), steps.join("\n"));
+  // Le marqueur relevé dit au générateur quoi corriger, sans changer la forme des options.
+  const retry = prompts.find((p) => /VERSION PRÉCÉDENTE REJETÉE/.test(p) && /^THÈME : .*Keyword filtering/m.test(p))!;
+  assert.match(retry, /contredit un fait du scénario/);
+  assert.match(retry, /même forme/);
+  // Le juge reçoit les marqueurs de la rubrique du banc, et la notion sœur du cours n'en est pas un.
+  const judge = judged.find((j) => /TELLESS/.test(j))!;
+  for (const rule of [/absurde/, /hors_sujet/, /absolu/, /longueur/, /contredit_enonce/, /même nature/]) assert.match(judge, rule);
+});
+
+test("C × distracteurs éliminables : le marqueur rangé dans l'option (objet ou « C: hors_sujet (…) ») rejette aussi", async () => {
+  // Premier essai du run du 24/11 : le juge écrivait { option: "A", tell: "contredit_enonce : …" } ou
+  // « A: hors_sujet (…) » ; seul un champ « tell » à côté des options était lu, ces signalements passaient.
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")], "TELLOBJ: a robot in a corridor."), block("A2", [scq("A2"), short("A2"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")], "TELLSTR: a moderation team."), block("B2", [scq("B2"), short("B2"), code("[1, 2]")])],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  prompts.length = 0;
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id)))!;
+  assert.ok(!exam.blocks.some((b) => /TELLOBJ|TELLSTR/.test(b.scenario)), steps.join("\n"));
+  const retry = (theme: string) => /VERSION PRÉCÉDENTE REJETÉE.*$/m.exec(prompts.find((p) => /VERSION PRÉCÉDENTE REJETÉE/.test(p) && new RegExp(`^THÈME : .*${theme}`, "m").test(p)) ?? "")?.[0] ?? "";
+  assert.match(retry("Ethical theories"), /éliminables sans le cours : « [^»]+ » \(contredit_enonce : the scenario says the post IS flagged\) — contredit un fait du scénario/);
+  assert.match(retry("Keyword filtering"), /« [^»]+ » \(hors_sujet \(sentiment score, another chapter\)\) ; « [^»]+ » \(absolu\/contredit_enonce \(« guarantees »\)\) — ne répond pas à la question posée[^\n]* ; un mot absolu/);
 });

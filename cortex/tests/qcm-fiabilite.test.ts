@@ -23,6 +23,8 @@ process.env.LLM_PROVIDER = "openai-compatible";
 process.env.LLM_API_KEY = "test";
 process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
+// Relecture de check_answer coupée : ces tests comptent les appels (relecture : tests/aides-relecture).
+process.env.CORTEX_CHECK_REVIEW = "0";
 // Un cours neuf par test : au-delà de 10, la garde « 10 cours par heure » refuserait la création.
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 process.env.MAX_COURSES_PER_USER = "unlimited";

@@ -7,6 +7,7 @@ import { Topbar } from "./Topbar";
 import { MobileNav } from "./MobileNav";
 import { CourseProvider, useCourse } from "@/lib/ux/api";
 import { FirstRunHero } from "@/components/dashboard/FirstRunHero";
+import { GenerationToasts } from "@/components/generation/GenerationPill";
 import { LegalLine } from "@/app/compte/BillingPanel";
 import type { LegalLinks } from "@/lib/legal";
 import { useTranslations } from "use-intl/react";
@@ -88,6 +89,7 @@ export function AppShell({ children, legal, legalEnglish, contact }: {
             </footer>
           )}
         </div>
+        <GenerationToasts />
       </div>
     </CourseProvider>
   );

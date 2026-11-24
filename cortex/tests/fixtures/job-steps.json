@@ -1,0 +1,1706 @@
+[
+{
+"type": "exam",
+"step": "0 QCM construits + vérifiés pour 20 places → revue finale…"
+},
+{
+"type": "exam",
+"step": "0 QCM manquant(s) → 3 lot(s) de comblement (…)"
+},
+{
+"type": "exam",
+"step": "0 QCM manquant(s) → 4 lot(s) de comblement"
+},
+{
+"type": "exam",
+"step": "1 QCM : seconde réparation des distracteurs encore éliminables"
+},
+{
+"type": "exam",
+"step": "1 QCM manquant(s) → 1 lot(s) de comblement"
+},
+{
+"type": "exam",
+"step": "10/10 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "11/12 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "11/20 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "12 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "12/12 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "13 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "14 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "14/20 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "15 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "16 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "16/20 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "17 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "18 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "19 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "2 QCM trop faible(s) → régénération ciblée"
+},
+{
+"type": "exam",
+"step": "20 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "exam",
+"step": "20/20 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "3 QCM trop faible(s) → régénération ciblée"
+},
+{
+"type": "exam",
+"step": "4 QCM trop faible(s) → régénération ciblée"
+},
+{
+"type": "exam",
+"step": "4/12 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "8/10 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "8/20 QCM construits + vérifiés…"
+},
+{
+"type": "exam",
+"step": "Architecte : 2/5 questions construites"
+},
+{
+"type": "exam",
+"step": "Architecte : 20 QCM + 0 ouverte(s) · moules ADN (0)…"
+},
+{
+"type": "exam",
+"step": "Architecte : 20 QCM + 3 ouverte(s) · moules ADN (0)…"
+},
+{
+"type": "exam",
+"step": "Architecte : 3/5 questions construites"
+},
+{
+"type": "exam",
+"step": "Architecte : 4/5 questions construites"
+},
+{
+"type": "exam",
+"step": "Architecte : 5/5 questions construites"
+},
+{
+"type": "exam",
+"step": "Architecte QCM…"
+},
+{
+"type": "exam",
+"step": "Audit des doublons : 8/10 QCM acquis conservés"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 1 QCM à options répétées → 0 remplacé(s), 1 gardé(s) faute de remplaçant vérifié"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 1 explication(s) réfutant des options absentes ou trop nombreuses → 1 réécrite(s) sur les options réelles"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 10 QCM à distracteurs encore éliminables ou options répétées → 0 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 13 QCM à distracteurs encore éliminables ou options répétées → 1 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 16 QCM à distracteurs encore éliminables ou options répétées → 6 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 3 QCM à distracteurs encore éliminables ou options répétées → 0 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 4 QCM tardif(s) écarté(s) par l'audit (…) → remplacé(s) ou retiré(s)"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 6 QCM à distracteurs encore éliminables ou options répétées → 2 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "exam",
+"step": "Contrôle final : 9 QCM à distracteurs encore éliminables ou options répétées → 3 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "exam",
+"step": "Contrôles déterministes : options et plafonds vérifiés sur 20 QCM"
+},
+{
+"type": "exam",
+"step": "Dernière vérification de l'examen (…) : au plus 10 min de plus"
+},
+{
+"type": "exam",
+"step": "Dernière vérification de l'examen (…) : au plus 6 min de plus"
+},
+{
+"type": "exam",
+"step": "Examen #4 prêt : 7 questions composées ✓"
+},
+{
+"type": "exam",
+"step": "Examen QCM #1 prêt : 20 QCM vérifiés · 3 questions ouvertes ✓"
+},
+{
+"type": "exam",
+"step": "Examen QCM #1 prêt : 20 QCM vérifiés ✓"
+},
+{
+"type": "exam",
+"step": "Examen QCM #1 prêt : 20 QCM, dont 19 vérifiés ✓"
+},
+{
+"type": "exam",
+"step": "Examen QCM #1 prêt — QCM 20 (…) + 3 ouverte(s) ✓"
+},
+{
+"type": "exam",
+"step": "Examen QCM #4 prêt : 12 QCM vérifiés · 2 questions ouvertes ✓"
+},
+{
+"type": "exam",
+"step": "Faits testables : 20 faits distincts sur 14 notions (…), 20 en réserve"
+},
+{
+"type": "exam",
+"step": "Faits testables : 20 faits distincts sur 14 notions (…), 21 en réserve"
+},
+{
+"type": "exam",
+"step": "Faits testables du cours : extraction sur 12 notions (3 appel(s))…"
+},
+{
+"type": "exam",
+"step": "Faits testables du cours : extraction sur 14 notions (3 appel(s))…"
+},
+{
+"type": "exam",
+"step": "Génération de 7 QCM (…)…"
+},
+{
+"type": "exam",
+"step": "Génération de 8 QCM (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q1 (…) · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q1 (…) · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q1 (…) · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q1 (…) · P3 — dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q2 (…) · P1 — conception du piège (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q2 (…) · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q2 (…) · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q2 (…) · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P0 — étude : archétype …"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P1 — conception du piège (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P3 — dernière passe : good (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Q3 (…) · P3 — dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 1/2 — «…» : corrigé"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 1/2 — «…» : non vérifié"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 1/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 1/2 — «…» : ok (…)"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 1/3 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 2/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 2/3 — «…» : corrigé"
+},
+{
+"type": "exam",
+"step": "Lot 1 · Vérif 2/3 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 1/2 vérifié ✓ (1500s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/2 vérifié ✓ (2594s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/2 vérifié ✓ (3258s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/2 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 : génération de 2 exercices…"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 : vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 généré ✓ (126s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 généré ✓ (391s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1088s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1208s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1219s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1317s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1411s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1529s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (1573s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (2115s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (254s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (323s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (462s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (481s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (498s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (499s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (525s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (553s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (617s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (619s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (720s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (733s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/3 vérifié ✓ (871s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/6 généré ✓ (475s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/6 vérifié ✓ (905s)"
+},
+{
+"type": "exam",
+"step": "Lot 1/6 — réessai (Le modèle a renvoyé une réponse illisible 3 fois de suite (…)"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q1 (…) · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q1 (…) · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q1 (…) · P3 — dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q1 (…) · P3 — validé (…) à la passe 1"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q2 (…) · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q2 (…) · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q2 (…) · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Q2 (…) · P3 — dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Vérif 1/2 — «…» : corrigé"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Vérif 1/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Vérif 1/2 — «…» : ok (…)"
+},
+{
+"type": "exam",
+"step": "Lot 2 · Vérif 2/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 2/2 vérifié ✓ (1359s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/2 vérifié ✓ (1877s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/2 vérifié ✓ (2311s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/2 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 : génération de 2 exercices…"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 : vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 généré ✓ (126s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 généré ✓ (140s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 généré ✓ (517s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1019s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1066s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1160s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1187s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1213s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1285s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1288s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1455s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1563s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (1593s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (356s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (428s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (447s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (528s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (561s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (577s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (668s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (693s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (735s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (897s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (917s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 vérifié ✓ (957s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/6 vérifié ✓ (384s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/6 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 3 · Vérif 1/1 — «…» : corrigé"
+},
+{
+"type": "exam",
+"step": "Lot 3 · Vérif 1/1 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 3 · Vérif 1/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 : génération de 1 exercices…"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 : vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 généré ✓ (382s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (115s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (1390s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (175s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (209s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (309s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (343s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (350s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (393s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (401s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (402s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (407s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (414s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (437s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (459s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (470s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (563s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (697s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (704s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (854s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (905s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/3 vérifié ✓ (930s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/6 vérifié ✓ (470s)"
+},
+{
+"type": "exam",
+"step": "Lot 3/6 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 4 · Vérif 1/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 4/6 vérifié ✓ (680s)"
+},
+{
+"type": "exam",
+"step": "Lot 4/6 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 5 · Vérif 1/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 5/6 vérifié ✓ (584s)"
+},
+{
+"type": "exam",
+"step": "Lot 5/6 — génération de 2 exercices…"
+},
+{
+"type": "exam",
+"step": "Lot 5/6 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Lot 6 · Vérif 1/2 — «…» : ok"
+},
+{
+"type": "exam",
+"step": "Lot 6/6 vérifié ✓ (510s)"
+},
+{
+"type": "exam",
+"step": "Lot 6/6 — vérification à l'aveugle + durcissement…"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — 20 QCM, dont 18 vérifiés ✓"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 10 (…) + 0 ouverte(s) ✓"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 10 sur 15 demandés (…) + 0 ouverte(s) ⚠ 5 questions sur 15 n'ont pas pu être générées : 0,34 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 11 sur 15 demandés (…) + 0 ouverte(s) ⚠ 4 questions sur 15 n'ont pas pu être générées : 0,27 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 12 sur 15 demandés (…) + 0 ouverte(s) ⚠ 3 questions sur 15 n'ont pas pu être générées : 0,2 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 13 sur 15 demandés (…) + 0 ouverte(s) ⚠ 2 questions sur 15 n'ont pas pu être générées : 0,14 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 14 sur 20 demandés (…) + 0 ouverte(s) ⚠ 6 questions sur 20 n'ont pas pu être générées : 0,3 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 15 (…) + 0 ouverte(s) ✓"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 18 sur 20 demandés (…) + 0 ouverte(s) ⚠ 2 questions sur 20 n'ont pas pu être générées : 0,1 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 18 sur 20 demandés (…) + 3 ouverte(s) ⚠ 2 questions sur 23 n'ont pas pu être générées : 0,09 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 5 sur 20 demandés (…) + 0 ouverte(s) ⚠ 15 questions sur 20 n'ont pas pu être générées : 0,75 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 6 sur 20 demandés (…) + 3 ouverte(s) ⚠ 14 questions sur 23 n'ont pas pu être générées : 0,61 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 8 sur 10 demandés (…) + 0 ouverte(s) ⚠ 2 questions sur 10 n'ont pas pu être générées : 0,2 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM 9 sur 20 demandés (…) + 0 ouverte(s) ⚠ 11 questions sur 20 n'ont pas pu être générées : 0,55 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 12 sur 20 demandés, dont 12 vérifiés ⚠ 8 questions sur 20 n'ont pas pu être générées : 0,4 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 15 sur 20 demandés, dont 15 vérifiés · 3 questions ouvertes ⚠ 5 questions sur 23 n'ont pas pu être générées : 0,87 crédi"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 17 sur 20 demandés, dont 17 vérifiés · 3 questions ouvertes ⚠ 3 questions sur 23 n'ont pas pu être générées : 0,52 crédi"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 17 sur 20 demandés, dont 17 vérifiés ⚠ 3 questions sur 20 n'ont pas pu être générées : 0,15 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 18 sur 20 demandés, dont 18 vérifiés ⚠ 2 questions sur 20 n'ont pas pu être générées : 0,1 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 19 sur 20 demandés, dont 19 vérifiés · 3 questions ouvertes ⚠ 1 question sur 23 n'a pas pu être générée : 0,05 crédit re"
+},
+{
+"type": "exam",
+"step": "Mock QCM #1 — QCM : 19 sur 20 demandés, dont 19 vérifiés ⚠ 1 question sur 20 n'a pas pu être générée : 0,05 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #4 — QCM 10 sur 12 demandés (…) + 2 ouverte(s) ⚠ 2 questions sur 14 n'ont pas pu être générées : 0,15 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #4 — QCM 11 sur 12 demandés (…) + 2 ouverte(s) ⚠ 1 question sur 14 n'a pas pu être générée : 0,08 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #4 — QCM 4 sur 12 demandés (…) + 2 ouverte(s) ⚠ 8 questions sur 14 n'ont pas pu être générées : 0,58 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Mock QCM #4 — QCM : 8 sur 12 demandés, dont 8 vérifiés · 2 questions ouvertes ⚠ 4 questions sur 14 n'ont pas pu être générées : 0,29 crédit "
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P1 : conception du piège (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P2 : rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3 : critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3 : validé (…) à la passe 1"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3 — dernière passe : good (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3 — validé (…) à la passe 1"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3, dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3, dernière passe : good (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 1 · P3, dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P1 — conception du piège (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P2 : rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 : critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 : validé (…) à la passe 1"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 — dernière passe : good (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 — dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 — dernière passe : undefined (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3 — validé (…) à la passe 1"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3, dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 2 · P3, dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P1 : conception du piège (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P2 : rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P2 — rédaction de l'énoncé multi-étapes (…)…"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3 : critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3 — critique adversariale (…), passe 1/1…"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3 — dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3 — dernière passe : good (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3 — dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3, dernière passe : broken (…)"
+},
+{
+"type": "exam",
+"step": "Ouverte 3 · P3, dernière passe : too_easy (…)"
+},
+{
+"type": "exam",
+"step": "Pré-vérifications…"
+},
+{
+"type": "exam",
+"step": "QCM rejeté : …"
+},
+{
+"type": "exam",
+"step": "QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours (…)"
+},
+{
+"type": "exam",
+"step": "Question composée 1/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 1/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 1/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2 : reprise sur Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2/7 (version 2) — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2/7 (version 3) — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 2/7 — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 3 rejetée — …"
+},
+{
+"type": "exam",
+"step": "Question composée 3/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 3/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 3/7 (version 3) — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 3/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 4 rejetée : …"
+},
+{
+"type": "exam",
+"step": "Question composée 4/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 4/7 (version 2) — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 4/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 4/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 4/7 — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 5 rejetée : …"
+},
+{
+"type": "exam",
+"step": "Question composée 5/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 5/7 (version 2) — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 5/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 5/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 5/7 — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 6 rejetée : …"
+},
+{
+"type": "exam",
+"step": "Question composée 6/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 6/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 6/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 6/7 — Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 7/7 (version 2) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 7/7 (version 3) : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 7/7 : Q — …"
+},
+{
+"type": "exam",
+"step": "Question composée 7/7 — Q — …"
+},
+{
+"type": "exam",
+"step": "Remplacement des distracteurs ignoré (…)"
+},
+{
+"type": "exam",
+"step": "Revue finale : 0 QCM écarté(s) (…), 1 doublon(s) ou au-delà du plafond par notion"
+},
+{
+"type": "exam",
+"step": "Revue finale : 0 QCM écarté(s) (…), 2 doublon(s) ou au-delà du plafond par notion"
+},
+{
+"type": "exam",
+"step": "Revue finale : 0 QCM écarté(s) (…), 3 doublon(s) ou au-delà du plafond par notion"
+},
+{
+"type": "exam",
+"step": "Revue finale : 1 QCM écarté(s) (…), 0 doublon(s) ou au-delà du plafond par notion"
+},
+{
+"type": "exam",
+"step": "Revue finale : 1 QCM écarté(s) (…), 1 doublon(s) ou au-delà du plafond par notion"
+},
+{
+"type": "exam",
+"step": "Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel"
+},
+{
+"type": "exam",
+"step": "Terminé ⚠ 1 question sur 7 n'a pas pu être générée : 0,86 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Terminé ⚠ 2 questions sur 7 n'ont pas pu être générées : 1,72 crédit rendu"
+},
+{
+"type": "exam",
+"step": "Terminé ✓"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1106s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1199s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1234s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1245s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1309s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1484s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (1529s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (3338s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (500s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (519s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (606s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (742s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (920s)"
+},
+{
+"type": "exam",
+"step": "Terminé ✓ (950s)"
+},
+{
+"type": "exam",
+"step": "⏱ Faits testables : 3 min 51 s"
+},
+{
+"type": "exam",
+"step": "⏱ Faits testables : 4 min 42 s"
+},
+{
+"type": "exam",
+"step": "⏱ QCM : 18 min 28 s"
+},
+{
+"type": "exam",
+"step": "⏱ QCM : 35 min 15 s"
+},
+{
+"type": "exam",
+"step": "⏱ QCM : 35 min 38 s"
+},
+{
+"type": "exam",
+"step": "⏱ Questions ouvertes : 20 min 15 s"
+},
+{
+"type": "exam",
+"step": "⏱ Questions ouvertes : 28 min 45 s"
+},
+{
+"type": "exam",
+"step": "⏱ Questions ouvertes : 55 min 49 s"
+},
+{
+"type": "exam",
+"step": "⏱ Questions ouvertes : 62 min 25 s"
+},
+{
+"type": "exam",
+"step": "⚠ 12 questions sur 14 demandées (…)"
+},
+{
+"type": "exam",
+"step": "⚠ 22 questions sur 23 demandées (…)"
+},
+{
+"type": "exam",
+"step": "⚠ 9 questions sur 20 demandées (…)"
+},
+{
+"type": "qcm",
+"step": "0 QCM manquant(s) → 2 lot(s) de comblement"
+},
+{
+"type": "qcm",
+"step": "0/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "1 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "1 QCM en doublon retiré(s) après le complément → nouveau complément"
+},
+{
+"type": "qcm",
+"step": "1 QCM trop faible(s) → régénération ciblée"
+},
+{
+"type": "qcm",
+"step": "1 question(s) proche(s) d'un examen précédent gardée(s) faute de remplaçant : chaque notion du cours a déjà été posée"
+},
+{
+"type": "qcm",
+"step": "10 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "10/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "10/40 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "11 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "11/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "12/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "14/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "15/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "2 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "2 QCM en doublon retiré(s) (…) → remplacement"
+},
+{
+"type": "qcm",
+"step": "2 QCM en doublon retiré(s) après le complément → nouveau complément"
+},
+{
+"type": "qcm",
+"step": "22/40 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "3 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "3 QCM en doublon retiré(s) après le complément → nouveau complément"
+},
+{
+"type": "qcm",
+"step": "30 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "33/40 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "38/40 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "4 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "4 QCM en doublon retiré(s) après le complément → nouveau complément"
+},
+{
+"type": "qcm",
+"step": "4 QCM manquant(s) → 1 lot(s) de comblement"
+},
+{
+"type": "qcm",
+"step": "4 question(s) proche(s) d'un examen précédent gardée(s) faute de remplaçant : chaque notion du cours a déjà été posée"
+},
+{
+"type": "qcm",
+"step": "40/40 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "5 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "6 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "6/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "7 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "8 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "8/15 QCM construits + vérifiés…"
+},
+{
+"type": "qcm",
+"step": "9 QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés"
+},
+{
+"type": "qcm",
+"step": "Annulé"
+},
+{
+"type": "qcm",
+"step": "Architecte : 15 QCM + 0 ouverte(s) · moules ADN (0)…"
+},
+{
+"type": "qcm",
+"step": "Audit final : clés, hors-cours et distracteurs contrôlés en un lot"
+},
+{
+"type": "qcm",
+"step": "Contrôle final : 1 QCM tardif(s) écarté(s) par l'audit (…) → remplacé(s) ou retiré(s)"
+},
+{
+"type": "qcm",
+"step": "Contrôle final : 1 QCM à options répétées ou éliminables → 1 corrigé(s)"
+},
+{
+"type": "qcm",
+"step": "Contrôle final : 2 QCM tardif(s) écarté(s) par l'audit (…) → remplacé(s) ou retiré(s)"
+},
+{
+"type": "qcm",
+"step": "Contrôle final : 6 QCM à options répétées ou éliminables → 6 corrigé(s)"
+},
+{
+"type": "qcm",
+"step": "Contrôle final : 8 QCM à distracteurs encore éliminables ou options répétées → 3 corrigé(s), revérifiés à l'aveugle"
+},
+{
+"type": "qcm",
+"step": "Contrôles déterministes : options et plafonds vérifiés sur 15 QCM"
+},
+{
+"type": "qcm",
+"step": "Contrôles déterministes : options et plafonds vérifiés sur 41 QCM"
+},
+{
+"type": "qcm",
+"step": "Doublons : 2 question(s) sur un fait déjà testé par une autre question"
+},
+{
+"type": "qcm",
+"step": "En file…"
+},
+{
+"type": "qcm",
+"step": "Examen QCM #1 prêt — QCM 40 (…) + 0 ouverte(s) ✓"
+},
+{
+"type": "qcm",
+"step": "Examen QCM #4 prêt : 15 QCM vérifiés ✓"
+},
+{
+"type": "qcm",
+"step": "Examen QCM #4 prêt — QCM 15 (…) + 0 ouverte(s) ✓"
+},
+{
+"type": "qcm",
+"step": "Faits testables : un groupe de notions ignoré (…)"
+},
+{
+"type": "qcm",
+"step": "Faits testables du cours : extraction sur 37 notions (5 appel(s))…"
+},
+{
+"type": "qcm",
+"step": "Faits testables du cours : extraction sur 7 notions (2 appel(s))…"
+},
+{
+"type": "qcm",
+"step": "Génération de 1 QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Génération de 2 QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Génération de 3 QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Génération de 4 QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Génération de 5 QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Génération de 6 QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Lot QCM échoué (…)"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM 32 sur 40 demandés (…) + 0 ouverte(s) ⚠ 8 questions sur 40 n'ont pas pu être générées : 0,4 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM 35 sur 40 demandés (…) + 0 ouverte(s) ⚠ 5 questions sur 40 n'ont pas pu être générées : 0,25 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM 38 sur 40 demandés (…) + 0 ouverte(s) ⚠ 2 questions sur 40 n'ont pas pu être générées : 0,1 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 16 sur 40 demandés, dont 16 vérifiés ⚠ 24 questions sur 40 n'ont pas pu être générées : 4,8 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 17 sur 40 demandés, dont 17 vérifiés ⚠ 23 questions sur 40 n'ont pas pu être générées : 4,6 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 20 sur 40 demandés, dont 20 vérifiés ⚠ 20 questions sur 40 n'ont pas pu être générées : 4 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 21 sur 40 demandés, dont 21 vérifiés ⚠ 19 questions sur 40 n'ont pas pu être générées : 3,8 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 25 sur 40 demandés, dont 25 vérifiés ⚠ 15 questions sur 40 n'ont pas pu être générées : 3 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 27 sur 40 demandés, dont 27 vérifiés ⚠ 13 questions sur 40 n'ont pas pu être générées : 2,6 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 28 sur 40 demandés, dont 28 vérifiés ⚠ 12 questions sur 40 n'ont pas pu être générées : 2,4 crédits rendus"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #1 — QCM : 35 sur 40 demandés, dont 35 vérifiés ⚠ 5 questions sur 40 n'ont pas pu être générées : 0,25 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 10 sur 15 demandés (…) + 0 ouverte(s) ⚠ 5 questions sur 15 n'ont pas pu être générées : 0,34 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 11 sur 15 demandés (…) + 0 ouverte(s) ⚠ 4 questions sur 15 n'ont pas pu être générées : 0,27 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 12 sur 15 demandés (…) + 0 ouverte(s) ⚠ 3 questions sur 15 n'ont pas pu être générées : 0,2 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 14 sur 15 demandés (…) + 0 ouverte(s) ⚠ 1 question sur 15 n'a pas pu être générée : 0,07 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 15 (…) + 0 ouverte(s) ✓"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 4 sur 15 demandés (…) + 0 ouverte(s) ⚠ 11 questions sur 15 n'ont pas pu être générées : 0,74 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 7 sur 15 demandés (…) + 0 ouverte(s) ⚠ 8 questions sur 15 n'ont pas pu être générées : 0,54 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 8 sur 15 demandés (…) + 0 ouverte(s) ⚠ 7 questions sur 15 n'ont pas pu être générées : 0,47 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM 9 sur 15 demandés (…) + 0 ouverte(s) ⚠ 6 questions sur 15 n'ont pas pu être générées : 0,4 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM : 11 sur 15 demandés, dont 11 vérifiés ⚠ 4 questions sur 15 n'ont pas pu être générées : 0,27 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "Mock QCM #4 — QCM : 13 sur 15 demandés, dont 13 vérifiés ⚠ 2 questions sur 15 n'ont pas pu être générées : 0,14 crédit rendu"
+},
+{
+"type": "qcm",
+"step": "QCM gardé : …"
+},
+{
+"type": "qcm",
+"step": "QCM gardé après remplacement : un distracteur reste jugé facile (1)"
+},
+{
+"type": "qcm",
+"step": "QCM gardé après remplacement : un distracteur reste jugé facile (2)"
+},
+{
+"type": "qcm",
+"step": "QCM gardé — …"
+},
+{
+"type": "qcm",
+"step": "QCM rejeté — …"
+},
+{
+"type": "qcm",
+"step": "Rendu du PDF (…)…"
+},
+{
+"type": "qcm",
+"step": "Vérification à l'aveugle des QCM (…)…"
+},
+{
+"type": "qcm",
+"step": "Worker interrompu, reprise automatique (…), progression conservée."
+},
+{
+"type": "qcm",
+"step": "⏱ Faits testables : 4 min 11 s"
+},
+{
+"type": "qcm",
+"step": "⏱ Faits testables : 63 min 16 s"
+},
+{
+"type": "qcm",
+"step": "⚠ 11 questions sur 15 demandées (…)"
+}
+]

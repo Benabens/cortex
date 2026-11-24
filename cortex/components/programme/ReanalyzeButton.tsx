@@ -5,8 +5,9 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, Check, ScanLine, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
-import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, engineDown } from "@/lib/ux/api";
+import { apiPost, useCourse, useJob, JOB_ACTIVE, jobEnd, asText, engineDown } from "@/lib/ux/api";
 import { useTranslations } from "use-intl/react";
+import { useShowJob } from "@/components/generation/useShowJob";
 
 type Phase = "idle" | "running" | "done" | "error";
 
@@ -23,6 +24,8 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
   const [jobId, setJobId] = useState<number | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const job = useJob(jobId);
+  // L'analyse est suivie ici : la pastille ne la répète pas, sa fin n'est pas notifiée en double.
+  useShowJob(jobId, !job || JOB_ACTIVE.includes(job.status));
   const notified = useRef(false);
 
   // Reprise : un job d'analyse tourne peut-être déjà (reload de page).
@@ -51,9 +54,12 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
     if (!job || JOB_ACTIVE.includes(job.status)) return;
     if (notified.current) return;
     notified.current = true;
-    if (job.status === "error" || job.status === "failed") {
+    const end = jobEnd(job.status);
+    if (end === "failed") {
       setPhase("error");
       setErrMsg(asText(job.error) ?? t("failed"));
+    } else if (end === "canceled") {
+      setPhase("idle");
     } else {
       setPhase("done");
       onDone();

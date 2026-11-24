@@ -5,6 +5,7 @@ import { Search, Menu, CalendarClock } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { AccountMenu } from "./AccountMenu";
+import { GenerationPill } from "@/components/generation/GenerationPill";
 
 import { useApi } from "@/lib/ux/api";
 import { useTranslations } from "use-intl/react";
@@ -44,6 +45,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
 
         {/* Right cluster */}
         <div className="ml-auto flex items-center gap-2">
+          <GenerationPill placement="topbar" />
           {showCountdown && (
             <span
               className="hidden items-center gap-2 rounded-full border border-line bg-surface-2/50 px-3 py-1.5 text-[0.78rem] md:inline-flex"

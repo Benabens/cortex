@@ -536,8 +536,6 @@
     "generationFailedLabel": "Generation failed",
     "generationFailed": "Generation failed{type, select, empty {} other { · {type}}}",
     "retrying": "Retrying…",
-    "generationRunning": "Generating{label, select, empty {} other { · {label}}}",
-    "generationRunningLabel": "Generation in progress",
     "queued": "Queued",
     "jobNotFound": "Process not found. Refresh the page before restarting it.",
     "jobConnectionLost": "Connection lost while tracking the process. Refresh the page to check its status.",
@@ -1437,7 +1435,9 @@
     "sliderLabel": "Number of {label}",
     "unitExercises": "Exercises",
     "unitTopics": "Topics",
-    "unitQuestions": "Questions"
+    "unitQuestions": "Questions",
+    "canceled": "Generation canceled: no exam was created.",
+    "retry": "Try again"
   },
   "reportButton": {
     "reasonWrong": "Incorrect answer",
@@ -1606,7 +1606,9 @@
     "debited": "{count, plural, one {# credit charged} other {# credits charged}}",
     "jobFailed": "The process failed. Try again.",
     "unreadSuffix": " {count, plural, one {# file couldn’t be read: see the list below.} other {# files couldn’t be read: see the list below.}}",
-    "prepared": "Course prepared: exercise types and weightings updated.",
+    "prepared": "Course prepared: exam format recognised, topics organised.",
+    "preparedExam": "Generate an exam",
+    "preparedProgram": "See the syllabus",
     "scansRead": "Scanned pages read: the course materials are up to date.",
     "folderIngested": "Folder ingested: the course materials are up to date.",
     "formatDetected": "Format detected again from your past exams{charged}.",
@@ -1662,7 +1664,8 @@
     "removeFromCourse": "Remove from course",
     "refusedItem": "<name>{fileName}</name>: {reason}",
     "debitedSuffix": ": {debited}",
-    "loadingCourse": "Loading course…"
+    "loadingCourse": "Loading course…",
+    "jobCanceled": "Canceled."
   },
   "sourceViewer": {
     "found": "⟵ Cortex · found here",
@@ -1702,7 +1705,19 @@
     "stepFailed": "Failed",
     "shortfall": "{missing, plural, one {# question of {requested} couldn’t be generated} other {# questions of {requested} couldn’t be generated}}",
     "shortfallBack": "{shortfall}: {credits} {back, plural, one {credit returned} other {credits returned}}",
-    "errorBack": "{error} ({credits} {back, plural, one {credit returned} other {credits returned}})."
+    "errorBack": "{error} ({credits} {back, plural, one {credit returned} other {credits returned}}).",
+    "stage": {
+      "read": "Reading your documents",
+      "format": "Reading the exam format",
+      "program": "Analysing the syllabus",
+      "plan": "Choosing what to test",
+      "write": "Writing the questions",
+      "check": "Checking the questions",
+      "refill": "Replacing rejected questions",
+      "review": "Final review",
+      "render": "Laying out the PDF"
+    },
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {MCQs ready} lot {batches ready} other {questions ready}}"
   },
   "order": {
     "product": {
@@ -1825,5 +1840,71 @@
     "cta3": "Works from Claude through its MCP connector",
     "ctaButton": "Try Cortex",
     "fileSize": "{mb} MB"
+  },
+  "generation": {
+    "label": "Generation progress",
+    "launching": "Starting…",
+    "queued": "Waiting in line",
+    "running": "Generating",
+    "etaRange": "{low} to {high} min left",
+    "etaAbout": "About {minutes} min left",
+    "etaUnder": "Less than a minute",
+    "etaQueuedRange": "{low} to {high} min once started",
+    "etaQueuedAbout": "About {minutes} min once started",
+    "etaLate": "Taking longer than usual, still going",
+    "elapsed": "{minutes, plural, =0 {Started just now} other {Started # min ago}}",
+    "leaveHint": "You can leave this page: generation keeps going.",
+    "progress": "Generation progress",
+    "progressText": "{value}%, {step}",
+    "phase": {
+      "read": "Reading your documents",
+      "format": "Reading the exam format",
+      "program": "Analysing the syllabus",
+      "plan": "Choosing what to test",
+      "write": "Writing the questions",
+      "check": "Checking the questions",
+      "refill": "Replacing rejected questions",
+      "review": "Final review",
+      "render": "Laying out the PDF"
+    },
+    "meanwhile": "Meanwhile:",
+    "meanwhileLink": {
+      "weak": "Review your weak points",
+      "train": "Practise"
+    },
+    "cancel": "Cancel",
+    "cancelKeep": "Keep going",
+    "cancelConfirm": "Stop generating",
+    "canceling": "Stopping…",
+    "cancelFailed": "Couldn’t cancel. Try again in a moment.",
+    "cancelOutcome": {
+      "refunded": "Nothing is lost: your credits are refunded.",
+      "keepsReady": "Questions already done stay in an exam; the rest is refunded.",
+      "notRefunded": "Generation is well under way: credits aren’t refunded.",
+      "free": "Stopping costs you nothing.",
+      "keepsReadyFree": "Questions already done stay in an exam."
+    },
+    "wait": {
+      "drill": "Writing your exercise…",
+      "check": "Marking your answer…"
+    },
+    "waitTypical": {
+      "drill": "Usually 1 to 3 min",
+      "check": "Usually 1 to 2 min"
+    },
+    "pill": {
+      "label": "{count, plural, one {One generation running} other {# generations running}}",
+      "open": "{step}, {course}. Open progress.",
+      "more": "+{count}"
+    },
+    "toast": {
+      "done": "{type, select, qcm {Your MCQ exam is ready} exam {Your exam is ready} prepare {Your course is ready} ingest {Your documents are read} format {The exam format is read} blueprint {The syllabus is analysed} exercise {Your exercise is ready} other {It’s ready}}",
+      "failed": "{type, select, qcm {The MCQ exam couldn’t be generated} exam {The exam couldn’t be generated} prepare {Course preparation failed} other {Generation failed}}",
+      "open": "Open",
+      "see": "Try again",
+      "close": "Dismiss",
+      "region": "Generation notifications",
+      "tabTitle": "{count, plural, one {Generation finished} other {# generations finished}}"
+    }
   }
 }
