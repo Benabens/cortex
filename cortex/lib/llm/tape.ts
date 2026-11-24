@@ -113,8 +113,18 @@ function load(file: string): Loaded {
   return t;
 }
 
+/**
+ * Rythme du rejeu : `LLM_TAPE_PACE=0.1` fait attendre chaque réponse 10 % de la durée enregistrée
+ * de son appel — le suivi d'un job (étapes, avancement, temps restant) se regarde alors comme en
+ * vrai, dix fois plus vite. Absent ou 0 : réponse immédiate (banc, CI).
+ */
+export function replayDelayMs(recordedMs: number, env: NodeJS.ProcessEnv = process.env): number {
+  const pace = Number(env.LLM_TAPE_PACE ?? 0);
+  return Number.isFinite(pace) && pace > 0 && recordedMs > 0 ? Math.round(recordedMs * pace) : 0;
+}
+
 /** Réponse rejouée (ou erreur rejouée) ; LlmError UNAVAILABLE si la bande n'a rien pour ce site. */
-export function replayCall(t: Mode, req: CompleteRequest, site: string, rank: number): CompleteResult {
+export async function replayCall(t: Mode, req: CompleteRequest, site: string, rank: number): Promise<CompleteResult> {
   const tape = load(t.file);
   const free = (e: Entry) => !tape.used.has(e);
   // Un même prompt peut revenir plusieurs fois (réessai à l'identique) : servi dans l'ordre.
@@ -136,6 +146,8 @@ export function replayCall(t: Mode, req: CompleteRequest, site: string, rank: nu
   tape.used.add(hit);
   // Journal des rejeux : LLM_TAPE_LOG (le banc le met dans le dossier du run), sinon à côté de la bande.
   fs.appendFileSync(process.env.LLM_TAPE_LOG || `${t.file}.replay.jsonl`, `${JSON.stringify({ site, rank, match: exact ? "exact" : similar ? "similar" : "rank" })}\n`);
+  const delay = replayDelayMs(hit.ms);
+  if (delay) await new Promise((r) => setTimeout(r, delay));
   if (hit.error) throw new LlmError(hit.error.message, hit.error.code);
   return { text: hit.text ?? "", provider: hit.provider ?? "tape", model: hit.model, usage: hit.usage };
 }

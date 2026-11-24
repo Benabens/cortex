@@ -13,6 +13,7 @@ import path from "node:path";
 import { storage } from "@/lib/storage";
 import type { IngestReport } from "@/lib/ingest-report";
 import type { JobError, JobStepInfo } from "@/lib/i18n/job-text";
+import { stageTracker, type StageInfo } from "@/lib/job-stage";
 import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
 
 /**
@@ -300,10 +301,29 @@ export async function heartbeatJob(id: number): Promise<void> {
 
 const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
 
+/**
+ * L'étape lisible de chaque phrase écrite par le worker (lib/job-stage). Un suivi par job, dans
+ * le process qui l'écrit : il garde l'étape et le compteur d'une phrase à l'autre. La promesse
+ * est mise en cache tout de suite, pour que des étapes émises sans await gardent leur ordre.
+ */
+const stageTrackers = new Map<number, Promise<((step: string) => StageInfo | null) | null>>();
+async function stageOf(id: number, step: string): Promise<StageInfo | null> {
+  let tracker = stageTrackers.get(id);
+  if (!tracker) {
+    // Le process web n'écrit que des étapes de service (annulation, reprise) : borne la mémoire.
+    if (stageTrackers.size > 200) stageTrackers.clear();
+    tracker = q.get<{ type: string }>(`SELECT type FROM jobs WHERE id = ?`, id).then((r) => (r ? stageTracker(r.type) : null)).catch(() => null);
+    stageTrackers.set(id, tracker);
+  }
+  const track = await tracker;
+  return track ? track(step) : null;
+}
+
 export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number; errorInfo: JobError; stepInfo: JobStepInfo | null }>): Promise<void> {
   const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid", errorInfo: "error_json", stepInfo: "step_json" };
-  // Une étape écrite sans sa forme sans langue efface la précédente : elle ne la décrit plus.
-  const fieldsWithStep = fields.currentStep !== undefined && !("stepInfo" in fields) ? { ...fields, stepInfo: null } : fields;
+  // Une étape écrite sans sa forme sans langue prend son étape lisible (lib/job-stage), sinon
+  // efface la précédente : elle ne la décrit plus.
+  const fieldsWithStep = fields.currentStep !== undefined && !("stepInfo" in fields) ? { ...fields, stepInfo: await stageOf(id, fields.currentStep) } : fields;
   const sets: string[] = [];
   const vals: (string | number | null)[] = [];
   for (const [k, v] of Object.entries(fieldsWithStep)) {
@@ -323,6 +343,7 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?${stillOpen}`, ...vals, id);
   // État terminal : la place « génération en cours » du compte est libérée, et celle de l'instance.
   if (finishing) {
+    stageTrackers.delete(id);
     const { releaseJob } = await import("@/lib/job-queue");
     await releaseJob(currentUser(), currentCourse(), id);
     try {

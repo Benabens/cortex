@@ -1,4 +1,5 @@
 import type { Eta } from "@/lib/eta";
+import type { StageInfo } from "@/lib/job-stage";
 import { llmErrorCode, llmUserError } from "@/lib/llm/errors";
 import { fmt } from "./format";
 import type { Locale } from "./locale";
@@ -17,8 +18,12 @@ import { errorText, isUserError, userError, type UserError } from "./user-error"
 /** Erreur d'un job : un code stable de `errors.*`, et les crédits rendus après l'échec. */
 export type JobError = UserError & { creditsBackCenti?: number };
 
-/** Étapes qui portent une information (fin incomplète, reprise) ; les autres se déduisent du statut. */
+/**
+ * Étapes qui portent une information (fin incomplète, reprise, file) ; `stage` : l'étape lisible
+ * d'une phrase du moteur (lib/job-stage), la seule que montre l'interface pendant la génération.
+ */
 export type JobStepInfo =
+  | StageInfo
   | { key: "done" }
   | { key: "doneIncomplete"; missing: number; requested: number; backCenti?: number }
   | { key: "resumed"; attempt: number; max: number }
@@ -71,6 +76,7 @@ function stepText(job: LocalizableJob, locale: Locale, generic: boolean): string
   if (info?.key === "waiting" && job.status === "queued" && info.own) return t("jobText.stepWaitingOwn", { what: info.ingest ? "ingest" : "assist" });
   if (info?.key === "waiting" && job.status === "queued") return t("jobText.stepWaiting", { position: info.position, what: info.ingest ? "ingest" : info.assist ? "assist" : "generation" });
   if (!job.currentStep || !generic) return job.currentStep;
+  if (info?.key === "stage" && JOB_RUNNING.includes(job.status)) return stageText(info, locale);
   switch (job.status) {
     case "queued": return t("jobText.stepQueued");
     case "running": case "verifying": case "compiling": return t("jobText.stepRunning", { type: job.type === "lab-exercise" ? "lab" : job.type });
@@ -78,6 +84,16 @@ function stepText(job: LocalizableJob, locale: Locale, generic: boolean): string
     case "canceled": return t("jobText.stepCanceled");
     default: return t("jobText.stepFailed");
   }
+}
+
+const JOB_RUNNING = ["running", "verifying", "compiling"];
+
+/** L'étape lisible dans la langue du lecteur, avec son compteur (« Rédaction des questions · 4/7 prêtes »). */
+export function stageText(info: StageInfo, locale: Locale): string {
+  const t = translator(locale);
+  const label = t(`jobText.stage.${info.stage}`);
+  if (info.done === undefined || !info.total || !info.unit) return label;
+  return t("jobText.stageCount", { stage: label, done: info.done, total: info.total, unit: info.unit });
 }
 
 export function shortfallText(s: { missing: number; requested: number; backCenti?: number }, locale: Locale): string {
