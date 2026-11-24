@@ -1605,7 +1605,7 @@
     "debited": "{count, plural, one {# crédit débité} other {# crédits débités}}",
     "jobFailed": "Le traitement a échoué. Réessaie.",
     "unreadSuffix": " {count, plural, one {# fichier n’a pas pu être lu : la liste est ci-dessous.} other {# fichiers n’ont pas pu être lus : la liste est ci-dessous.}}",
-    "prepared": "Cours prêt : format du final reconnu, notions organisées.",
+    "prepared": "Cours préparé : format du final reconnu, notions organisées.",
     "preparedExam": "Générer un examen",
     "preparedProgram": "Voir le programme",
     "scansRead": "Pages scannées lues : le corpus est à jour.",
