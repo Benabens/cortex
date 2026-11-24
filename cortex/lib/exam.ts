@@ -21,6 +21,7 @@ import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds } from "@/lib/source-scope";
 import { examSummaryLabel } from "@/lib/exam-summary";
 import { examKindLabel } from "@/lib/exam-template";
+import { repairExerciseClosers } from "@/lib/tex-closers";
 
 const EXAM_DIR = () => examsDir();
 
@@ -644,7 +645,7 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
   // Sortie mesurée au banc (17/11) : 30 k tokens en moyenne, jamais sous la limite par défaut de 16 000.
   const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: exerciseTimeoutMs(), maxTokens: EXAM_OUTPUT_MAX_TOKENS });
   const r = extractJson<ExamQuestion>(text);
-  return { ...r, category: q.category, points: q.points };
+  return repairExerciseClosers({ ...r, category: q.category, points: q.points });
 }
 
 const BATCH_SCHEMA = {
@@ -715,7 +716,9 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés
-  return qs.slice(0, slots.length).map((q, i) => ({ ...q, category: slots[i].category, points: slots[i].points }));
+  // Accolades fermées en markdown réparées AVANT la vérification (lib/tex-closers) : sinon un
+  // exercice juste est jugé faux pour son LaTeX et régénéré en entier.
+  return qs.slice(0, slots.length).map((q, i) => repairExerciseClosers({ ...q, category: slots[i].category, points: slots[i].points }));
 }
 
 /**
