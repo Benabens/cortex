@@ -27,7 +27,7 @@ import { log } from "@/lib/metrics";
  * des imports, un compte ne tient qu'UNE place à la fois : ses autres imports attendent, et ceux
  * des autres comptes passent devant eux (20 cours relancés d'un coup ne bloquent personne).
  * TROISIÈME FILE, les aides en arrière-plan (« drill » du connecteur) : un appel au modèle d'une
- * à trois minutes, payé 0,3 crédit, qui n'attend pas derrière des examens de 10 à 35 minutes.
+ * à trois minutes, payé le prix d'une aide, qui n'attend pas derrière des examens de 10 à 35 minutes.
  * MAX_GLOBAL_ASSIST_JOBS (défaut 4) places, une à la fois par compte.
  */
 

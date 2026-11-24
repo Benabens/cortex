@@ -22,7 +22,7 @@ import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-erro
  */
 export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done" | "error" | "canceled";
 /**
- * « drill » et « check » : des aides (0,3 crédit) lancées par le connecteur, exécutées en job pour ne
+ * « drill » et « check » : des aides (prix d'une aide) lancées par le connecteur, exécutées en job pour ne
  * pas faire attendre le client (lib/drill-job, lib/check-job).
  */
 export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill" | "check";
@@ -146,7 +146,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
 
 /**
  * Insertion EXCLUSIVE d'un job dont la réservation est déjà faite par l'appelant (aide en job,
- * lib/drill-job : 0,3 crédit réservé comme une aide, pas comme une génération). Le job actif du
+ * lib/drill-job : le prix d'une aide réservé comme une aide, pas comme une génération). Le job actif du
  * même type est re-vérifié dans la transaction ; s'il existe, l'appelant rend sa réservation.
  */
 export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {

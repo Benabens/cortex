@@ -3,7 +3,7 @@ import { apiError } from "@/lib/i18n/api-error";
 import type { ErrorCode } from "@/lib/i18n/user-error";
 
 /**
- * PLAFONDS PAR CHAMP des routes d'assistance (prix FIXE : 0,3 crédit l'appel).
+ * PLAFONDS PAR CHAMP des routes d'assistance (prix FIXE : celui d'une aide, creditCost("assist")).
  *
  * Le corps est déjà borné à 1 Mo (lib/upload-limit), mais 1 Mo de texte dans
  * un « concept » de drill = ~250 000 tokens facturés au prix d'une question :

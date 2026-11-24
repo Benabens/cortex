@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * CONCURRENCE SUR UN VRAI POSTGRES (connexions réellement parallèles), activée
  * par CORTEX_TEST_PG_URL — sautée sinon. PGlite sérialise tout sur une seule

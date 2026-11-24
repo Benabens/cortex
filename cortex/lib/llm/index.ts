@@ -72,9 +72,9 @@ function assistMaxTokens(): number {
 }
 
 /**
- * Plafond d'une aide qui fixe sa propre taille (le drill : énoncé, indices et corrigé, réflexion
- * comprise : 10 000 demandés). 12 k tokens de Sonnet 5 ≈ 0,12 $ ; le plafond par réservation
- * (0,3 crédit × 0,9 $ = 0,27 $) borne de toute façon la somme des essais d'une même aide.
+ * Plafond d'une aide qui fixe sa propre taille (le drill et la correction : 12 000 demandés,
+ * réflexion comprise). 12 k tokens d'Opus 5.5 ≈ 0,24 $ ; le plafond par réservation (prix de l'aide
+ * × JOB_SPEND_CAP_USD_PER_CREDIT) borne de toute façon la somme des essais d'une même aide.
  */
 export const ASSIST_MAX_TOKENS_CAP = 12_000;
 
@@ -84,12 +84,14 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   const callSite = callerSite();
   const job = currentJob();
   const proof = currentLlmProof();
-  // Aide à 0,3 crédit sur un fournisseur payant : jamais opus, réponse bornée — son
+  // Aide sur un fournisseur payant : Opus seulement si le site le demande (drill, correction) ET
+  // que LLM_ALLOW_OPUS l'autorise (lib/llm/config opusAllowed), sinon Sonnet ; réponse bornée — son
   // plafond par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
   // La taille vient du site d'appel quand il la connaît (un drill ne tient pas dans le défaut
   // d'une correction : coupé 3 fois à 6000 tokens, CS-250 du 21/11) ; sinon ASSIST_MAX_TOKENS.
-  if (proof?.kind === "assist" && isPaidProvider(provider.name)) {
-    req = { ...req, model: req.model === "haiku" ? "haiku" : "sonnet", maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
+  req = { ...req, assist: proof?.kind === "assist" };
+  if (req.assist && isPaidProvider(provider.name)) {
+    req = { ...req, model: req.model === "opus" || req.model === "haiku" ? req.model : "sonnet", maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
   }
   const model = req.model ?? "opus";
   const labels = { provider: provider.name, model };
@@ -125,7 +127,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   // répondre (timeout, annulation en vol), retirée s'il a refusé avant de
   // traiter (429, 5xx, auth). Un worker tué en plein appel laisse une trace.
   const tokensInEstimate = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
-  const modelId = mapModel(model, provider.name as ProviderName);
+  const modelId = mapModel(model, provider.name as ProviderName, req.assist);
   try {
     const res = await globalLimiter().run(() =>
       withRetry(async (a) => {

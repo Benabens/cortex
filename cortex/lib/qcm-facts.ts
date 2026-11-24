@@ -258,7 +258,7 @@ async function extractGroup(group: string[], others: string[], k: number, lang: 
     `Réponds UNIQUEMENT avec {"facts":[{"notion":1,"statement":"…","passage":"…"}]}.`,
   ].filter(Boolean).join("\n");
   const out = await completeJson<{ facts: { notion: number; statement: string; passage: string }[] }>(
-    { prompt, model: "opus", maxTokens: LONG_OUTPUT_MAX_TOKENS, timeoutMs: 600_000, json: { schema: FACTS_SCHEMA } },
+    { prompt, model: "sonnet", maxTokens: LONG_OUTPUT_MAX_TOKENS, timeoutMs: 600_000, json: { schema: FACTS_SCHEMA } },
     { check: (v) => (Array.isArray(v?.facts) ? null : "le champ « facts » (tableau) manque") },
   );
   const facts: CourseFact[] = [];
@@ -406,7 +406,7 @@ const ASKED_BY_MODEL = 60;
 /** Pour chaque question (son rang), le rang du fait qu'elle teste, si le modèle en nomme un. */
 async function factsTestedBy(facts: CourseFact[], questions: string[]): Promise<[number, number][]> {
   const out = await completeJson<{ matches: { question: number; fact: number }[] }>({
-    model: "opus", timeoutMs: 300_000,
+    model: "sonnet", timeoutMs: 300_000,
     json: { schema: { type: "object", properties: { matches: { type: "array", items: { type: "object", properties: { question: { type: "integer" }, fact: { type: "integer" } }, required: ["question", "fact"], additionalProperties: false } } }, required: ["matches"], additionalProperties: false } },
     prompt: [
       `Voici les FAITS du cours (F0, F1…) et des questions déjà posées aux examens précédents (Q0, Q1…). Pour chaque question, donne le fait qu'elle teste : la même proposition, la même règle ou le même résultat, même sous un autre décor, d'autres chiffres ou une autre langue. -1 si elle n'en teste aucun nettement.`,

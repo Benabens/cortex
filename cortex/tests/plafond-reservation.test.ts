@@ -3,7 +3,7 @@
  * ne dépense jamais plus que la valeur des crédits débités (crédits × valeur
  * d'un crédit, 0,9 $ par défaut). Vérifié avant chaque tentative d'appel
  * payant : au-delà, SPEND_CAP (arrêt propre, le générateur livre ce qui est prêt).
- * Les aides sont bornées en modèle (jamais opus) et en taille de réponse.
+ * Les aides gardent le modèle de leur site (Opus pour le drill) et sont bornées en taille de réponse.
  *
  * Seam : lib/llm complete(), fournisseur payant factice (serveur HTTP local).
  * Aucun appel réel au modèle.
@@ -31,8 +31,8 @@ const ENV: Record<string, string> = {
   CREDITS_COST_JSON: JSON.stringify({ qcm: 4, assist: 0.3 }),
   LLM_PROVIDER: "openai-compatible",
   LLM_API_KEY: "test-key",
-  LLM_MODEL_OPUS: "claude-opus-4-8",
-  LLM_MODEL_SONNET: "claude-sonnet-5",
+  LLM_MODEL_OPUS: "claude-opus-5-5",
+  LLM_MODEL_SONNET: "claude-sonnet-5-5",
   LLM_ALLOW_OPUS: "1",
   LLM_MAX_RETRIES: "0",
 };
@@ -155,18 +155,18 @@ test("B2 : réservation sans débit (propriétaire, facturation coupée) : rien 
   assert.equal(hits, 3);
 });
 
-test("I5 : une aide (0,3 crédit) : modèle borné à sonnet, réponse bornée, puis arrêt au plafond ; le remboursement est offert", async () => {
+test("I5 : une aide (0,3 crédit) : modèle de son site, réponse bornée, puis arrêt au plafond ; le remboursement est offert", async () => {
   const { assistCall } = await import("../lib/billing/reserve");
   const { complete } = await import("../lib/llm");
   const { authGet } = await import("../db/auth-store");
   await inMl("helper", async () => {
     await assert.rejects(assistCall("drill", async () => {
       await complete({ prompt: "x", model: "opus", maxTokens: 64_000 });
-      return complete({ prompt: "y", model: "opus" });     // 1,5 $ ≥ 0,3 × 0,9 $
+      return complete({ prompt: "y", model: "opus" });     // 3 $ ≥ 0,3 × 0,9 $
     }), isSpendCap);
   });
   assert.equal(hits, 1);
-  assert.equal(seen[0].model, "claude-sonnet-5", "une aide ne part jamais sur opus");
+  assert.equal(seen[0].model, "claude-opus-5-5", "le drill rédige un corrigé : il part sur Opus (décision du 23/11)");
   // Borne dure des aides (lib/llm ASSIST_MAX_TOKENS_CAP) : le drill demande 10 000 jetons (réflexion comprise).
   assert.ok((seen[0].max_tokens ?? Infinity) <= 12_000, `réponse bornée (${seen[0].max_tokens})`);
   const refund = await authGet<{ delta: number; offered: number | null }>(

@@ -1,8 +1,10 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * DRILL FIABLE (21/11/2026) — un drill d'algorithmique (Dijkstra, Bellman-Ford) sortait coupé trois
  * fois de suite : la réflexion du modèle et un corrigé-roman dépassaient 6 000 jetons, et chaque
  * relance renvoyait la MÊME demande. Verrouillé :
- *  - le drill pose son budget (10 000 jetons, effort moyen) et un format compact ;
+ *  - le drill pose son budget (12 000 jetons, effort haut depuis Opus 5.5) et un format compact ;
  *  - une réponse coupée n'est relancée qu'UNE fois, avec une demande qui change (question plus
  *    petite, corrigé abrégé, 6 000 jetons, effort bas) ; coupée encore → erreur, remboursée ;
  *  - le drill du connecteur est un job : réservé avant (0,3 crédit), exécuté par le worker, rendu
@@ -81,13 +83,13 @@ const post = (body: unknown) =>
   });
 const balance = async () => (await import("../lib/billing/credits")).getBalanceCenti("owner");
 
-test("drill : son budget et son format compact sont posés (10 000 jetons, indice 5 = étape décisive)", async () => {
+test("drill : son budget et son format compact sont posés (12 000 jetons, indice 5 = étape décisive)", async () => {
   const { POST } = await import("../app/api/drill/route");
   replies = [OK];
   const res = await POST(post({ concept: "Bellman-Ford" }));
   assert.equal(res.status, 200);
   assert.equal(calls, 1);
-  assert.equal(bodies[0].max_tokens, 10_000, "le drill demande son budget, pas le défaut des aides (6 000)");
+  assert.equal(bodies[0].max_tokens, 12_000, "le drill demande son budget, pas le défaut des aides (6 000)");
   assert.match(userPrompt(0), /étape décisive/);
   assert.match(userPrompt(0), /350 mots au plus/);
 });

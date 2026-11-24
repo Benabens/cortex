@@ -39,10 +39,10 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test("mapping économe : opus → Sonnet par défaut sur anthropic ; Opus si LLM_ALLOW_OPUS=1 ; claude-code intact", () => {
+test("mapping économe : opus → Sonnet 5 par défaut sur anthropic ; Opus si LLM_ALLOW_OPUS=1 ; claude-code intact", () => {
   assert.equal(mapModel("opus", "anthropic"), "claude-sonnet-5");
   process.env.LLM_ALLOW_OPUS = "1";
-  assert.equal(mapModel("opus", "anthropic"), "claude-opus-4-8");
+  assert.equal(mapModel("opus", "anthropic"), "claude-opus-5-5");
   delete process.env.LLM_ALLOW_OPUS;
   // LLM_MODEL_OPUS explicite prime toujours (mapping choisi par l'opérateur)
   process.env.LLM_MODEL_OPUS = "claude-haiku-4-5-20251001";
@@ -50,7 +50,7 @@ test("mapping économe : opus → Sonnet par défaut sur anthropic ; Opus si LLM
   delete process.env.LLM_MODEL_OPUS;
   // dev €0 : passthrough historique du CLI
   assert.equal(mapModel("opus", "claude-code"), "opus");
-  assert.equal(mapModel("sonnet", "anthropic"), "claude-sonnet-5");
+  assert.equal(mapModel("sonnet", "anthropic"), "claude-sonnet-5-5");
   assert.equal(mapModel("haiku", "anthropic"), "claude-haiku-4-5-20251001");
 });
 
