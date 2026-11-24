@@ -3,6 +3,10 @@ import { completeJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { currentCourse } from "@/db/client";
+import { getCourse } from "@/lib/courses";
+import { reviewDrill } from "@/lib/assist-review";
+import { drillReviewEnabled } from "@/lib/verif-switches";
 
 export type Drill = {
   concept: string;
@@ -27,12 +31,14 @@ const DRILL_SCHEMA = {
 } as const;
 
 /**
- * Taille de la réponse, réflexion comprise (Sonnet 5 réfléchit par défaut, et sa réflexion compte
- * dans la limite) : à 6000 tokens et à l'effort par défaut, un drill Dijkstra/Bellman-Ford de
- * CS-250 sortait coupé trois fois de suite (21/11/2026). Effort moyen et format compact : la
- * réponse tient largement ; la relance après une coupure demande moins, pas la même chose.
+ * Taille de la réponse, réflexion comprise (sa réflexion compte dans la limite) : à 6000 tokens et
+ * à l'effort par défaut, un drill Dijkstra/Bellman-Ford de CS-250 sortait coupé trois fois de suite
+ * (Sonnet 5, 21/11/2026). Opus 5.5 depuis le 23/11 : au banc (13 drills algo, ML, systèmes), l'effort
+ * haut donne 12 corrigés justes sur 13 sans imprécision (moyen : 10 justes, 2 imprécis) pour 0,14 $
+ * en moyenne ; sa plus longue réponse fait 7 700 tokens, d'où la marge à 12 000. La relance après une
+ * coupure demande moins, pas la même chose.
  */
-const DRILL_LIMITS = { maxTokens: 10_000, effort: "medium" } as const;
+const DRILL_LIMITS = { maxTokens: 12_000, effort: "high" } as const;
 const DRILL_SHORT_LIMITS = { maxTokens: 6_000, effort: "low" } as const;
 
 /** Consignes de longueur : chaque partie dit ce qu'elle contient, rien n'est écrit deux fois. */
@@ -99,7 +105,12 @@ export async function generateDrill(concept: string): Promise<Drill> {
   );
   delete d.course_terms;
   d.hints = hintsOf(d).slice(0, 5);
-  return d;
+  // Relecture courte (CORTEX_DRILL_REVIEW=1) : re-résolution sans le corrigé, comparaison, une réécriture au plus.
+  if (!drillReviewEnabled()) return d;
+  const c = getCourse(currentCourse());
+  const matiere = [c.examCode, c.examName].filter(Boolean).join(" ") + (c.university.trim() ? ` (${c.university.trim()})` : "");
+  const rules = [`Une réécriture garde le FORMAT du drill : HTML SIMPLE (<p>,<ul>,<ol>,<li>,<code>,<pre>,<table>,<strong>,<sub>,<sup>), corrigé en 4 à 8 étapes courtes, 5 indices du plus vague à l'étape décisive (jamais le corrigé recopié), même langue.`, DRILL_FORMULA_RULE].join("\n");
+  return reviewDrill(d, { matiere, rules, passages });
 }
 
 /** Les indices utilisables d'une réponse : des chaînes non vides, rognées. */

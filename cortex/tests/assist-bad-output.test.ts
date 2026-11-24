@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * Assistance (drill, check-solution) quand le modèle répond du texte illisible —
  * le « mcp.assist_failed code=unknown » de CS-290 (01/11) : le SyntaxError de
@@ -28,6 +30,8 @@ process.env.LLM_PROVIDER = "openai-compatible";
 process.env.LLM_API_KEY = "test";
 process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
+// Relecture de check_answer (lib/assist-review) testée dans aides-relecture.test.ts : ici, un seul appel par essai.
+process.env.CORTEX_CHECK_REVIEW = "0";
 
 let reply: () => { status?: number; content?: string } = () => ({ content: "{}" });
 let calls = 0;

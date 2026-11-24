@@ -119,7 +119,7 @@ export const anthropicProvider: LlmProvider = {
       // Message aligné sur l'historique lib/anthropic.ts (la route analyze mappe /ANTHROPIC_API_KEY/ → 400).
       throw new LlmError(this.unavailableReason()!, "UNAVAILABLE");
     }
-    const model = mapModel(req.model ?? "opus", "anthropic");
+    const model = mapModel(req.model ?? "opus", "anthropic", req.assist);
 
     type Block =
       | { type: "text"; text: string }

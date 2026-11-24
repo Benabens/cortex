@@ -95,9 +95,11 @@ function renderItem(it: BenchItem, withKey: boolean): string {
     }).join("\n");
     return `${head}\n${parts}`;
   }
-  // Corrigé entier jusqu'à 12 000 caractères : un exercice de CS-202 à six sous-questions en fait
-  // 3 500 à 6 600 ; coupé à 2 500, l'arbitre jugeait « tronqué » un corrigé complet (banc du 15/11).
-  return withKey ? `${head}\n   CORRIGÉ : ${sanitizeCorpus(it.solution ?? "").slice(0, 12_000)}` : head;
+  // Corrigé entier jusqu'à 40 000 caractères : un exercice de CS-202 à six sous-questions en fait
+  // 3 500 à 6 600 sous Sonnet 5, jusqu'à 16 000 sous Opus 5.5 ; coupé à 2 500 (banc du 15/11) puis
+  // à 12 000 (banc du 23/11, deux corrigés complets jugés « interrompus avant 1.6 »), l'arbitre
+  // comptait une clé fausse sur un corrigé complet.
+  return withKey ? `${head}\n   CORRIGÉ : ${sanitizeCorpus(it.solution ?? "").slice(0, 40_000)}` : head;
 }
 
 const SOLVER_SCHEMA = { type: "object", properties: { answers: { type: "array", items: { type: "object", properties: { q: { type: "integer" }, chosen: { type: "array", items: { type: "integer" } } }, required: ["q", "chosen"] } } }, required: ["answers"] } as const;

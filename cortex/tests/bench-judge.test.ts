@@ -236,3 +236,17 @@ test("un verdict par question du lot : ni numéro étranger, ni question manquan
   assert.notEqual(verdictsCoverBatch([{ q: 4 }, { q: 4 }, { q: 5 }], [4, 5]), null, "deux verdicts pour la même question");
   assert.notEqual(verdictsCoverBatch([{ q: "4" }, { q: 5 }], [4, 5]), null, "numéro en chaîne");
 });
+
+test("corrigé d'Opus 5.5 au-delà de 12 000 caractères : l'arbitre le lit jusqu'au bout", async () => {
+  // Banc du 23/11/2026 (o55-cs202-exam8, Opus 5.5 high) : deux corrigés de 12 866 et 15 920
+  // caractères coupés à 12 000 ; l'arbitre notait « le corrigé s'interrompt avant 1.6 » et comptait
+  // deux clés fausses sur des corrigés complets (5/8 au lieu de 7/8).
+  const { runWithCourse } = await import("../db/client");
+  const { judgeExam } = await import("../lib/bench/judge");
+  const solution = `${"\\subq{1.1}{Première partie} La réponse détaillée. ".repeat(320)}FIN-DU-CORRIGÉ-LONG`;
+  const written = { ...run, exam: { id: 5, kind: "exercises", items: [{ idx: 0, kind: "exercise", topic: "t", stem: "\\subq{1.1}{…}{4} … \\subq{1.6}{…}{4} …", solution }] }, rejected: [] } as unknown as BenchRun;
+  prompts.length = 0;
+  await runWithCourse("ml", () => judgeExam(written));
+  assert.ok(solution.length > 15_900);
+  assert.match(prompts.find((p) => /examinateur exigeant/.test(p)) ?? "", /FIN-DU-CORRIGÉ-LONG/);
+});

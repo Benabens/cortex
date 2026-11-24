@@ -59,7 +59,9 @@ async function handlePOST(req: NextRequest) {
   if (model !== undefined && model !== null && model !== "" && !isLlmModel(model)) {
     return apiError(req, "llm_model_unknown", 400);
   }
-  const chosenModel = isLlmModel(model) ? model : "opus";
+  // Une analyse de point faible est un classement (mécanique) : jamais Opus, même demandé —
+  // son prix d'aide ne couvre pas un appel Opus (lib/llm/config, classement des sites).
+  const chosenModel = model === "haiku" ? "haiku" : "sonnet";
 
   const row = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(
     "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",
@@ -74,7 +76,7 @@ async function handlePOST(req: NextRequest) {
 
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-    // l'appel au modèle, APRÈS validation de la demande : 0,3 crédit, rendu seulement si
+    // l'appel au modèle, APRÈS validation de la demande : le prix d'une aide, rendu seulement si
     // l'appel n'est pas parti ou si la réponse est inutilisable (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
     // L'image doit être sur le disque pour l'outil Read (stockage objet : rapatriée).

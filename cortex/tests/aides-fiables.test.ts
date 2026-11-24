@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * AIDES FIABLES (chasse aux bugs du 22/11/2026) — correction (check_answer) et drill :
  *  - la correction pose son budget (12 000 tokens, effort moyen) au lieu du défaut des aides
@@ -22,7 +24,8 @@ const ENV: Record<string, string> = {
   DAILY_ASSIST_QUOTA: "unlimited", RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited",
   // Aucune place pour un worker détaché : le job drill reste en file et le test l'exécute lui-même.
   MAX_GLOBAL_ASSIST_JOBS: "0",
-  LLM_PROVIDER: "openai-compatible", LLM_API_KEY: "test", LLM_MODEL_OPUS: "claude-sonnet-5", LLM_MAX_RETRIES: "0",
+  // Relecture de check_answer coupée : ces tests rejouent une file de réponses dans l'ordre (relecture : tests/aides-relecture).
+  CORTEX_CHECK_REVIEW: "0", LLM_PROVIDER: "openai-compatible", LLM_API_KEY: "test", LLM_MODEL_OPUS: "claude-sonnet-5", LLM_MAX_RETRIES: "0",
 };
 Object.assign(process.env, ENV);
 

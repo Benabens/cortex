@@ -38,8 +38,8 @@ const MODEL_ENV: Record<string, string> = {
 
 /** Ids par défaut côté API Anthropic (alignés sur l'historique GEN_MODEL pour opus). */
 const ANTHROPIC_DEFAULTS: Record<string, string> = {
-  opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-5",
+  opus: "claude-opus-5-5",
+  sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-4-5-20251001",
 };
 
@@ -57,7 +57,23 @@ export function isLlmModel(v: unknown): v is LlmModel {
   return typeof v === "string" && (LLM_MODELS as readonly string[]).includes(v);
 }
 
-export function mapModel(model: LlmModel, provider: ProviderName): string {
+/**
+ * Modèle d'un site « opus » quand Opus n'y est pas autorisé : Sonnet 5, celui des examens, QCM et
+ * exercices jusqu'ici. Étape 1 du 23/11/2026 : ces sites gardent leur modèle (et leur prix) en
+ * attendant la décision de Ben ; seul le mécanique passe sur Sonnet 5.5 (alias « sonnet »).
+ */
+const OPUS_FALLBACK = "claude-sonnet-5";
+
+/**
+ * LLM_ALLOW_OPUS : « 1 » = Opus 5.5 sur tous les sites « opus » ; « assist » = seulement sur les
+ * aides payées (drill, correction : étape 1) ; absent = Sonnet 5 partout.
+ */
+export function opusAllowed(assist = false): boolean {
+  const v = process.env.LLM_ALLOW_OPUS?.trim();
+  return v === "1" || (assist && v === "assist");
+}
+
+export function mapModel(model: LlmModel, provider: ProviderName, assist = false): string {
   // Un id complet n'est JAMAIS accepté sur un fournisseur PAYANT : il
   // contournerait la règle LLM_ALLOW_OPUS (et le tarif connu). Seul le CLI
   // local (dev, €0) garde son passthrough historique.
@@ -69,11 +85,11 @@ export function mapModel(model: LlmModel, provider: ProviderName): string {
   if (envKey && process.env[envKey]) return process.env[envKey]!;
   if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
     // RÈGLE D'OR coûts : sur le provider API PAYANT, l'alias
-    // logique « opus » ne se résout vers Opus (5×/25× plus cher que Sonnet en
-    // sortie) que si EXPLICITEMENT autorisé — LLM_ALLOW_OPUS=1 ou LLM_MODEL_OPUS
-    // posé. Sinon Sonnet. Le provider claude-code (dev €0 via le CLI local) garde le
+    // logique « opus » ne se résout vers Opus (2× le prix de Sonnet) que si
+    // EXPLICITEMENT autorisé — LLM_ALLOW_OPUS (opusAllowed) ou LLM_MODEL_OPUS
+    // posé. Sinon Sonnet 5 (OPUS_FALLBACK). Le provider claude-code (dev €0 via le CLI local) garde le
     // passthrough historique : « opus » y reste opus.
-    if (model === "opus" && process.env.LLM_ALLOW_OPUS !== "1") return ANTHROPIC_DEFAULTS.sonnet;
+    if (model === "opus" && !opusAllowed(assist)) return OPUS_FALLBACK;
     return ANTHROPIC_DEFAULTS[model];
   }
   return model;
