@@ -176,7 +176,12 @@ test("jobs : 8 createJobExclusive parallèles avec de quoi en payer 8 → un seu
   // départage. Sans verrou, chaque transaction voyait « aucun job actif » et insérait le sien.
   await credits.addTransaction(user, 5000, "test", `test:${user}:topup`);
   const before = await credits.getBalanceCenti(user);
-  const results = await inCourse(user, "cs-202", () => Promise.all(Array.from({ length: N }, () => jobs.createJobExclusive("exam"))));
+  // Le verrou d'insertion est ce qui est testé, pas les fusibles : 8 examens réservés au p95 Opus
+  // (12,5 $) dépassent les 50 $ par défaut du mois (SPEND_CAP_USD) et du jour (SPEND_CAP_PER_USER_USD).
+  const fuses = { SPEND_CAP_USD: process.env.SPEND_CAP_USD, SPEND_CAP_PER_USER_USD: process.env.SPEND_CAP_PER_USER_USD };
+  process.env.SPEND_CAP_USD = process.env.SPEND_CAP_PER_USER_USD = "unlimited";
+  const results = await inCourse(user, "cs-202", () => Promise.all(Array.from({ length: N }, () => jobs.createJobExclusive("exam"))))
+    .finally(() => { for (const [k, v] of Object.entries(fuses)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
   const ids = new Set(results.map((r) => r.id));
   assert.equal(ids.size, 1, `jobs distincts : ${[...ids].join(",")}`);
   assert.equal(results.filter((r) => !r.existing).length, 1);
