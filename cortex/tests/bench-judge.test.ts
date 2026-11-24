@@ -194,3 +194,13 @@ test("questions composées : un verdict rendu par sous-question est redemandé, 
   const v = await runWithCourse("ml", () => judgeExam(blocks));
   assert.deepEqual(v.items.map((x) => [x.idx, x.offCourse, x.notion]), [[0, false, "n0"], [1, false, "n1"]]);
 });
+
+test("un verdict par question du lot : ni numéro étranger, ni question manquante, ni deux verdicts pour la même", async () => {
+  const { verdictsCoverBatch } = await import("../lib/bench/judge");
+  assert.equal(verdictsCoverBatch([{ q: 4 }, { q: 5 }], [4, 5]), null);
+  assert.match(verdictsCoverBatch([{ q: 4 }, { q: 5 }, { q: 6 }], [4, 5]) ?? "", /un seul par question/, "numéro de sous-question");
+  assert.notEqual(verdictsCoverBatch([{ q: 4 }], [4, 5]), null, "question manquante");
+  // Deux verdicts pour Q4 : find() n'en garde qu'un, l'autre disparaît sans bruit.
+  assert.notEqual(verdictsCoverBatch([{ q: 4 }, { q: 4 }, { q: 5 }], [4, 5]), null, "deux verdicts pour la même question");
+  assert.notEqual(verdictsCoverBatch([{ q: "4" }, { q: 5 }], [4, 5]), null, "numéro en chaîne");
+});

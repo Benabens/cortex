@@ -133,9 +133,9 @@ const ITEM_SCHEMA = {
  * trois ont rendu un verdict par SOUS-question (q 0 à 24 pour cinq questions composées) ; la
  * sous-question (e) de Q1 portait le numéro de Q5, comptée « livrée hors cours » (offCourse.leaked).
  */
-function verdictsCoverBatch(items: unknown, ids: number[]): string | null {
+export function verdictsCoverBatch(items: unknown, ids: number[]): string | null {
   const qs = Array.isArray(items) ? items.map((x) => (x as { q?: unknown })?.q) : [];
-  if (ids.every((id) => qs.includes(id)) && qs.every((q) => ids.includes(q as number))) return null;
+  if (qs.length === ids.length && ids.every((id) => qs.includes(id)) && qs.every((q) => ids.includes(q as number))) return null;
   return `il faut un verdict pour chacune des ${ids.length} questions (q = ${ids.join(", ")}), un seul par question, jamais un par sous-question`;
 }
 

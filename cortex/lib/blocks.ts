@@ -120,7 +120,12 @@ const TELLS: Record<string, string> = {
   longueur: "sa forme ou sa longueur la trahit : aligne-la sur la bonne réponse",
   contredit_enonce: "contredit un fait du scénario ou de l'énoncé : seul le cours doit la réfuter, n'y ajoute aucune justification que le scénario dément",
 };
-const tellOf = (x: unknown) => (typeof x === "string" ? x.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/[\s'-]+/g, "_") : "");
+/** Le marqueur en tête d'un texte du juge (« contredit_enonce : … », « absolu/contredit_enonce (…) », « hors sujet »), "" sinon. */
+function tellOf(x: unknown): string {
+  if (typeof x !== "string") return "";
+  const t = x.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/\bl['’]/g, "").replace(/[\s'’-]+/g, "_");
+  return Object.keys(TELLS).find((k) => t.startsWith(k)) ?? "";
+}
 
 const VERDICT_SCHEMA = {
   type: "object",
@@ -496,23 +501,30 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   // Sortie du modèle non garantie : banc du 04/11 (CS-290 composite), « options » rendu en chaîne a
   // fait planter tout l'examen (« t.options.slice(...).join is not a function »).
   for (const t of Array.isArray(res.trivial_distractors) ? res.trivial_distractors : []) {
-    // Sans marqueur concret, l'avis ne tient pas d'une version à l'autre (c519f840) : il ne rejette rien.
-    const tell = tellOf(t?.tell);
-    if (!Object.hasOwn(TELLS, tell)) continue;
     const raw: unknown = t?.options;
-    const opts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
+    const entries: unknown[] = Array.isArray(raw) ? raw : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
     // Le juge nomme les options par leur lettre, dans l'ordre MÉLANGÉ après la génération : la relance
     // les cite par leur texte, sinon le générateur corrige au hasard (banc rs-composite, 22/11).
     const options = b.parts[t.index]?.options ?? [];
-    const named = opts.map((o) => {
+    const tells = new Set<string>();
+    const named = entries.flatMap((e) => {
+      // Run du 24/11 (claude-code, schéma non imposé) : le marqueur vient à côté des options (« tell »),
+      // dans chacune ({ option, tell }), ou en tête de la raison (« A: hors_sujet (…) »).
+      const o = e && typeof e === "object" ? e as { option?: unknown; tell?: unknown } : null;
+      const text = o ? String(o.option ?? "") : String(e);
       // « B », « (B) texte », « B (raison) », « B : raison » ; « A, B — … » reste tel quel.
-      const m = /^\s*\(?([A-H])\)?(?=$|[\s(:.—–-])[\s(:.—–-]*(.*)$/.exec(o);
+      const m = /^\s*\(?([A-H])\)?(?=$|[\s(:.—–-])[\s(:.—–-]*(.*)$/.exec(text);
       const option = m ? options[LETTER.indexOf(m[1])] : undefined;
-      // La raison perd la parenthèse fermante de « B (raison) ».
-      const reason = m?.[2]?.trim().replace(/\)$/, "").slice(0, 160);
-      return option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : o;
+      // La raison perd la parenthèse fermante de « B (raison) », pas celle de « hors_sujet (raison) ».
+      const said = (o && typeof o.tell === "string" ? o.tell : m?.[2] ?? "").trim();
+      const reason = (said.split(")").length > said.split("(").length ? said.replace(/\)$/, "") : said).slice(0, 160);
+      // Sans marqueur concret, l'avis ne tient pas d'une version à l'autre (c519f840) : il ne rejette rien.
+      const tell = tellOf(t?.tell) || tellOf(reason);
+      if (!tell) return [];
+      tells.add(tell);
+      return [option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : text];
     });
-    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")} — ${TELLS[tell]} ; les options gardent la même forme (un nom de notion reste un nom seul)`);
+    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")} — ${[...tells].map((k) => TELLS[k]).join(" ; ")} ; les options gardent la même forme (un nom de notion reste un nom seul)`);
   }
   return issues;
 }
