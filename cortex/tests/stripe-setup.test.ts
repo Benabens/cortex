@@ -88,7 +88,7 @@ test("compte vide : produits, prix, portail et webhook sont créés, et le secre
   assert.notEqual(byKey.cortex_credits_10.product, byKey.cortex_pro_monthly.product);
   assert.notEqual(byKey.cortex_credits_40.product, byKey.cortex_credits_10.product, "un produit par pack : son nom s'affiche au paiement");
   assert.equal(db.products.length, 3);
-  assert.equal(db.products.find((r) => r.id === "cortex_pro")?.description, "Abonnement Cortex Pro : 30 crédits de génération par mois.");
+  assert.equal(db.products.find((r) => r.id === "cortex_pro")?.description, "30 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.");
 
   const portal = db.portals[0] as unknown as Stripe.BillingPortal.Configuration;
   assert.equal(portal.metadata?.app, "cortex");
@@ -121,11 +121,11 @@ test("compte existant au Pro à 20 crédits : la description du produit est remi
   const { client, db, writes } = fakeStripe();
   await setupStripe(client, OPTIONS);
   const pro = db.products.find((r) => r.id === "cortex_pro")!;
-  pro.description = "Abonnement Cortex Pro : 20 crédits de génération par mois.";
+  pro.description = "20 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.";
   writes.length = 0;
   const report = await setupStripe(client, OPTIONS);
   assert.deepEqual(writes, ["products.update cortex_pro"]);
-  assert.equal(pro.description, "Abonnement Cortex Pro : 30 crédits de génération par mois.");
+  assert.equal(pro.description, "30 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.");
   assert.ok(report.steps.some((s) => s.what === "produit" && s.action === "mis à jour" && s.detail.includes("30 crédits")), JSON.stringify(report.steps));
 });
 

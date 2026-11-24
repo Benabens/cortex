@@ -30,11 +30,13 @@ export const PORTAL_APP_TAG = "cortex";
 export const WEBHOOK_PATH = "/api/billing/webhook";
 
 type ProductKey = "pro" | "pack40" | "pack";
+// Descriptions = celles du compte live (24/11/2026), seul le nombre de crédits du Pro a changé : la mise en place les
+// remet à ces textes, elle ne réécrit donc rien d'autre.
 const PRODUCTS: Record<ProductKey, { id: string; name: string; description: string; statement_descriptor?: string }> = {
   // Le libellé de relevé d'un abonnement est celui de son produit (un pack reçoit le sien au paiement : checkout-params).
-  pro: { id: "cortex_pro", name: "Cortex Pro", description: "Abonnement Cortex Pro : 30 crédits de génération par mois.", statement_descriptor: "BENABENS CORTEX" },
-  pack40: { id: "cortex_credits_40", name: "Cortex : pack de 40 crédits", description: "40 crédits de génération, sans date d'expiration." },
-  pack: { id: "cortex_credits_10", name: "Cortex : pack de 10 crédits", description: "10 crédits de génération, sans date d'expiration." },
+  pro: { id: "cortex_pro", name: "Cortex Pro", description: "30 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.", statement_descriptor: "BENABENS CORTEX" },
+  pack40: { id: "cortex_credits_40", name: "Cortex : pack de 40 crédits", description: "40 crédits de génération d'examens d'entraînement, sans date d'expiration." },
+  pack: { id: "cortex_credits_10", name: "Cortex : pack de 10 crédits", description: "10 crédits de génération d'examens d'entraînement, sans date d'expiration." },
 };
 
 /** Les quatre prix de l'offre, en centimes d'euro. Les lookup_keys sont celles que lit l'app (PLANS). */
