@@ -6,7 +6,8 @@ import { courseLanguage, type Language } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { FORMULA_RULE } from "@/lib/tex-rich";
-import { assistReviewEnabled, blindSolve, slipLines } from "@/lib/assist-review";
+import { blindSolve, slipLines } from "@/lib/assist-review";
+import { checkReviewEnabled } from "@/lib/verif-switches";
 import { benchTrace } from "@/lib/bench/trace";
 
 export type CheckResult = {
@@ -246,8 +247,9 @@ export async function checkSolution(input: { statement: string; answer?: string;
   );
   const prompt = lines.join("\n");
   // Relecture courte (lib/assist-review) : la question est re-résolue EN PARALLÈLE de la correction,
-  // sans la réponse de l'étudiant — le correcteur, qui la lit, s'y ancrait.
-  const blindP = assistReviewEnabled() ? blindSolve(input.statement, { matiere, passages }) : Promise.resolve(null);
+  // sans la réponse de l'étudiant — le correcteur, qui la lit, s'y ancrait (CORTEX_CHECK_REVIEW=0 la coupe).
+  const reviewOn = checkReviewEnabled();
+  const blindP = reviewOn ? blindSolve(input.statement, { matiere, passages }) : Promise.resolve(null);
   const parsed = await completeJson<unknown>(
     { prompt, model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA }, ...CHECK_LIMITS },
     {
@@ -261,7 +263,7 @@ export async function checkSolution(input: { statement: string; answer?: string;
   );
   const first = rubric ? withRubric(parsed, rubric) : checkResultFrom(parsed, language);
   const blind = await blindP;
-  if (!blind) { if (assistReviewEnabled()) benchTrace("check.review", { outcome: "unreviewed", draft: first }); return first; }
+  if (!blind) { if (reviewOn) benchTrace("check.review", { outcome: "unreviewed", draft: first }); return first; }
   const slips = slipLines(first.correct_solution);
   const review = await completeJson<{ agree?: boolean; issue?: string } & Record<string, unknown>>(
     {

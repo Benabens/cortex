@@ -5,6 +5,7 @@ import { getCourse } from "@/lib/courses";
 import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
 import { arithmeticSlips, missingSubquestions, namesLabel, subquestionLabels } from "@/lib/verify-arith";
+import { verifyV2Enabled } from "@/lib/verif-switches";
 import { examsDir } from "@/lib/paths";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import path from "node:path";
@@ -194,6 +195,85 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
   return r;
 }
 
+/** Contrat de la vérification historique (un seul appel : résolution puis verdict). */
+const LEGACY_ONE_SCHEMA = {
+  type: "object",
+  properties: {
+    my_solution: { type: "string", description: "TA solution complète, résolue de zéro (avant de regarder le corrigé proposé)." },
+    verdict: { type: "string", description: "ok | wrong | ambiguous" },
+    issue: { type: "string", description: "Court : ce qui ne va pas / ce qui manque (piège, interaction, nombres). Vide si ok." },
+    corrected_solution_tex: { type: "string", description: "UNIQUEMENT si verdict=wrong : le corrigé LaTeX COMPLET et correct, toutes les sous-questions réécrites en entier (les justes recopiées), jamais « inchangé » ni renvoi au corrigé proposé." },
+    violates_exclusion: { type: "boolean", description: "true si l'énoncé porte sur un sujet EXCLU." },
+    too_easy: { type: "boolean", description: "true si, comparé à la vraie page de référence : pas de piège / nombres ronds / faible charge / pas de cas-limite / snippet déconnecté." },
+  },
+  required: ["my_solution", "verdict"],
+  additionalProperties: false,
+} as const;
+
+/** CHAÎNE HISTORIQUE (défaut, CORTEX_VERIFY_V2 absent) — contrôle UN exercice : résolution à l'aveugle (avec la vraie page de réf) PUIS verdict.
+ *  Une question à FIGURE est re-résolue DEPUIS la figure : le PNG rendu est
+ *  ouvert (vision) par le vérifieur ; s'il ne suffit pas à répondre, le verdict le dit. */
+async function verifyOneLegacy(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResult | null> {
+  const p = profile();
+  const c = getCourse(currentCourse());
+  const img = p.refImageFor(q.category, q.concept);
+  const figPath = q.figureFile ? path.join(path.relative(process.cwd(), examsDir()), q.figureFile) : null;
+  const step1 = opts?.step1 ?? (img
+    ? `ÉTAPE 1 — Ouvre la vraie page de référence du MÊME TYPE : ${img} (outil Read). Puis RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`
+    : `ÉTAPE 1 — RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, prouve). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`);
+  const prompt = [
+    `Tu es un assistant (TA) rigoureux de ${c.examCode} ${c.examName} (${c.university}). Tu contrôles UN SEUL exercice d'examen blanc.`,
+    opts?.directives ?? p.directivesBlock(),
+    ``,
+    step1,
+    figPath ? `L'exercice s'appuie sur une FIGURE GÉNÉRÉE : OUVRE ${figPath} (outil Read) et résous DEPUIS la figure. Si la figure ne permet PAS de répondre (illisible, quantités absentes), verdict "ambiguous" avec issue="figure insuffisante".` : ``,
+    ``,
+    `ÉNONCÉ (LaTeX) :`,
+    q.statement_tex,
+    ``,
+    `ÉTAPE 2 — Compare maintenant ta solution au CORRIGÉ PROPOSÉ ci-dessous, et donne un verdict honnête :`,
+    `CORRIGÉ PROPOSÉ (LaTeX) :`,
+    q.solution_tex,
+    ``,
+    `- "ok" : énoncé bien posé, corrigé proposé correct et complet, ET difficulté/richesse/piège au niveau de la vraie page de référence.`,
+    `- "wrong" : corrigé proposé FAUX ou incomplet → fournis corrected_solution_tex : le BON corrigé COMPLET en LaTeX, toutes les sous-questions réécrites en entier (il remplace le corrigé proposé tel quel).`,
+    `  ${LATEX_FORMULA_RULE}`,
+    `- "ambiguous" : énoncé mal posé / non résoluble / ambigu / incohérent avec son barème.`,
+    `too_easy=true si, COMPARÉ à la vraie page : pas de vrai piège, nombres ronds, faible charge de calcul/bookkeeping, pas de cas-limite/frontière, ou simple snippet déconnecté au lieu d'un artefact creusé. Dans issue, dis QUOI ajouter.`,
+    `violates_exclusion=true si l'énoncé porte sur un sujet EXCLU par les directives.`,
+    `Réponds UNIQUEMENT avec l'objet JSON conforme. N'écris aucun fichier.`,
+    JSON.stringify(LEGACY_ONE_SCHEMA, null, 2),
+  ].join("\n");
+  try {
+    // 9 min : la re-résolution à l'aveugle d'un exo DENSE de l'architecte (6 sous-questions +
+    // comparaison au corrigé) frôlait les 340 s → timeout → « non vérifié » systématique. Mesuré :
+    // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
+    // Sans limite propre, l'API coupait à 16 000 tokens la vérification qui trouve l'erreur et
+    // réécrit le corrigé (banc du 17/11 : 65 % d'entre elles) → exercice livré « non vérifié ».
+    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
+    const r = extractJson<VerifyResult>(text);
+    if (!r || !r.verdict) return null;
+    // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
+    // si la réponse est PROUVÉE équivalente (calcul/symbolique), on l'étiquette « deterministic »
+    // (moat « prouvé »). Ne change NI le verdict NI le contenu (cs-202 byte-identique) — juste un label.
+    r.method = "llm";
+    try {
+      // question à figure avec vérité déclarée UNIQUE : preuve contre la vérité
+      // de la spec (calculée au rendu depuis les données mêmes de la figure).
+      if (q.figureTruth && Object.keys(q.figureTruth).length === 1) {
+        const d = await verifyDeterministic(lastExpr(r.my_solution ?? "") ?? "", "", "figure", { figureTruth: q.figureTruth });
+        if (d.verified === true) r.method = "deterministic";
+        else if (d.verified === false && r.verdict === "ok") { r.verdict = "wrong"; r.issue = `réponse ≠ vérité de la figure (${d.detail})`; }
+      }
+      const a = lastExpr(r.my_solution ?? ""), b = lastExpr(q.solution_tex ?? "");
+      if (r.method === "llm" && a && b) { const d = await verifyDeterministic(a, b, "numeric"); if (d.verified === true) r.method = "deterministic"; }
+    } catch { /* python/sympy absent → reste « llm » */ }
+    return r;
+  } catch {
+    return null; // fallback honnête : non vérifié (jamais "ok" par défaut)
+  }
+}
+
 /**
  * EVALS (additif, lecture seule) — SOLVEUR À L'AVEUGLE réutilisé : résout une question DE ZÉRO,
  * sans corrigé, avec exactement la même posture que l'étape 1 de `verifyOne` (le composant qui
@@ -281,8 +361,52 @@ export async function verifyAndHarden(
 ): Promise<{ spec: ExamSpec; report: VerifyReport }> {
   let done = 0;
   const total = spec.questions.length;
+  // Chaîne historique (défaut) : vérification en un appel, régénération d'abord, faible gardé.
+  const hardenLegacy = async (q0: ExamQuestion) => {
+    let q = q0;
+    let attempts = 0;
+    let res = await verifyOneLegacy(q, opts);
+    while (isInvalid(res) && attempts < maxAttempts) {
+      const r = res!;
+      const diag = [
+        r.issue ?? "",
+        r.too_easy ? "TROP FACILE vs la vraie page de référence : ajoute un VRAI piège (cas-limite / multi-saut / frontière direct-indirect / égalité longest-prefix), augmente la charge de calcul, et utilise des NOMBRES NON RONDS." : "",
+        r.violates_exclusion ? "HORS-SCOPE : remplace par un sujet AUTORISÉ par les directives." : "",
+        r.verdict === "ambiguous" ? "ÉNONCÉ MAL POSÉ : rends-le résoluble et non ambigu, cohérent avec son barème." : "",
+      ].filter(Boolean).join(" ");
+      let ng: ExamQuestion | null = null;
+      try { ng = await regenerate(q, diag); } catch { ng = null; }
+      if (!ng) break;
+      q = ng;
+      attempts++;
+      res = await verifyOneLegacy(q, opts);
+    }
+    let verified: 1 | 0 | null;
+    let dropped = false;
+    let fixedSol = false;
+    if (!res) verified = null;
+    else if (res.verdict === "ok" && !res.violates_exclusion && !res.too_easy) verified = 1;
+    else if (res.verdict === "wrong" && res.corrected_solution_tex && res.corrected_solution_tex.length > 10 && isCompleteCorrection(res.corrected_solution_tex, q.statement_tex)) {
+      q.solution_tex = res.corrected_solution_tex;
+      verified = 1;
+      fixedSol = true;
+    } else if (res.violates_exclusion) {
+      // hors-scope = retiré (dernier recours documenté ; on préfère remplacer mais ici on ne tombe à <6 que pour ça)
+      dropped = true;
+      verified = 0;
+    } else {
+      // en scope mais faible/ambigu après N tentatives → GARDÉ (on garde 6 exos), marqué non-validé
+      verified = 0;
+    }
+    done++;
+    const tag = !res ? "non vérifié" : verified === 1 ? (fixedSol ? "corrigé" : "ok") : dropped ? "retiré" : "gardé (faible)";
+    onProgress?.(`Vérif ${done}/${total} — « ${q.concept.slice(0, 48)} » : ${tag}${attempts ? ` (durci ×${attempts})` : ""}`);
+    return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };
+  };
+  const v2 = verifyV2Enabled();
   const check = async (q: ExamQuestion) => (await verifyOne(q, opts)) ?? (await verifyOne(q, opts));
   const processed = await mapPool(spec.questions, 3, async (q0) => {
+    if (!v2) return hardenLegacy(q0);
     let q = q0;
     let attempts = 0;
     let repairs = 0;

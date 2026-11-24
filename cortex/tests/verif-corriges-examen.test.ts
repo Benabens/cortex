@@ -4,6 +4,8 @@
  * répondre et validait « ok » 5 corrigés faux sur 6 (Sonnet 5) ; un énoncé sous-déterminé (cache
  * ARP, MSS, égalité de métriques) passait ; un exercice faux sans réparation était livré « gardé
  * (faible) » ; une erreur trouvée était jetée au profit d'une régénération.
+ * Nouvelle chaîne derrière CORTEX_VERIFY_V2=1 (posé par chaque test) ; sans lui, la chaîne historique
+ * reste en place (tests « interrupteur » en fin de fichier).
  * Faux /v1/messages Anthropic (aucune dépense) ; la régénération est injectée.
  */
 import assert from "node:assert/strict";
@@ -79,11 +81,11 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { reply = {}; prompts = []; compares = 0; });
+beforeEach(() => { reply = {}; prompts = []; compares = 0; process.env.CORTEX_VERIFY_V2 = "1"; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MAX_RETRIES", "LLM_BASE_URL"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MAX_RETRIES", "LLM_BASE_URL", "CORTEX_VERIFY_V2"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -162,4 +164,45 @@ test("une vérification qui n'aboutit pas est relancée une fois avant « non v�
   assert.equal(compares, 2);
   assert.equal(report.results[0].verified, 1);
   assert.equal(report.unverified, 0);
+});
+
+test("interrupteur : sans CORTEX_VERIFY_V2, la chaîne historique — un seul appel qui résout puis voit le corrigé", async () => {
+  delete process.env.CORTEX_VERIFY_V2;
+  const { report } = await harden();
+  assert.equal(prompts.length, 1, "aucune re-résolution séparée");
+  assert.match(prompts[0], /ÉTAPE 1 —/);
+  assert.match(prompts[0], /CORRIGÉ PROPOSÉ/);
+  assert.doesNotMatch(prompts[0], /RÉSOLUTION INDÉPENDANTE|CONTRÔLES AUTOMATIQUES/, "ni re-résolution ni égalités recalculées");
+  assert.equal(report.results[0].verified, 1);
+});
+
+test("interrupteur : sans CORTEX_VERIFY_V2, faux sans réparation régénéré puis gardé (faible), même en lot ; énoncé jamais réécrit", async () => {
+  delete process.env.CORTEX_VERIFY_V2;
+  reply.compare = () => ({ verdict: "wrong", issue: "1.2 faux", corrected_solution_tex: "" });
+  const batch = await harden(2, { dropUnfixed: true });
+  assert.equal(regenerations, 2, "régénération d'abord, comme avant");
+  assert.equal(batch.spec.questions.length, 1, "gardé : le retrait des clés fausses est réservé à la nouvelle chaîne");
+  assert.equal(batch.report.results[0].verified, 0);
+  regenerations = 0;
+  reply.compare = () => ({ verdict: "ambiguous", issue: "cache ARP", corrected_statement_tex: STATEMENT_FIXED, corrected_solution_tex: FIXED });
+  const amb = await harden(1);
+  assert.equal(amb.spec.questions[0].statement_tex, STATEMENT, "l'énoncé n'est pas réparé");
+  assert.equal(regenerations, 1);
+});
+
+test("interrupteur : sans CORTEX_VERIFY_V2, une vérification qui n'aboutit pas n'est pas relancée", async () => {
+  delete process.env.CORTEX_VERIFY_V2;
+  reply.compare = () => null;
+  const { report } = await harden();
+  assert.equal(compares, 1);
+  assert.equal(report.unverified, 1);
+});
+
+test("interrupteur : CORTEX_VERIFY_V2 ne s'active qu'avec « 1 »", async () => {
+  for (const v of ["0", "true", ""]) {
+    prompts = [];
+    process.env.CORTEX_VERIFY_V2 = v;
+    await harden();
+    assert.ok(!prompts.some((p) => /RÉSOLUTION INDÉPENDANTE/.test(p)), `CORTEX_VERIFY_V2=${JSON.stringify(v)}`);
+  }
 });

@@ -152,13 +152,14 @@ before(async () => {
 beforeEach(() => {
   designed = 0; trivialEvery = 3; contestedEvery = 5; residueEvery = 0; mismatchEvery = 0; repaired = 0;
   auditRejects = () => false; auditUnreadable = false; dedupe = () => []; auditFix = () => undefined; reviewPrompts.length = 0;
+  delete process.env.CORTEX_VERIFY_V2;
   for (const k of Object.keys(calls) as (keyof typeof calls)[]) calls[k] = 0;
   auditedStems.length = 0;
 });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER", "CORTEX_VERIFY_V2"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -262,6 +263,7 @@ test("audit final : clé juste sous une hypothèse non écrite → énoncé rép
   // Banc du 23/11/2026 (QCM ML, Opus 5.5) : clés justes « selon le cours » mais pas uniques pour un
   // expert (norme L1/L2 non dite, λ non chiffré). La revue réécrit l'énoncé avec l'hypothèse ;
   // la résolution à l'aveugle doit retrouver la clé, sinon la question part comme avant.
+  process.env.CORTEX_VERIFY_V2 = "1";
   contestedEvery = 0; trivialEvery = 0;
   auditRejects = (stem) => /Question (4|9) /.test(stem) && !/hypothèse écrite/.test(stem);
   auditFix = (stem) => {
@@ -278,4 +280,19 @@ test("audit final : clé juste sous une hypothèse non écrite → énoncé rép
   assert.match(q4[0].stem, /hypothèse écrite/, "sous son énoncé réparé");
   assert.ok(!items.some((it) => /Question 9 /.test(it.stem)), "une réparation que la résolution à l'aveugle contredit n'est jamais livrée");
   assert.ok(!items.some((it) => /Question 4 /.test(it.stem) && !/hypothèse écrite/.test(it.stem)), "l'énoncé d'origine ne revient pas en réserve");
+});
+
+test("interrupteur : sans CORTEX_VERIFY_V2, l'audit final reste celui d'avant — ni règle d'expert, ni énoncé réparé", async (t) => {
+  contestedEvery = 0; trivialEvery = 0;
+  auditRejects = (stem) => /Question 4 /.test(stem) && !/hypothèse écrite/.test(stem);
+  auditFix = (stem) => `${/Question (\d+) : [^\n]*/.exec(stem)?.[0] ?? ""} (hypothèse écrite : vecteurs normalisés en norme L2)`;
+  const { r, items } = await exam(15);
+  t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)}`);
+  assert.ok(reviewPrompts.length > 0);
+  for (const p of reviewPrompts) {
+    assert.doesNotMatch(p, /expert de la matière qui n'a pas suivi ce cours/);
+    assert.doesNotMatch(p, /"fix"/, "le schéma n'offre pas de champ « fix »");
+  }
+  assert.ok(!items.some((it) => /hypothèse écrite/.test(it.stem)), "aucun énoncé réparé par l'audit n'est livré");
+  assert.ok(!items.some((it) => /Question 4 /.test(it.stem)), "la clé refusée est écartée, comme avant");
 });

@@ -8,6 +8,7 @@
  *  2. la comparaison (propre à chaque aide) confronte les deux, avec les égalités recalculées
  *     (lib/verify-arith), et réécrit UNE fois en cas de désaccord.
  *
+ * Interrupteurs : lib/verif-switches (CORTEX_CHECK_REVIEW actif, CORTEX_DRILL_REVIEW coupé par défaut).
  * Fallback : une relecture qui n'aboutit pas laisse l'aide telle quelle (jamais de blocage), et la
  * réécriture n'est appliquée que si elle est complète.
  */
@@ -23,11 +24,6 @@ import type { Drill } from "@/lib/drill";
  */
 const SOLVE_LIMITS = { maxTokens: 8_000, effort: "medium" } as const;
 const COMPARE_LIMITS = { maxTokens: 10_000, effort: "medium" } as const;
-
-/** Relecture des aides active (défaut) ; CORTEX_ASSIST_REVIEW=0 la coupe (surcoût, panne du modèle). */
-export function assistReviewEnabled(): boolean {
-  return process.env.CORTEX_ASSIST_REVIEW !== "0";
-}
 
 /** Marque du prompt de re-résolution (les tests et le banc la reconnaissent). */
 export const BLIND_SOLVE_MARK = "RÉSOLUTION INDÉPENDANTE d'un exercice d'entraînement";

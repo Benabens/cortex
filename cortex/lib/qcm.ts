@@ -33,6 +33,7 @@ import { JUSTIFICATION_SCHEMA, assembleExplanation, distractorIndices, fillRatio
 // import statique : un require() rendait le module vide depuis que exam-latex importe katex (tests/require-esm)
 import { dropSectionCallouts, texToHtml } from "@/lib/exam-latex";
 import { log } from "@/lib/metrics";
+import { verifyV2Enabled } from "@/lib/verif-switches";
 import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmBatchState, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
 
 /**
@@ -854,7 +855,6 @@ const FINAL_QUALITY_SCHEMA = {
     verdicts: { type: "array", items: { type: "object", properties: {
       index: { type: "integer" }, key: { type: "boolean" }, offCourse: { type: "boolean" },
       trivial: { type: "array", items: { type: "integer" } },
-      fix: { type: "string" },
     }, required: ["index", "key", "offCourse", "trivial"], additionalProperties: false } },
   }, required: ["verdicts"], additionalProperties: false,
 } as const;
@@ -875,13 +875,20 @@ const AUDIT_JUSTIFICATIONS = {
 /** Consignes de l'audit de sortie, calquées sur la rubrique du banc (audit seul ou revue finale). */
 const AUDIT_RULES = [
   `key : true seulement si la clé est juste et la seule défendable ; false si elle est fausse, si une autre option est au moins aussi défendable ou s'il manque une bonne réponse.`,
+  `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
+  `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit ; et toute mauvaise option qui nomme la même notion qu'une autre option du QCM.`,
+];
+
+/** Consignes ajoutées par la nouvelle vérification (CORTEX_VERIFY_V2=1), après celle de la clé. */
+const AUDIT_RULES_V2 = [
   // Banc du 23/11/2026 (QCM ML, Opus 5.5) : les trois clés contestées étaient justes « selon le cours »
   // mais pas uniques pour un expert (norme L1 ou L2 non dite, λ non chiffré, « erreur de test grande »).
   `key, robustesse : juge AUSSI comme un expert de la matière qui n'a pas suivi ce cours. Si la clé n'est la seule défendable que sous une convention ou une hypothèse que l'énoncé n'écrit pas (normalisation, valeur ou ordre de grandeur d'un paramètre, régime asymptotique, choix au point de non-dérivabilité, départage d'une égalité, état initial), ou si une affirmation catégorique de la clé n'est vraie que « en général », key=false.`,
   `fix : seulement quand key=false pour cette seule raison (la clé devient la seule défendable une fois l'hypothèse écrite) : l'énoncé COMPLET réécrit qui écrit cette hypothèse, même langue, mêmes options dans le même ordre, même clé. Sinon, omets fix.`,
-  `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
-  `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit ; et toute mauvaise option qui nomme la même notion qu'une autre option du QCM.`,
 ];
+
+/** Consignes de l'audit selon l'interrupteur : celles de la chaîne historique, ou les nouvelles insérées après la clé. */
+const auditRules = (v2: boolean): string[] => (v2 ? [AUDIT_RULES[0], ...AUDIT_RULES_V2, ...AUDIT_RULES.slice(1)] : AUDIT_RULES);
 
 /** Un verdict d'audit par QCM, chacun bien formé. */
 const verdictsCheck = (v: { verdicts?: unknown } | null | undefined, n: number): string | null =>
@@ -1714,15 +1721,20 @@ export async function finalReview(items: QcmItem[], opts: { strict: boolean; pre
   const prior = [...(opts.previous ?? []).slice(0, PREVIOUS_STEMS), ...(opts.current ?? [])];
   const previous = prior.map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
   const programme = (opts.programme ?? []).slice(0, 60);
-  const schema = toJustify
-    ? { ...REVIEW_SCHEMA, properties: { ...REVIEW_SCHEMA.properties, justifications: AUDIT_JUSTIFICATIONS }, required: [...REVIEW_SCHEMA.required, "justifications"] }
+  const v2 = verifyV2Enabled();
+  // Nouvelle vérification : le verdict peut porter un énoncé réparé (« fix »), champ facultatif.
+  const base = v2
+    ? { ...REVIEW_SCHEMA, properties: { ...REVIEW_SCHEMA.properties, verdicts: { ...REVIEW_SCHEMA.properties.verdicts, items: { ...REVIEW_SCHEMA.properties.verdicts.items, properties: { ...REVIEW_SCHEMA.properties.verdicts.items.properties, fix: { type: "string" } } } } } }
     : REVIEW_SCHEMA;
+  const schema = toJustify
+    ? { ...base, properties: { ...base.properties, justifications: AUDIT_JUSTIFICATIONS }, required: [...base.required, "justifications"] }
+    : base;
   const out = await completeJson<{ verdicts: FinalQualityVerdict[]; justifications?: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] } & DupAnswer>({
     model: "opus", ...QCM_CALL_LIMITS, json: { schema },
     prompt: [
       `Tu es un examinateur exigeant. Voici les QCM d'un même examen, avec leur clé, leur explication et le fait du cours qui les prouve. Deux contrôles, rendus dans le même objet JSON.`,
       `1. AUDIT (verdicts) : pour chaque QCM, tranche selon les extraits du cours.`,
-      ...AUDIT_RULES,
+      ...auditRules(v2),
       ...(toJustify ? [`justifications : pour chaque QCM qui a des cases « ← À JUSTIFIER », une entrée {index, key, distractors} — "key" (seulement si la clé est marquée, sinon vide) dit pourquoi elle est juste selon le cours ; "distractors" a une entrée par option marquée, et elles seules : "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit), sans citer d'autre option, ni lettre, ni numéro.`, FORMULA_RULE] : []),
       `2. DOUBLONS (notions, duplicates, repeats).`,
       ...duplicateRules(items, { strict: opts.strict, previous: prior, programme }),
@@ -1750,7 +1762,7 @@ export async function finalReview(items: QcmItem[], opts: { strict: boolean; pre
   opts.step(`Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel${toJustify ? ` (${justified}/${toJustify} justification(s) complétée(s) au passage)` : ""}`, 79);
   const byIndex = new Map((out.verdicts ?? []).map((v) => [v.index, v]));
   const audit = items.map((it, i) => applyFinalQualityVerdicts([it], byIndex.has(i) ? [{ ...byIndex.get(i)!, index: 0 }] : [])[0] ?? null);
-  const repairs = items.map((it, i) => (audit[i] ? null : stemRepair(it, byIndex.get(i))));
+  const repairs = v2 ? items.map((it, i) => (audit[i] ? null : stemRepair(it, byIndex.get(i)))) : undefined;
   return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams, programme }), repairs };
 }
 

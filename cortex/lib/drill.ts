@@ -5,7 +5,8 @@ import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassage
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
-import { assistReviewEnabled, reviewDrill } from "@/lib/assist-review";
+import { reviewDrill } from "@/lib/assist-review";
+import { drillReviewEnabled } from "@/lib/verif-switches";
 
 export type Drill = {
   concept: string;
@@ -104,8 +105,8 @@ export async function generateDrill(concept: string): Promise<Drill> {
   );
   delete d.course_terms;
   d.hints = hintsOf(d).slice(0, 5);
-  // Relecture courte : re-résolution sans le corrigé, comparaison, une réécriture au plus.
-  if (!assistReviewEnabled()) return d;
+  // Relecture courte (CORTEX_DRILL_REVIEW=1) : re-résolution sans le corrigé, comparaison, une réécriture au plus.
+  if (!drillReviewEnabled()) return d;
   const c = getCourse(currentCourse());
   const matiere = [c.examCode, c.examName].filter(Boolean).join(" ") + (c.university.trim() ? ` (${c.university.trim()})` : "");
   const rules = [`Une réécriture garde le FORMAT du drill : HTML SIMPLE (<p>,<ul>,<ol>,<li>,<code>,<pre>,<table>,<strong>,<sub>,<sup>), corrigé en 4 à 8 étapes courtes, 5 indices du plus vague à l'étape décisive (jamais le corrigé recopié), même langue.`, DRILL_FORMULA_RULE].join("\n");

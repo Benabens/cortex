@@ -5,6 +5,8 @@
  *  - drill : re-résolution sans le corrigé, comparaison, UNE réécriture en cas de désaccord ;
  *  - check_answer : re-résolution sans la réponse de l'étudiant, en parallèle de la correction,
  *    puis comparaison ; une correction faite contre une solution fausse est refaite.
+ * Interrupteurs (lib/verif-switches) : CORTEX_CHECK_REVIEW (actif par défaut), CORTEX_DRILL_REVIEW
+ * (coupé par défaut) ; les tests du drill l'activent.
  * Fournisseur simulé (openai-compatible) : aucune dépense.
  */
 import assert from "node:assert/strict";
@@ -73,7 +75,8 @@ before(async () => {
 
 beforeEach(() => {
   prompts.length = 0;
-  delete process.env.CORTEX_ASSIST_REVIEW;
+  delete process.env.CORTEX_CHECK_REVIEW;
+  process.env.CORTEX_DRILL_REVIEW = "1";
   onBlind = () => "Chemins 6, 2, 3. RÉPONSE FINALE : 11. HYPOTHÈSES : aucune";
   onDrillReview = () => ({ verdict: "agree", issue: "" });
   onCheckReview = () => ({ agree: true, issue: "" });
@@ -82,7 +85,7 @@ beforeEach(() => {
 
 after(async () => {
   await new Promise((r) => server.close(r));
-  for (const k of [...Object.keys(ENV), "LLM_BASE_URL", "CORTEX_ASSIST_REVIEW"]) delete process.env[k];
+  for (const k of [...Object.keys(ENV), "LLM_BASE_URL", "CORTEX_CHECK_REVIEW", "CORTEX_DRILL_REVIEW"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -150,12 +153,39 @@ test("check_answer corrigé contre une solution fausse : la correction refaite r
   assert.deepEqual(r.score, { earned: 2, total: 2 });
 });
 
-test("check_answer : un désaccord sans correction complète garde la première ; CORTEX_ASSIST_REVIEW=0 coupe la relecture", async () => {
+test("check_answer : un désaccord sans correction complète garde la première", async () => {
   onCheckReview = () => ({ agree: false, issue: "doute" });
   assert.equal((await check("11")).verdict, "correct");
-  prompts.length = 0;
-  process.env.CORTEX_ASSIST_REVIEW = "0";
+  assert.ok(prompts.some((p) => p.kind === "check-review"), "la relecture a bien eu lieu");
+});
+
+const kinds = () => prompts.map((p) => p.kind).sort();
+
+test("interrupteurs par défaut : check_answer relu, drill livré sans relecture", async () => {
+  delete process.env.CORTEX_CHECK_REVIEW;
+  delete process.env.CORTEX_DRILL_REVIEW;
   await check("11");
+  assert.deepEqual(kinds(), ["blind", "check", "check-review"], "check_answer : re-résolution et comparaison");
+  prompts.length = 0;
+  const d = await drill();
+  assert.deepEqual(kinds(), ["drill"], "drill : aucun appel de relecture");
+  assert.equal(d.solution_html, DRILL.solution_html, "drill livré tel quel");
+});
+
+test("CORTEX_CHECK_REVIEW=0 coupe la relecture de check_answer", async () => {
+  process.env.CORTEX_CHECK_REVIEW = "0";
+  await check("11");
+  assert.deepEqual(kinds(), ["check"]);
+});
+
+test("CORTEX_DRILL_REVIEW=1 active la relecture du drill, toute autre valeur la laisse coupée", async () => {
+  process.env.CORTEX_DRILL_REVIEW = "1";
   await drill();
-  assert.deepEqual(prompts.map((p) => p.kind).sort(), ["check", "drill"], "aucun appel de relecture");
+  assert.deepEqual(kinds(), ["blind", "drill", "drill-review"]);
+  for (const v of ["0", "true", ""]) {
+    prompts.length = 0;
+    process.env.CORTEX_DRILL_REVIEW = v;
+    await drill();
+    assert.deepEqual(kinds(), ["drill"], `CORTEX_DRILL_REVIEW=${JSON.stringify(v)}`);
+  }
 });
