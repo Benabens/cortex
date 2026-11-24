@@ -879,3 +879,101 @@ a.d2-card:hover {
   content: "";
   pointer-events: none;
 }
+
+/* Suivi d'une génération (components/generation) : barre branchée sur l'avancement réel du
+   worker. Le remplissage glisse en transform (jamais la largeur), assez lentement pour que les
+   sauts du moteur (0 → 18 %) se lisent comme un avancement, pas comme un à-coup. */
+.gen-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-ink-1) 9%, transparent);
+}
+/* La barre avance par paliers (un sondage toutes les 1,8 s) : 900 ms ease-out comble l'écart entre
+   deux paliers sans arrêt visible, au-delà des 300 ms d'une animation d'interface, à dessein. */
+.gen-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transform-origin: left center;
+  transition: transform 900ms var(--ease-out-quint);
+}
+.gen-fill[data-indeterminate] {
+  transform: scaleX(0.04) !important;
+}
+.gen-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  color: var(--color-ink-1);
+  font-size: 0.8rem;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 120ms var(--ease-out-quint);
+}
+.gen-chip:hover {
+  border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
+  background: var(--color-wash);
+}
+.gen-chip:focus-visible,
+.gen-cancel:focus-visible,
+.gen-pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.gen-cancel {
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+  color: var(--color-ink-2);
+  font-size: 0.8rem;
+  transition: color 160ms ease, background-color 160ms ease, transform 120ms var(--ease-out-quint);
+}
+.gen-cancel:hover {
+  color: var(--color-ink-1);
+  background: var(--color-wash);
+}
+.gen-cancel:active,
+.gen-chip:active,
+.gen-pill:active {
+  transform: scale(0.97);
+}
+.gen-cancel-confirm {
+  color: var(--color-danger-hi);
+  border: 1px solid color-mix(in oklch, var(--color-danger) 40%, transparent);
+}
+.gen-cancel:disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* Pastille et notification : elles arrivent pendant qu'on fait autre chose ; un fondu (la pastille)
+   ou un glissé court (la notification) les signale sans saut (ease-out, 240 ms). La pression
+   rétrécit à peine (retour du clic). */
+.gen-pill {
+  transition: border-color 160ms ease, background-color 160ms ease, opacity 240ms var(--ease-out-quint),
+    transform 120ms var(--ease-out-quint);
+  @starting-style {
+    opacity: 0;
+  }
+}
+.gen-toast {
+  transition: opacity 240ms var(--ease-out-quint), transform 240ms var(--ease-out-quint);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+/* Écran tactile : cibles de 44 px (annuler, suggestions, fermer une notification). */
+@media (pointer: coarse) {
+  .gen-chip,
+  .gen-cancel {
+    min-height: 2.75rem;
+  }
+  .gen-toast .gen-cancel {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}

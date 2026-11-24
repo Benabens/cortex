@@ -72,6 +72,9 @@ type Watch = {
   failures: number;
 };
 const watches = new Map<string, Watch>();
+/** Derniers états des sondages abandonnés (lastWatchedJob), bornés. */
+const retired = new Map<string, Job>();
+const RETIRED_MAX = 20;
 
 /** (tests) oublie tous les sondages en cours. */
 export function resetJobWatch(): void {
@@ -80,6 +83,7 @@ export function resetJobWatch(): void {
     w.offVisible?.();
   }
   watches.clear();
+  retired.clear();
   deps = browserDeps;
 }
 
@@ -136,6 +140,15 @@ async function poll(key: string, w: Watch): Promise<void> {
  * S'abonne à l'état d'un job. Renvoie le désabonnement ; le sondage s'arrête
  * quand le dernier abonné part.
  */
+/**
+ * Le dernier état connu d'un job, sondé ou tout juste abandonné (un composant qui retire son
+ * suivi à la fin du job lâche le sondage dans le même rendu) ; null : jamais vu.
+ */
+export function lastWatchedJob(jobId: number, course: string): Job | null {
+  const key = `${course}|${jobId}`;
+  return watches.get(key)?.last ?? retired.get(key) ?? null;
+}
+
 export function watchJob(jobId: number, course: string, listener: (job: Job) => void): () => void {
   const key = `${course}|${jobId}`;
   let w = watches.get(key);
@@ -160,5 +173,9 @@ export function watchJob(jobId: number, course: string, listener: (job: Job) => 
     if (cur.timer !== null) { deps.clearTimer(cur.timer); cur.timer = null; }
     cur.offVisible?.();
     watches.delete(key);
+    if (cur.last) {
+      retired.set(key, cur.last);
+      if (retired.size > RETIRED_MAX) retired.delete(retired.keys().next().value!);
+    }
   };
 }

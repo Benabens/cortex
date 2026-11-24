@@ -15,6 +15,18 @@ export type Job = {
   error?: string | null;
   /** Ingestion et préparation : le sort de chaque fichier (lib/ingest-report). */
   report?: IngestReport | null;
+  /** L'étape sans langue (lib/i18n/job-text) ; `stage` : l'étape lisible et son compteur (lib/job-stage). */
+  stepInfo?: { key: string; stage?: string; done?: number; total?: number; unit?: string } | null;
+  /** Temps restant dans la langue du lecteur, et sa fourchette (lib/eta) ; etaLate : plus long que d'habitude. */
+  eta?: string | null;
+  etaRange?: { lowMs: number | null; highMs: number | null } | null;
+  etaLate?: boolean;
+  /** Horodatage SQL (UTC) de la création du job. */
+  createdAt?: string;
+  /** Examen QCM déjà visible pendant sa génération (livraison progressive). */
+  resultId?: number | null;
+  /** false : la génération ne coûte rien à ce compte (propriétaire, facturation coupée). */
+  charged?: boolean;
 };
 
 export const JOB_ACTIVE = ["queued", "running", "verifying", "compiling"];
