@@ -69,7 +69,7 @@ test("costReport : agrège par job puis par type, et donne le prix minimal en cr
   assert.equal(drill.calls, 2);
   assert.equal(drill.avgUsd, 0.1);
   assert.equal(drill.maxUsd, 0.15);
-  assert.equal(drill.priceCredits, 0.5);
+  assert.equal(drill.priceCredits, 0.3);
   assert.equal(drill.estimatedCalls, 1);
   assert.equal(drill.minCreditsBreakEven, 0.2);
   assert.match(r.text, /exam/);

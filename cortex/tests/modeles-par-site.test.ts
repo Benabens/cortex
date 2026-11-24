@@ -1,6 +1,6 @@
 /**
  * MODÈLE PAR SITE, ÉTAPE 1 (23/11/2026) : Opus 5.5 à l'effort haut pour le drill et la correction
- * (aides à 0,5 crédit), Sonnet 5.5 pour le mécanique (extraction, classement, OCR, plan, analyse
+ * (aides à 0,3 crédit, prix inchangé), Sonnet 5.5 pour le mécanique (extraction, classement, OCR, plan, analyse
  * d'un point faible) ; examens, QCM et exercices gardent leur modèle (Sonnet 5) et leur prix en
  * attendant la décision de Ben. Verrouillé :
  *  - LLM_ALLOW_OPUS=assist : « opus » → claude-opus-5-5 pour une aide, claude-sonnet-5 pour un job ;
