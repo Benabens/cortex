@@ -319,7 +319,7 @@ export function asText(v: unknown): string | null {
 /* -------------------------------------------------------------------- jobs */
 
 export type { Job } from "./job-status";
-export { JOB_ACTIVE } from "./job-status";
+export { JOB_ACTIVE, jobEnd, type JobEnd } from "./job-status";
 
 /**
  * État d'un job, via le sondeur PARTAGÉ (lib/ux/job-watch) : un seul appel par

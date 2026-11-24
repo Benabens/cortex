@@ -18,3 +18,16 @@ export type Job = {
 };
 
 export const JOB_ACTIVE = ["queued", "running", "verifying", "compiling"];
+
+/**
+ * Comment un job s'est terminé, vu de l'interface ; null tant qu'il tourne. « canceled » n'est ni
+ * un succès ni un échec : le compositeur affichait « Examen généré » pour une génération annulée
+ * (audit generation-ux du 24/11), le bandeau de l'Accueil « La génération a échoué ».
+ * « failed » : statut posé par le sondeur quand le job est introuvable ou la connexion perdue.
+ */
+export type JobEnd = "done" | "failed" | "canceled";
+export function jobEnd(status: string): JobEnd | null {
+  if (JOB_ACTIVE.includes(status)) return null;
+  if (status === "done") return "done";
+  return status === "canceled" ? "canceled" : "failed";
+}

@@ -7,7 +7,7 @@ import { FlaskConical, Sparkles, ExternalLink, AlertTriangle, RotateCw } from "l
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
-import { useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
+import { useApi, useCourse, useJob, JOB_ACTIVE, jobEnd, asText, type ApiError, engineDown } from "@/lib/ux/api";
 import { examLinkFromResultPath, type LabsResp } from "@/lib/ux/training";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { useTranslations } from "use-intl/react";
@@ -36,8 +36,12 @@ export function LabsSeries() {
   useEffect(() => {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
-    if (job.status === "error" || job.status === "failed") {
+    const end = jobEnd(job.status);
+    if (end === "failed") {
       setGenError(asText(job.error) ?? t("jobFailed"));
+      setJobId(null);
+      setActiveLab(null);
+    } else if (end === "canceled") {
       setJobId(null);
       setActiveLab(null);
     } else {

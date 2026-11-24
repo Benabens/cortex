@@ -25,7 +25,9 @@ export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done
  * « drill » et « check » : des aides (prix d'une aide) lancées par le connecteur, exécutées en job pour ne
  * pas faire attendre le client (lib/drill-job, lib/check-job).
  */
-export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare" | "drill" | "check";
+export const JOB_TYPES = ["exam", "exercise", "ingest", "blueprint", "lab-exercise", "qcm", "format", "prepare", "drill", "check"] as const;
+export type JobType = (typeof JOB_TYPES)[number];
+export const isJobType = (s: unknown): s is JobType => typeof s === "string" && (JOB_TYPES as readonly string[]).includes(s);
 
 /** Aides du connecteur exécutées en job : file à part, sans fichiers du cours, jamais relancées par « réessayer ». */
 export const ASSIST_JOB_TYPES: readonly JobType[] = ["drill", "check"];
@@ -66,6 +68,16 @@ export async function createJob(type: JobType, target?: string): Promise<number>
     `INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`,
     type, target ?? null,
   );
+}
+
+/**
+ * Sérialise, dans la transaction en cours, les créations d'un même type de job dans un même cours.
+ * Sans verrou, deux transactions READ COMMITTED voient toutes deux « aucun job actif » et insèrent
+ * chacune le leur : 4 clics simultanés avaient lancé 3 examens identiques (audit generation-ux du
+ * 24/11). SQLite sérialise déjà les transactions (mutex par connexion). Le verrou tombe au COMMIT.
+ */
+async function lockJobCreation(type: JobType): Promise<void> {
+  if (dbDriverName() === "postgres") await q.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `cortex:job:${currentUser()}:${currentCourse()}:${type}`);
 }
 
 /**
@@ -128,6 +140,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   // transaction (deux POST concurrents pouvaient spawner 2 workers). Si un
   // autre job a été créé pendant la réservation, celle-ci est rendue.
   const res = await q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(activeSql, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(
@@ -152,6 +165,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
 export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
   return q.tx(async () => {
+    await lockJobCreation(type);
     const active = await q.get<{ id: number }>(`SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`, type);
     if (active) return { id: active.id, existing: true };
     const id = await q.insert(
@@ -945,7 +959,9 @@ function orderedUnits(target: string | null): number | null {
 export async function activeJob(type?: JobType): Promise<Job | null> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  const where = type ? `AND type = '${type}'` : `AND type NOT IN (${ASSIST_JOB_TYPES.map((t) => `'${t}'`).join(",")})`;
-  const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`);
+  // Paramétré : `type` vient parfois d'une requête (GET /api/jobs?type=), une valeur collée dans
+  // le SQL lisait n'importe quel job, et en Postgres les tables des autres schémas.
+  const where = type ? `AND type = ?` : `AND type NOT IN (${ASSIST_JOB_TYPES.map(() => "?").join(",")})`;
+  const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`, ...(type ? [type] : ASSIST_JOB_TYPES));
   return r ? rowToJob(r) : null;
 }
