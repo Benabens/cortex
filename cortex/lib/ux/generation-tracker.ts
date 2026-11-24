@@ -180,11 +180,18 @@ export function showJob(course: string, id: number): (endShown: boolean) => void
   };
 }
 
-/** Une page vient de finir ce job (annulé depuis son suivi) : la pastille le lâche tout de suite. */
-export function jobEnded(course: string, id: number): void {
+/**
+ * Une page a vu ce job finir (fin montrée, annulation depuis son suivi) : la pastille le lâche
+ * tout de suite au lieu d'attendre le tour suivant. `notify` : la page s'efface sans rien dire,
+ * la notification de fin part maintenant.
+ */
+export function jobEnded(course: string, id: number, notify = false): void {
   const key = jobKey(course, id);
+  const job = state.jobs.find((j) => jobKey(j.course, j.id) === key);
   endedAt.set(key, deps.now());
-  emit({ jobs: state.jobs.filter((j) => jobKey(j.course, j.id) !== key) });
+  if (!job) return;
+  emit({ jobs: state.jobs.filter((j) => j !== job) });
+  if (notify) void settle(job);
 }
 
 export function dismissToast(key: string): void {

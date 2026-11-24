@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { UploadCloud, Check, Sparkles, FolderInput, AlertTriangle } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
@@ -8,7 +9,8 @@ import { GenerationProgress } from "@/components/generation/GenerationProgress";
 import { useJobError } from "@/components/generation/useJobError";
 import { notifyJobStarted } from "@/lib/ux/generation-tracker";
 import { Segmented } from "@/components/ui/Segmented";
-import { useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, asText, type ApiError } from "@/lib/ux/api";
+import { useCourse, useJob, findActiveJob, withCourse, JOB_ACTIVE, jobEnd, asText, type ApiError } from "@/lib/ux/api";
+import { useReducedMotion } from "@/lib/ux/hooks";
 import { cn } from "@/lib/ux/cn";
 import { LocalImportNote } from "@/components/sources/OriginalsNotes";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
@@ -76,6 +78,14 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   const job = useJob(jobId);
   const jobError = useJobError();
   const running = jobId != null && (!job || JOB_ACTIVE.includes(job.status));
+  // Le suivi s'affiche sous le bouton, en bas du panneau : au lancement il revient à l'écran.
+  const progressRef = useRef<HTMLDivElement>(null);
+  const reduced = useReducedMotion();
+  useEffect(() => {
+    if (running) progressRef.current?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+  }, [running, reduced]);
+  // Cours préparé : la suite est proposée (examen, programme).
+  const [prepared, setPrepared] = useState(false);
   // Même verdict que POST /api/prepare : le bouton est coupé avant le clic, raison à l'appui.
   const launch = useLaunchUsage("prepare");
   const { refresh: refreshUsage } = launch;
@@ -98,6 +108,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     setJobKind(null);
     setError(null);
     setUploadedMsg(null);
+    setPrepared(false);
     setFolderProgress(null);
     setFolderRefusals([]);
     setFormatOffer(false);
@@ -132,6 +143,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       onChanged();
     } else {
       const skipped = unread.length ? t("unreadSuffix", { count: unread.length }) : "";
+      setPrepared(jobKind === "prepare");
       setUploadedMsg(
         (jobKind === "prepare"
           ? t("prepared")
@@ -183,6 +195,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     }
     setError(null);
     setUploadedMsg(null);
+    setPrepared(false);
     setUnreadFiles([]);
     setUploading(true);
     try {
@@ -244,6 +257,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     if (!courseId) return; // même garde que upload()
     setError(null);
     setUploadedMsg(null);
+    setPrepared(false);
     setUploading(true);
     setFolderProgress(null);
     try {
@@ -303,6 +317,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     setError(null);
     setPaywall(null);
     setUploadedMsg(null);
+    setPrepared(false);
     try {
       const res = await fetch(`/api/refs/format?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
@@ -324,6 +339,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     setError(null);
     setPaywall(null);
     setUploadedMsg(null);
+    setPrepared(false);
     try {
       const res = await fetch(`/api/prepare?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
@@ -475,12 +491,14 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       {/* progression de job (format / ingest / prepare) */}
       {paywall && <PaywallNotice credits={2} code={paywall.code} />}
       {running && (
+        <div ref={progressRef} className="scroll-mb-6">
         <GenerationProgress
           job={job && { ...job, currentStep: asText(job.currentStep) ?? (jobKind === "prepare" ? t("preparing") : jobKind === "ingest" || jobKind === "scan" ? t("ingesting") : t("detecting")) }}
           // Seule la préparation est payante et longue : l'annuler rend les crédits selon l'avancement.
           cancelable={jobKind === "prepare"}
           meanwhile={false}
         />
+        </div>
       )}
 
       {uploadedMsg && (
@@ -488,6 +506,12 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           <Check className="size-4" strokeWidth={2.5} />
           {uploadedMsg}
         </p>
+      )}
+      {prepared && uploadedMsg && (
+        <div className="flex flex-wrap gap-2">
+          <Link href={withCourse("/examens", courseId)} className="gen-chip">{t("preparedExam")}</Link>
+          <Link href={withCourse("/programme", courseId)} className="gen-chip">{t("preparedProgram")}</Link>
+        </div>
       )}
       {error && (
         <p role="alert" className="inline-flex items-start gap-1.5 text-[0.8rem] text-danger-hi">

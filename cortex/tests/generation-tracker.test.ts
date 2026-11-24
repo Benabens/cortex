@@ -176,3 +176,23 @@ test("annulé depuis la page : la pastille le lâche aussitôt, un sondage parti
   assert.equal(trackerState().toasts.length, 0, "une annulation ne notifie rien");
   off();
 });
+
+test("fin vue par la page : la pastille lâche le job ; page qui s'efface au succès : la notification part tout de suite", async () => {
+  const h = harness();
+  h.list = [running(7), running(8)];
+  const off = subscribeTracker(() => {});
+  await flush(); await flush();
+  const unshow7 = showJob("algo", 7);
+  unshow7(true);
+  jobEnded("algo", 7);
+  assert.deepEqual(trackerState().jobs.map((j) => j.id), [8]);
+  assert.equal(trackerState().toasts.length, 0, "la page a montré la fin");
+  h.finals.set("algo:8", { status: "done", resultPath: "/mock/9" });
+  const unshow8 = showJob("algo", 8);
+  unshow8(false);
+  jobEnded("algo", 8, true);
+  await flush(); await flush();
+  assert.deepEqual(trackerState().jobs.map((j) => j.id), []);
+  assert.equal(trackerState().toasts[0]?.resultPath, "/mock/9");
+  off();
+});

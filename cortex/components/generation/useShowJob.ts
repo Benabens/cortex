@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useCourse, jobEnd } from "@/lib/ux/api";
-import { showJob } from "@/lib/ux/generation-tracker";
+import { jobEnded, showJob } from "@/lib/ux/generation-tracker";
 import { lastWatchedJob } from "@/lib/ux/job-watch";
 
 /**
@@ -21,7 +21,10 @@ export function useShowJob(jobId: number | null | undefined, active: boolean, an
     return () => {
       const last = lastWatchedJob(shownId, courseId);
       const end = last ? jobEnd(last.status) : null;
-      unshow(end !== null && !(announceDone && end === "done"));
+      const announce = announceDone && end === "done";
+      unshow(end !== null && !announce);
+      // Fin vue ici : la pastille ne montre pas ce job « en cours » jusqu'au tour suivant.
+      if (end !== null) jobEnded(courseId, shownId, announce);
     };
   }, [shownId, courseId, announceDone]);
 }
