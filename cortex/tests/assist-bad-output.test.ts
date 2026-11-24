@@ -30,6 +30,8 @@ process.env.LLM_PROVIDER = "openai-compatible";
 process.env.LLM_API_KEY = "test";
 process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
+// Relecture des aides (lib/assist-review) testée dans aides-relecture.test.ts : ici, un seul appel par essai.
+process.env.CORTEX_ASSIST_REVIEW = "0";
 
 let reply: () => { status?: number; content?: string } = () => ({ content: "{}" });
 let calls = 0;
