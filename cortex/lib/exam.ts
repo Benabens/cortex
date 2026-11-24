@@ -944,7 +944,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         if (!doVerify) return { questions: qs, report: null as VerifyReport | null };
         step(`Lot ${i + 1}/${nBatches} : vérification à l'aveugle + durcissement…`, 45);
         try {
-          const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0));
+          const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0), { dropUnfixed: true });
           step(`Lot ${i + 1}/${nBatches} vérifié ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 70);
           return { questions: v.spec.questions, report: v.report as VerifyReport | null };
         } catch (e) {
@@ -961,7 +961,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   );
 
   // NOMBRE GARANTI : les exercices manquants (lot échoué, question perdue, retirée à la
-  // vérification) sont relancés UNE fois, un par appel, sauf si la cause est une garde. Ils
+  // vérification — avec CORTEX_VERIFY_V2=1, clé fausse sans réparation comprise) sont relancés UNE fois, un par appel, sauf si la cause est une garde. Ils
   // s'ajoutent en fin d'examen avec leur propre rapport de vérification.
   // Slots manquants d'un lot = ses slots MOINS les questions qui en restent, appariés par
   // catégorie et barème (une question retirée à la vérification laisse SON slot, pas le
@@ -991,7 +991,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         let questions = extra;
         if (doVerify) {
           try {
-            const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement ${k + 1} · ${m}`, 0));
+            const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement ${k + 1} · ${m}`, 0), { dropUnfixed: true });
             questions = v.spec.questions;
             report = v.report as VerifyReport | null;
           } catch (e) { step(`Comblement ${k + 1}, vérif interrompue : ${(e as Error).message}`, 0); }

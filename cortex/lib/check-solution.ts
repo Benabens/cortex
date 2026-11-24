@@ -6,6 +6,9 @@ import { courseLanguage, type Language } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { FORMULA_RULE } from "@/lib/tex-rich";
+import { blindSolve, slipLines } from "@/lib/assist-review";
+import { checkReviewEnabled } from "@/lib/verif-switches";
+import { benchTrace } from "@/lib/bench/trace";
 
 export type CheckResult = {
   verdict: "correct" | "partial" | "wrong";
@@ -243,6 +246,10 @@ export async function checkSolution(input: { statement: string; answer?: string;
     `Réponds UNIQUEMENT avec un objet JSON {"verdict","feedback","correct_solution","criteria":[{"label","points","achieved","essential","justification"}]}. Aucune prose autour, aucune balise markdown.`
   );
   const prompt = lines.join("\n");
+  // Relecture courte (lib/assist-review) : la question est re-résolue EN PARALLÈLE de la correction,
+  // sans la réponse de l'étudiant — le correcteur, qui la lit, s'y ancrait (CORTEX_CHECK_REVIEW=0 la coupe).
+  const reviewOn = checkReviewEnabled();
+  const blindP = reviewOn ? blindSolve(input.statement, { matiere, passages }) : Promise.resolve(null);
   const parsed = await completeJson<unknown>(
     { prompt, model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA }, ...CHECK_LIMITS },
     {
@@ -254,5 +261,46 @@ export async function checkSolution(input: { statement: string; answer?: string;
           : null,
     },
   );
-  return rubric ? withRubric(parsed, rubric) : checkResultFrom(parsed, language);
+  const first = rubric ? withRubric(parsed, rubric) : checkResultFrom(parsed, language);
+  const blind = await blindP;
+  if (!blind) { if (reviewOn) benchTrace("check.review", { outcome: "unreviewed", draft: first }); return first; }
+  const slips = slipLines(first.correct_solution);
+  const review = await completeJson<{ agree?: boolean; issue?: string } & Record<string, unknown>>(
+    {
+      prompt: [
+        prompt,
+        ``,
+        `CONTRÔLE D'UNE PREMIÈRE CORRECTION. Un premier correcteur a rendu :`,
+        JSON.stringify({ verdict: first.verdict, feedback: first.feedback, correct_solution: first.correct_solution, criteria: first.criteria }),
+        ``,
+        `RÉSOLUTION INDÉPENDANTE de la question (un autre assistant, sans voir la réponse de l'étudiant) :`,
+        blind,
+        ``,
+        `CONTRÔLES AUTOMATIQUES de sa correct_solution :`,
+        slips || "- aucune anomalie relevée",
+        ``,
+        `Compare la correct_solution du premier correcteur à la résolution indépendante. Quand elles diffèrent, REFAIS le calcul pour trancher, sans suivre l'une ou l'autre par défaut. Puis vérifie que son verdict et ses critères jugent la réponse de l'étudiant contre la BONNE solution.`,
+        `- Tout est juste : réponds {"agree": true, "issue": ""}.`,
+        `- Sinon : {"agree": false, "issue": "ce qui était faux", "verdict", "feedback", "correct_solution", "criteria"} — la correction COMPLÈTE refaite contre la bonne solution, mêmes règles que ci-dessus${rubric ? " (barème imposé inchangé)" : ""}.`,
+      ].join("\n"),
+      model: "opus", timeoutMs: 200_000, json: { schema: CHECK_REVIEW_SCHEMA }, ...CHECK_LIMITS,
+    },
+    { check: (v) => (typeof v?.agree !== "boolean" ? "agree (booléen) est requis" : v.agree || isLegacyResult(v) ? null : "agree=false exige verdict, feedback et correct_solution") },
+  ).catch(() => null);
+  const issue = typeof review?.issue === "string" ? review.issue : "";
+  if (!review || review.agree !== false || !isLegacyResult(review)) {
+    benchTrace("check.review", { outcome: review ? (review.agree ? "agree" : "fix-unusable") : "unreviewed", draft: first });
+    return first;
+  }
+  const regraded = rubric ? withRubric(review, rubric) : checkResultFrom(review, language);
+  benchTrace("check.review", { outcome: "fixed", issue, draft: first, final: regraded });
+  return regraded;
 }
+
+/** Contrat de la relecture : l'accord seul, ou la correction refaite entière. */
+const CHECK_REVIEW_SCHEMA = {
+  type: "object",
+  properties: { agree: { type: "boolean" }, issue: { type: "string" }, ...CHECK_SCHEMA.properties },
+  required: ["agree", "issue"],
+  additionalProperties: false,
+} as const;
