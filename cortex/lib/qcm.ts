@@ -1,4 +1,5 @@
 import { currentCourse } from "@/db/client";
+import { reportDegraded } from "@/lib/failure-report";
 import { q, nowStr } from "@/db/q";
 import { HARD_STOP_CODES, hardTaskEffort, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { DEFAULT_ANSWER_MODE, OPTIONS_MIN, QCM_DEFAULT, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, requestedFormat, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
@@ -1744,6 +1745,7 @@ export async function finalReview(items: QcmItem[], opts: { strict: boolean; pre
       `Réponds UNIQUEMENT avec {"verdicts": [{"index": 0, "key": true, "offCourse": false, "trivial": []}], "notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…", "programme": n}], "duplicates": [{"first": i, "second": j, "reason": "…"}], "repeats": [{"index": i, "previous": p}]${toJustify ? `, "justifications": [{"index": 0, "key": "", "distractors": [{"option_index": 1, "why_wrong": "…"}]}]` : ""}} : un verdict et une notion par QCM, first < second, listes vides s'il n'y a rien.`,
     ].join("\n"),
   }, { check: (v) => verdictsCheck(v, items.length) ?? (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") }).catch((e) => {
+    reportDegraded("qcm_final_review", e);
     opts.step(`Revue finale en échec (${llmFailureReason(e).split(/\.\s/u)[0].slice(0, 80)}) : verdicts de la vérification gardés, plafonds par notion appliqués seuls`, 79);
     return null;
   });
@@ -2434,6 +2436,7 @@ async function runQcmExam(opts: QcmExamOptions, live: QcmLive): Promise<QcmExamR
     const picked = selectCapped(current, ok, count).filter((it) => !current.includes(it));
     const flagged = picked.filter((it) => !!it.trivialDistractors?.length);
     const repaired = (await Promise.all(chunked(flagged).map((c) => replaceTrivialDistractorsBatch(c, step, shared.language).catch((e) => {
+      reportDegraded("qcm_distractors", e);
       step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
       return c;
     })))).flat();
@@ -2560,7 +2563,7 @@ async function runQcmExam(opts: QcmExamOptions, live: QcmLive): Promise<QcmExamR
       const d = duplicateOptionIndices(it.options, it.correct);
       return { ...it, duplicateOptions: d, trivialDistractors: [...new Set([...(it.trivialDistractors ?? []), ...d])] };
     });
-    const repaired = (await Promise.all(chunked(sent).map((c) => replaceTrivialDistractorsBatch(c, step, shared.language).catch(() => c)))).flat();
+    const repaired = (await Promise.all(chunked(sent).map((c) => replaceTrivialDistractorsBatch(c, step, shared.language).catch((e) => { reportDegraded("qcm_distractors", e); return c; })))).flat();
     const changed = repaired.filter((r, k) => r !== sent[k]);
     if (changed.length) await verifyGrouped(changed);
     let fixed = 0;

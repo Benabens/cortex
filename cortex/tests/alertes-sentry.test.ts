@@ -253,7 +253,7 @@ test("job abandonné par la réconciliation (worker mort, tentatives épuisées)
     assert.equal(row?.status, "error");
     const alert = captured.find((c) => c.tags.area === "jobs");
     assert.ok(alert, JSON.stringify(captured.map((c) => c.tags)));
-    assert.equal(alert!.tags.step, "reconcile");
+    assert.equal(alert!.tags.failure, "job_abandoned", "vocabulaire commun des échecs (lib/failure-report)");
     assert.equal(alert!.tags.job_type, "qcm");
   });
 });

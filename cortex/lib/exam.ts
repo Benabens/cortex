@@ -1,4 +1,5 @@
 import { currentCourse } from "@/db/client";
+import { reportDegraded } from "@/lib/failure-report";
 import { nowStr, q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { annaleExercisePoints, exercisePoints } from "@/lib/exam-points";
@@ -961,6 +962,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           step(`${qChecked}/${qTotal} exercices vérifiés ✓ (lot ${i + 1}/${nBatches}, ${Math.round((Date.now() - t0) / 1000)}s)`, 70);
           return { questions: v.spec.questions, report: v.report as VerifyReport | null };
         } catch (e) {
+          reportDegraded("exam_verify", e);
           step(`Lot ${i + 1}, vérif interrompue : ${(e as Error).message}`, 70);
           return { questions: qs, report: null as VerifyReport | null };
         }
@@ -1007,7 +1009,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
             const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement ${k + 1} · ${m}`, 0), { dropUnfixed: true });
             questions = v.spec.questions;
             report = v.report as VerifyReport | null;
-          } catch (e) { step(`Comblement ${k + 1}, vérif interrompue : ${(e as Error).message}`, 0); }
+          } catch (e) { reportDegraded("exam_verify", e); step(`Comblement ${k + 1}, vérif interrompue : ${(e as Error).message}`, 0); }
         }
         settled.push({ questions, report });
       } catch (e) {

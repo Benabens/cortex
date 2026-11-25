@@ -67,8 +67,11 @@ test("scripts/run-job.ts : un échec sans résultat remet la progression à 0 po
   // seulement pour exam/qcm (resultId n'existe que pour eux) : un correctif trop large
   // (régression constatée le même jour en CI, tests/mcp-prepare-pg.test.ts) écrasait aussi
   // le pourcentage, déjà réel, d'un prepare_course qui échoue après une ingestion réussie.
-  const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "run-job.ts"), "utf8");
-  const failFn = src.slice(src.indexOf("async function fail("), src.indexOf("\n}\n", src.indexOf("async function fail(")));
+  // fail() délègue à lib/jobs recordJobFailure (surveillance, 25/11) : la règle vit là.
+  const runJob = fs.readFileSync(path.join(__dirname, "..", "scripts", "run-job.ts"), "utf8");
+  assert.match(runJob.slice(runJob.indexOf("async function fail(")), /^[^]*?recordJobFailure\(/);
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "jobs.ts"), "utf8");
+  const failFn = src.slice(src.indexOf("export async function recordJobFailure("), src.indexOf("\n}\n", src.indexOf("export async function recordJobFailure(")));
   assert.match(failFn, /resetProgress[\s\S]*progress:\s*0|progress:\s*0[\s\S]*resetProgress/);
   assert.match(failFn, /current\.type === "exam"/);
   assert.match(failFn, /current\.type === "qcm"/);
