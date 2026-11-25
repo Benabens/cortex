@@ -108,6 +108,16 @@ function termPatterns(term: string): RegExp[] {
   return out;
 }
 
+/** Une notion citée par un juge apparaît-elle littéralement dans les extraits qu'il a lus ? */
+export function excerptMentionsTerm(term: string, excerpts: { text: string }[]): boolean {
+  const patterns = termPatterns(term);
+  if (!patterns.length) return false;
+  return excerpts.some(({ text }) => {
+    const tokens = tokenize(text, 1).join(" ");
+    return patterns.some((re) => re.test(tokens));
+  });
+}
+
 /**
  * Textes normalisés du corpus du cours courant, ou null s'il est vide ou trop gros pour être vérifié.
  * Sans les consignes d'examen (exam_info) : une grille d'évaluation dit comment le cours est noté,
