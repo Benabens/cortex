@@ -74,15 +74,33 @@ export async function initErrorTracking(
   }
 }
 
+/** Compte `e` comme déjà envoyée : signalée sous une autre forme (lib/failure-report), elle ne repart pas. */
+export function markReported(e: unknown): void {
+  if (e && typeof e === "object") _reported.add(e);
+}
+
+/** Niveau et regroupement d'un événement (sinon : « error », groupé par Sentry sur la pile). */
+export type CaptureOptions = { level?: "error" | "warning"; fingerprint?: string[] };
+
+/**
+ * Exceptions déjà envoyées par ce process : une erreur signalée là où elle est née (lib/failure-report)
+ * puis relevée plus haut (route non gérée, outil MCP) ne fait qu'un événement.
+ */
+const _reported = new WeakSet<object>();
+
 /**
  * Signale une erreur DÉJÀ gérée (le journal reste la source primaire). No-op si
  * le suivi n'est pas actif. Les étiquettes passées ici doivent rester techniques
  * — jamais d'e-mail, de contenu de cours ni d'identifiant d'utilisateur.
  */
-export function captureError(e: unknown, tags: Record<string, string> = {}): void {
+export function captureError(e: unknown, tags: Record<string, string> = {}, opts: CaptureOptions = {}): void {
   if (!_sentry?.captureException) return;
+  if (e && typeof e === "object") {
+    if (_reported.has(e)) return;
+    _reported.add(e);
+  }
   try {
-    _sentry.captureException(e, { tags });
+    _sentry.captureException(e, { tags, ...(opts.level ? { level: opts.level } : {}), ...(opts.fingerprint ? { fingerprint: opts.fingerprint } : {}) });
   } catch {
     /* le suivi d'erreurs ne doit jamais casser le chemin d'exécution */
   }
