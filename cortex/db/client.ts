@@ -30,6 +30,11 @@ export function currentCourse(): string {
   return courseCtx.getStore() ?? process.env.CORTEX_COURSE ?? DEFAULT_COURSE;
 }
 
+/** Un cours courant a-t-il été posé (contexte ou CORTEX_COURSE), plutôt que le repli cs-202 ? */
+export function hasCourseContext(): boolean {
+  return courseCtx.getStore() !== undefined || !!process.env.CORTEX_COURSE;
+}
+
 /**
  * Installe le cours courant pour le reste de l'exécution asynchrone en cours
  * (ex. 1ʳᵉ ligne d'un route handler). Chaque requête HTTP a sa propre chaîne async →

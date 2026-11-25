@@ -15,6 +15,7 @@ import type { IngestReport } from "@/lib/ingest-report";
 import type { JobError, JobStepInfo } from "@/lib/i18n/job-text";
 import { stageTracker, type StageInfo } from "@/lib/job-stage";
 import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
+import { reportFailure, jobFailureLevel } from "@/lib/failure-report";
 
 /**
  * Jobs de génération en ARRIÈRE-PLAN, découplés de la requête HTTP.
@@ -212,7 +213,9 @@ async function releaseReservation(type: JobType, ref: string, user: string): Pro
     await refundGeneration(type, ref, user);
     await releaseJobSlot(user, ref);
     await releaseQuotaEvent(user, ref);
-  } catch { /* best-effort */ }
+  } catch {
+    reportFailure({ failure: "refund_failed", level: "error", code: "release_reservation", jobType: type });
+  }
 }
 
 /**
@@ -581,16 +584,14 @@ export async function reconcileStaleJobs(): Promise<number> {
       await requeueJob(currentUser(), currentCourse(), r.id);
     } else {
       const error = reservationValid ? ZOMBIE_MSG : "Reprise annulée : la réservation de crédits est absente ou n’est plus valide.";
-      await setJob(r.id, { status: "error", error, errorInfo: userError(reservationValid ? "job_worker_lost" : "job_reservation_invalid") });
+      const code = reservationValid ? "job_worker_lost" : "job_reservation_invalid";
+      await setJob(r.id, { status: "error", error, errorInfo: userError(code) });
       await logJob(r.id, error);
-      // Le worker est mort sans passer par fail() : personne d'autre ne le signalera.
-      const { captureError } = await import("@/lib/observability");
-      captureError(new Error(`Job abandonné par la réconciliation : ${reservationValid ? "worker interrompu, tentatives épuisées" : "réservation absente"}`), {
-        area: "jobs", step: "reconcile", job_type: r.type,
-      });
       // Échec définitif hors du worker (celui-ci est mort sans passer par
       // fail()) → c'est ICI qu'il faut rendre les crédits : rien n'a été livré.
-      await refundJobCredits({ id: r.id, type: r.type as JobType }, "failed");
+      const back = await refundJobCredits({ id: r.id, type: r.type as JobType }, "failed");
+      // Le worker est mort sans passer par fail() : personne d'autre ne le signalera.
+      reportFailure({ failure: "job_abandoned", level: "error", code, jobType: r.type, extra: { credits_back: back > 0 ? "yes" : "no" } });
     }
   }
   return fixed;
@@ -822,7 +823,11 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
       await logJob(job.id, `${fmtCreditsBack(back)} : le job n'a rien produit${spent > 0 ? ` après ${spent.toFixed(3)} $ d'appels au modèle, crédits rendus offerts` : ""}.`).catch(() => {});
     }
     return back;
-  } catch { return 0; /* best-effort : jamais bloquant */ }
+  } catch {
+    // Jamais bloquant, mais jamais muet : un échec sans remboursement, l'étudiant a payé pour rien.
+    reportFailure({ failure: "refund_failed", level: "error", code: `refund_job_${why}`, jobType: job.type });
+    return 0;
+  }
 }
 
 /**
@@ -839,7 +844,7 @@ export async function settleShortfall(job: Pick<Job, "id" | "type">, produced: n
 export type Shortfall = { text: string; missing: number; requested: number; backCenti: number };
 
 /** settleShortfall, avec le manque et les crédits rendus en nombres. */
-export async function settleShortfallDetail(job: Pick<Job, "id" | "type">, produced: number, requested: number): Promise<Shortfall | null> {
+export async function settleShortfallDetail(job: Pick<Job, "id" | "type">, produced: number, requested: number, opts: { report?: boolean } = {}): Promise<Shortfall | null> {
   const missing = Math.max(0, requested - produced);
   if (!missing || requested <= 0) return null;
   const what = missing === 1
@@ -855,9 +860,70 @@ export async function settleShortfallDetail(job: Pick<Job, "id" | "type">, produ
       notice = `${what} : ${fmtCreditsBack(back)}`;
       backCenti = back;
     }
-  } catch { /* best-effort : le message reste dû */ }
+  } catch {
+    // Le message reste dû ; le remboursement manqué, lui, doit se voir.
+    reportFailure({ failure: "refund_failed", level: "error", code: "refund_shortfall", jobType: job.type });
+  }
   await logJob(job.id, `⚠ ${notice}.`).catch(() => {});
+  // Le nombre de questions reste au journal : dans l'empreinte, il éclaterait le regroupement.
+  if (opts.report !== false) reportFailure({ failure: "exam_incomplete", level: "warning", code: "exam_incomplete", jobType: job.type, extra: { credits_back: backCenti > 0 ? "yes" : "no" } });
   return { text: notice, missing, requested, backCenti };
+}
+
+/**
+ * ÉCHEC DÉFINITIF d'un job, écrit par son worker (scripts/run-job.ts fail) : état « error », journal,
+ * remboursement (sauf `refund: false`, une aide qui a déjà appliqué sa règle), puis UN événement
+ * Sentry. « skipped » : l'étudiant a annulé entre-temps, ou le job était déjà livré — cancelJob
+ * a statué, rien n'est écrasé ni signalé. L'appelant sort du process (après flushErrorTracking).
+ */
+export async function recordJobFailure(jobId: number, msg: string, info: JobError = userError("job_failed"), opts: { refund?: boolean } = {}): Promise<"failed" | "skipped"> {
+  // « done » aussi : un QCM annulé après livraison est clos par cancelJob avec ce qu'il contenait.
+  try { if (["canceled", "done"].includes((await getJob(jobId))?.status ?? "")) return "skipped"; } catch {}
+  let type: string | undefined;
+  try {
+    // « exam »/« qcm » SEULEMENT : leur progression PAR PHASE (lib/progress) peut afficher
+    // un pourcentage très avancé pour un échec immédiat — un lot QCM qui échoue vaut « son
+    // unité faite » pour l'ETA (progress.done("QCM", 1) dans lib/qcm.ts), ce qui gonfle
+    // l'avancement même à 0 question construite (constat prod 14/11, job 21 HUM-285 :
+    // plafond de dépense touché en 2 s, progress_pct affiché à 99). resultId n'est posé QUE
+    // par ces deux types (onExamReady) : sans lui, rien de livrable, 0 est le seul pourcentage
+    // honnête. Les autres types (ingest, prepare, format, blueprint…) avancent pas à pas
+    // (stepFields) : leur pourcentage à l'échec est déjà réel — ne JAMAIS l'écraser (régression
+    // du 14/11 : un prepare_course qui échoue après une ingestion réussie retombait à 0 %).
+    const current = await getJob(jobId);
+    type = current?.type;
+    const resetProgress = current && (current.type === "exam" || current.type === "qcm") && !current.resultId;
+    await setJob(jobId, { status: "error", error: msg, errorInfo: info, ...(resetProgress ? { progress: 0 } : {}) });
+    await logJob(jobId, "ERREUR : " + msg);
+  } catch {}
+  // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier (idempotent — ref
+  // refund:job:…, et seulement si le débit a eu lieu) ; après des appels payants,
+  // en crédits offerts, que le budget lié au revenu borne. No-op sans BILLING_ENABLED.
+  let back = 0;
+  if (opts.refund !== false) try {
+    const { fmtCreditsBack } = await import("@/lib/billing/credits");
+    const j = await getJob(jobId);
+    back = j ? await refundJobCredits(j, "failed") : 0;
+    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.`, errorInfo: { ...info, creditsBackCenti: back } });
+  } catch {}
+  // Un job qui échoue de nuit doit être visible. Le message du job peut citer le cours : il
+  // reste au journal, l'événement ne porte que son code.
+  // Une aide (refund: false) a appliqué sa propre règle de remboursement (lib/drill-job) : sans objet ici.
+  const creditsBack = opts.refund === false ? "assist_rule" : back > 0 ? "yes" : "no";
+  reportFailure({ failure: "job_failed", level: jobFailureLevel(info.code), code: info.code, jobType: type, extra: { credits_back: creditsBack } });
+  return "failed";
+}
+
+/**
+ * PDF non compilé même après le repli : le résultat reste lisible (HTML, ou dans l'app pour un
+ * QCM), le job finit « done », mais l'étudiant n'a pas son PDF. L'erreur LaTeX complète reste
+ * sur le job (débogage) ; Sentry n'en reçoit que le code.
+ */
+export async function recordPdfFailure(jobId: number, jobType: string, texError: string): Promise<void> {
+  const fallback = jobType === "qcm" ? "l'examen reste lisible dans l'app" : "repli HTML lisible";
+  await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, ${fallback}. Détail : ${texError.slice(0, 500)}`, errorInfo: userError("job_pdf_failed") });
+  await logJob(jobId, `⚠ Erreur LaTeX : ${texError.slice(0, 300)}`);
+  reportFailure({ failure: "pdf_failed", level: "warning", code: "job_pdf_failed", jobType });
 }
 
 /** Fin d'un examen : l'étape française d'origine et sa forme sans langue (manque éventuel). */
@@ -895,7 +961,7 @@ export async function cancelJob(id: number): Promise<Job | null> {
     const delivered = await qcmDelivery(id);
     if (delivered && delivered.produced > 0) {
       await closeQcmExam(job, delivered);
-      const shortfall = await settleShortfallDetail(job, delivered.produced, delivered.requested);
+      const shortfall = await settleShortfallDetail(job, delivered.produced, delivered.requested, { report: false }); // annulé par l'étudiant : pas une panne
       await setJob(id, { status: "done", progress: 100, ...doneStep(shortfall) });
       await logJob(id, `Annulé après livraison : ${delivered.produced}/${delivered.requested} questions déjà visibles conservées, worker tué.`);
       return await getJob(id);
