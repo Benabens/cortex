@@ -7,7 +7,8 @@ import { FlaskConical, Sparkles, ExternalLink, AlertTriangle, RotateCw } from "l
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { GenerationProgress } from "@/components/generation/GenerationProgress";
-import { useApi, useCourse, useJob, JOB_ACTIVE, jobEnd, type ApiError, engineDown } from "@/lib/ux/api";
+import { useApi, useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, type ApiError, engineDown } from "@/lib/ux/api";
+import { notifyJobStarted } from "@/lib/ux/generation-tracker";
 import { useJobError } from "@/components/generation/useJobError";
 import { examLinkFromResultPath, type LabsResp } from "@/lib/ux/training";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
@@ -16,6 +17,7 @@ import { useTranslations } from "use-intl/react";
 /**
  * Série Labs (spécifique CS-202 — le moule « Q6 2025 » sur le vrai code des labs).
  * GET /api/labs/generate → série ; POST {lab} → JOB de génération d'un exo neuf.
+ * Page quittée ou rechargée pendant la génération : le suivi reprend sur la carte de son lab.
  */
 export function LabsSeries() {
   const t = useTranslations("labsSeries");
@@ -34,6 +36,19 @@ export function LabsSeries() {
   const launch = useLaunchUsage("lab-exercise");
   const { refresh: refreshUsage } = launch;
   useEffect(() => { if (!running) refreshUsage(); }, [running, refreshUsage]);
+
+  // Un exercice de lab lancé avant (page quittée, rechargement) : son suivi reprend sur sa carte.
+  useEffect(() => {
+    setJobId(null); setActiveLab(null);
+    let alive = true;
+    if (courseId) void findActiveJob(courseId, ["lab-exercise"]).then((j) => {
+      if (!alive || !j) return;
+      notified.current = false;
+      setActiveLab(labOfTarget(j.target));
+      setJobId(j.id);
+    });
+    return () => { alive = false; };
+  }, [courseId]);
 
   useEffect(() => {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
@@ -68,6 +83,9 @@ export function LabsSeries() {
         throw err;
       }
       setJobId(d.jobId);
+      // Un exercice déjà en cours pour ce cours : la route rend le sien, son suivi va sur sa carte.
+      if (d.existing) setActiveLab(null);
+      notifyJobStarted();
     } catch (e) {
       const err = e as ApiError;
       setGenError(
@@ -80,6 +98,8 @@ export function LabsSeries() {
   };
 
   const doneLink = job && !JOB_ACTIVE.includes(job.status) ? examLinkFromResultPath(job.resultPath, courseId) : null;
+  // La carte qui suit le job : celle du clic, sinon celle de son lab (job repris, ou déjà en cours).
+  const shownLab = activeLab ?? labOfTarget(job?.target ?? null);
 
   return (
     <section>
@@ -111,7 +131,7 @@ export function LabsSeries() {
         {!running && <UsageLine usage={launch.usage} now={launch.now} className="mb-3" />}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {data.series.map(({ lab, exams }) => {
-            const isActive = activeLab === lab.id;
+            const isActive = shownLab === lab.id;
             return (
               <Panel key={lab.id} className="flex flex-col gap-4 p-5 sm:p-6">
                 <div className="flex flex-wrap items-center gap-3">
@@ -162,4 +182,14 @@ export function LabsSeries() {
       )}
     </section>
   );
+}
+
+/** Le lab d'un job « lab-exercise », lu dans sa cible (`{lab, topic?}`, app/api/labs/generate). */
+function labOfTarget(target: string | null): string | null {
+  try {
+    const lab = (JSON.parse(target ?? "{}") as { lab?: unknown }).lab;
+    return typeof lab === "string" && lab ? lab : null;
+  } catch {
+    return null;
+  }
 }
