@@ -68,10 +68,16 @@ export async function purgeExamLogisticsConcepts(): Promise<number> {
   return bad.length;
 }
 
-/** Marque des concepts comme testés : avance l'intervalle (SM-2 simplifié). */
+/**
+ * Plafond de l'intervalle de révision. Sans lui, une notion testée une vingtaine de fois sortait des
+ * dates de JavaScript (« Invalid time value ») et l'examen suivant qui la testait échouait (25/11/2026).
+ */
+export const MAX_INTERVAL_DAYS = 365;
+
+/** Marque des concepts comme testés : avance l'intervalle (SM-2 simplifié), une fois par concept. */
 export async function markTested(concepts: string[]): Promise<void> {
   await q.tx(async () => {
-    for (const c of concepts.filter((x) => !notMatter(x))) {
+    for (const c of new Set(concepts.filter((x) => !notMatter(x)))) {
       const row = await q.get<{ interval_days: number; ease: number }>(
         `SELECT interval_days, ease FROM schedule WHERE concept = ?`,
         c
@@ -89,7 +95,7 @@ export async function markTested(concepts: string[]): Promise<void> {
           nowPlusDays(3)
         );
       } else {
-        const next = Math.max(3, Math.round((row.interval_days || 1) * (row.ease || 2.5)));
+        const next = Math.min(MAX_INTERVAL_DAYS, Math.max(3, Math.round((row.interval_days || 1) * (row.ease || 2.5))));
         await q.run(
           `UPDATE schedule
            SET last_tested_at = ?, interval_days = ?, next_due_at = ?
