@@ -28,6 +28,8 @@ process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 process.env.MAX_COURSES_PER_USER = "unlimited";
+// Correction de l'app en job : aucune place pour un worker détaché, le test exécute le job lui-même.
+process.env.MAX_GLOBAL_ASSIST_JOBS = "0";
 
 type Part = { kind: string; prompt: string; code: string; options: string[]; correct: number; answer: string; criteria: { label: string; points: number }[]; points: number; explanation: string };
 const scq = (tag: string): Part => ({ kind: "scq", prompt: `Which phenomenon is at work (${tag})?`, code: "", options: ["Right: a reinforcing feedback loop", "A balancing loop", "Illusory truth effect", "Malinformation"], correct: 0, answer: "", criteria: [], points: 1, explanation: "The course: a reinforcing loop amplifies its own cause." });
@@ -106,7 +108,7 @@ before(async () => {
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER", "MAX_GLOBAL_ASSIST_JOBS"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -231,7 +233,14 @@ test("C — réponse courte : correction critère par critère sur le barème fi
   const sh = exam.blocks.flatMap((b) => b.parts).find((p) => p.kind === "short")!;
   prompts.length = 0;
   const res = await POST(new NextRequest(`http://cortex.test/api/check-solution?course=${examCourse}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ examId, partId: sh.id, answer: "It is a reinforcing loop." }) }));
-  const d = await res.json() as { result: { criteria: { label: string; points: number; achieved: boolean }[]; score: { earned: number; total: number }; verdict: string } };
+  assert.equal(res.status, 200, await res.clone().text());
+  // La correction est un job : le worker relit le barème de la question dans la base.
+  const { jobId } = await res.json() as { jobId: number };
+  const { executeCheckJob } = await import("../lib/check-job");
+  await runWithCourse(examCourse, () => executeCheckJob(jobId));
+  const { GET } = await import("../app/api/jobs/[id]/route");
+  const out = await GET(new NextRequest(`http://cortex.test/api/jobs/${jobId}?course=${examCourse}`), { params: Promise.resolve({ id: String(jobId) }) });
+  const d = { result: (await out.json() as { check: { criteria: { label: string; points: number; achieved: boolean }[]; score: { earned: number; total: number }; verdict: string } }).check };
   assert.match(prompts[0] ?? "", /BARÈME IMPOSÉ[\s\S]*Names the reinforcing loop \(1 pt\)[\s\S]*Explains the amplification \(1 pt\)/);
   assert.match(prompts[0] ?? "", /A video platform ranks posts/, "le scénario fait partie de l'énoncé");
   assert.deepEqual(d.result.criteria.map((x) => [x.label, x.points, x.achieved]), [["Names the reinforcing loop", 1, true], ["Explains the amplification", 1, false]]);
@@ -331,7 +340,7 @@ test("C — garantie du nombre : une réponse restée illisible n'arrête pas l'
   assert.deepEqual(exam.blocks.map((b) => b.section), ["Q1 — Ethics", "Q2 — Moderation"], "la reprise garde sa section");
 });
 
-test("C × temps restant — l'avancement des questions composées ne recule qu'à l'ajout d'une version ou d'une reprise", async () => {
+test("C × temps restant — l'avancement des questions composées ne recule jamais, même à l'ajout d'une version ou d'une reprise", async () => {
   const id = await compositeCourse(3);
   script = {
     "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
@@ -343,7 +352,8 @@ test("C × temps restant — l'avancement des questions composées ne recule qu'
   const seq: { s: string; p: number }[] = [];
   await runWithCourse(id, () => generateMockExam({ onStep: (s, p) => { seq.push({ s, p }); } }));
   const back = seq.filter((x, i) => i > 0 && x.p < seq[i - 1].p).map((x) => `${x.p} % — ${x.s}`);
-  assert.ok(back.every((x) => /rejetée|inutilisable|reprise/.test(x)), `recul hors réessai :\n${back.join("\n")}\n---\n${seq.map((x) => `${x.p} ${x.s}`).join("\n")}`);
+  assert.ok(seq.some((x) => /rejetée|inutilisable|reprise/.test(x.s)), "une version ou une reprise a bien été ajoutée");
+  assert.deepEqual(back, [], seq.map((x) => `${x.p} ${x.s}`).join("\n"));
   assert.ok(seq.filter((x) => x.p >= 100).length === 1 && seq.at(-1)!.p === 100, "100 % une seule fois, à la fin");
 });
 

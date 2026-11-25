@@ -41,10 +41,15 @@ test("les phrases qui inquiétaient tombent dans une étape neutre", () => {
   assert.ok(cases.every(([, , s]) => (STAGES as readonly string[]).includes(s)));
 });
 
-test("compteurs : QCM construits, lots, version d'une question reprise", () => {
+test("compteurs : QCM construits, exercices de l'écrit (pas ses lots), version d'une question reprise", () => {
   assert.deepEqual(classifyStep("qcm", "11/20 QCM construits + vérifiés…"), { stage: "write", done: 11, total: 20, unit: "qcm" });
-  assert.deepEqual(classifyStep("exam", "Lot 2/3 : génération de 2 exercices…"), { stage: "write", done: 1, total: 3, unit: "lot" });
-  assert.deepEqual(classifyStep("exam", "Lot 2/3 vérifié ✓ (384s)"), { stage: "check", done: 2, total: 3, unit: "lot" });
+  // Écrit : les lots tournent en parallèle, « lot 2/3 » ne disait rien ; l'étape compte les exercices.
+  assert.deepEqual(classifyStep("exam", "Lot 2/3 : génération de 2 exercices…"), { stage: "write" });
+  assert.deepEqual(classifyStep("exam", "3/6 exercices rédigés ✓ (lot 2/3, 120s)"), { stage: "write", done: 3, total: 6, unit: "exercise" });
+  assert.deepEqual(classifyStep("exam", "Architecte : 2/6 exercices construits"), { stage: "write", done: 2, total: 6, unit: "exercise" });
+  assert.deepEqual(classifyStep("exam", "Lot 2/3 : vérification à l'aveugle + durcissement (1/6 exercices vérifiés)…"), { stage: "check", done: 1, total: 6, unit: "exercise" });
+  assert.deepEqual(classifyStep("exam", "4/6 exercices vérifiés ✓ (lot 2/3, 384s)"), { stage: "check", done: 4, total: 6, unit: "exercise" });
+  assert.deepEqual(classifyStep("exam", "2/6 exercices repris du checkpoint (lot 1/3)"), { stage: "write", done: 2, total: 6, unit: "exercise" });
   assert.equal(classifyStep("exam", "Question composée 4/7 (version 2) : Q4…")?.version, 2);
 });
 
@@ -56,6 +61,21 @@ test("suivi : une ligne sans étape garde la précédente, le compteur de QCM tr
   // Vérification du lot suivant : le compte des QCM déjà prêts reste affiché.
   assert.deepEqual(track("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…"), { key: "stage", stage: "check", done: 8, total: 20, unit: "qcm" });
   assert.equal(track("Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel")?.done, undefined);
+});
+
+test("écrit : le compte des exercices vérifiés reste pendant la vérification, ne passe pas à la rédaction", () => {
+  const track = stageTracker("exam");
+  assert.deepEqual(track("3/6 exercices rédigés ✓ (lot 1/2, 90s)"), { key: "stage", stage: "write", done: 3, total: 6, unit: "exercise" });
+  assert.deepEqual(track("Lot 1/2 : vérification à l'aveugle + durcissement (0/6 exercices vérifiés)…"), { key: "stage", stage: "check", done: 0, total: 6, unit: "exercise" });
+  assert.deepEqual(track("Lot 1 · Vérif 1/3 — « Cours — Part 2 » : ok"), { key: "stage", stage: "check", done: 0, total: 6, unit: "exercise" });
+  // Les lots tournent en parallèle : celui qui s'écrit encore ne ramène pas le suivi à la rédaction
+  // (banc du 25/11 : « Vérification · 2/4 exercices prêts » puis « Rédaction · 4/4 exercices prêts »).
+  const checking = { key: "stage", stage: "check", done: 0, total: 6, unit: "exercise" };
+  assert.deepEqual(track("Lot 2/2 : génération de 3 exercices…"), checking, "un lot encore en rédaction ne fait pas reculer l'étape");
+  assert.deepEqual(track("6/6 exercices rédigés ✓ (lot 2/2, 120s)"), checking, "les exercices rédigés ne se lisent pas comme vérifiés");
+  assert.deepEqual(track("3/6 exercices vérifiés ✓ (lot 1/2, 130s)"), { ...checking, done: 3 });
+  assert.deepEqual(track("Lot 2 · Vérif 1/3 — « Réseaux » : ok"), { ...checking, done: 3 });
+  assert.deepEqual(track("Compilation du PDF (LaTeX)…"), { key: "stage", stage: "render" });
 });
 
 test("questions composées : le compte vient des questions prêtes, pas de la dernière commencée", () => {

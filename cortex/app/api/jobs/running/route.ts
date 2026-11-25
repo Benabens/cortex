@@ -6,6 +6,7 @@ import { localizeJob } from "@/lib/i18n/job-text";
 import { jobEta, listActiveJobs } from "@/lib/jobs";
 import { redactMessage } from "@/lib/observability";
 import { useUser } from "@/lib/req";
+import { questionOfTarget } from "@/lib/ux/generation";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -30,6 +31,8 @@ export async function GET(req: NextRequest) {
       out.push({
         id: job.id, course: course.id, courseLabel: courseLabel(course.id), type: job.type, status: job.status, progress: job.progress,
         currentStep: text.currentStep, stepInfo: job.stepInfo, eta: text.eta, ...etaFields(eta), createdAt: job.createdAt,
+        // Correction lancée par l'app : la question corrigée (la pastille y ramène), jamais la cible entière.
+        ...(job.type === "check" ? { question: questionOfTarget(job.target) } : {}),
       });
     }
   }

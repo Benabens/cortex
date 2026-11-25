@@ -22,14 +22,13 @@ import { Button } from "@/components/ui/Button";
 import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { MathText } from "@/components/ui/MathText";
-import { GenerationProgress, GenerationWait } from "@/components/generation/GenerationProgress";
+import { GenerationProgress } from "@/components/generation/GenerationProgress";
 import { useJobError } from "@/components/generation/useJobError";
 import { notifyJobStarted } from "@/lib/ux/generation-tracker";
-import { apiPost, useApi, useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, type ApiError, engineDown } from "@/lib/ux/api";
+import { apiPost, useApi, useCourse, useJob, findActiveJob, JOB_ACTIVE, jobEnd, jobInUrl, rememberJobInUrl, webAssistJobs, type ApiError, engineDown } from "@/lib/ux/api";
 import {
   FEEDBACK_OPTIONS,
   examLinkFromResultPath,
-  type Drill,
   type DrillListResp,
 } from "@/lib/ux/training";
 import { cn } from "@/lib/ux/cn";
@@ -40,10 +39,21 @@ import { useTranslations } from "use-intl/react";
  * Studio d'entraînement RÉEL — UNE seule zone (REFONTE ALLÉGÉE, plus de mode Drill/Architecte).
  * Tu donnes un concept, une consigne, une image, ou tu piques une puce (dus / faiblesses) →
  * Cortex produit un exo AU FORMAT DU FINAL, avec les indices progressifs en OPTION sur le résultat.
- *  - texte seul  → POST /api/drill (sync) : énoncé + 5 indices progressifs + solution ;
+ *  - texte seul  → POST /api/drill (JOB) : énoncé + 5 indices progressifs + solution, lus sur le job ;
  *  - avec image  → POST /api/exercises/generate (JOB) : énoncé/corrigé PDF (pipeline architecte).
+ * Les deux sont des jobs : quitter la page ou recharger ne perd rien (reprise du suivi, `?job=`
+ * pour relire un exercice prêt, notification de fin ailleurs dans l'app).
  * Retour difficulté → POST /api/feedback (recalibre la difficulté).
  */
+
+// Le dernier exercice ciblé affiché, par cours : un exercice fini pendant l'absence revient une fois.
+const seenKey = (course: string) => `cortex:drill-seen:${course}`;
+function drillSeen(course: string): number {
+  try { return Number(window.localStorage.getItem(seenKey(course))) || 0; } catch { return 0; }
+}
+function markDrillSeen(course: string, id: number): void {
+  try { if (id > drillSeen(course)) window.localStorage.setItem(seenKey(course), String(id)); } catch { /* stockage indisponible */ }
+}
 export function TrainingStudio() {
   const t = useTranslations("trainingStudio");
   const apiT = useTranslations("api");
@@ -55,9 +65,6 @@ export function TrainingStudio() {
   const [image, setImage] = useState<File | null>(null);
   const [prefillNote, setPrefillNote] = useState<string | null>(null); // concept pré-rempli depuis Faiblesses
 
-  const [drill, setDrill] = useState<Drill | null>(null);
-  const [drilling, setDrilling] = useState(false);
-  const [drillStartedAt, setDrillStartedAt] = useState(0);
   const [shownHints, setShownHints] = useState(0);
   const [showSolution, setShowSolution] = useState(false);
 
@@ -68,15 +75,17 @@ export function TrainingStudio() {
   const jobRunning = launching || (job != null && JOB_ACTIVE.includes(job.status));
   // Un exercice annulé n'est ni prêt ni en échec : le panneau revient à son état d'avant.
   const end = job ? jobEnd(job.status) : null;
-  const jobDone = end === "done";
-  const jobFailed = end === "failed";
+  // Exercice ciblé (job drill) prêt : son énoncé, ses indices et son corrigé viennent du job.
+  const drill = end === "done" && job?.type === "drill" ? job.drill ?? null : null;
+  const jobDone = end === "done" && job?.type === "exercise";
+  const jobFailed = end === "failed" || (end === "done" && job?.type === "drill" && !drill);
 
   const [error, setError] = useState<{ offline: boolean; message: string } | null>(null);
   const [fbSent, setFbSent] = useState<string | null>(null);
   const [fbBusy, setFbBusy] = useState(false);
   const [fbError, setFbError] = useState<string | null>(null);
 
-  const busy = drilling || jobRunning;
+  const busy = jobRunning;
   // Avec image : exercice (job) ; sinon : question d'entraînement (aide). Même verdict que la route visée.
   const launch = useLaunchUsage(image ? "exercise" : "drill");
   const { refresh: refreshUsage } = launch;
@@ -86,12 +95,41 @@ export function TrainingStudio() {
   // le cours initial se résout de cs-202 → ml via un effet (courseId change au montage) ; effacer
   // l'input ici écraserait le pré-remplissage ?prefill= (déposé au montage). Le × / l'édition suffisent.
   useEffect(() => {
-    setDrill(null); setJobId(null); setError(null); setFbSent(null); setFbError(null); setShownHints(0); setShowSolution(false);
-    // Un exercice lancé avant (page quittée, rechargement) : son suivi reprend ici.
+    setJobId(null); setError(null); setFbSent(null); setFbError(null); setShownHints(0); setShowSolution(false);
     let alive = true;
-    if (courseId) void findActiveJob(courseId, ["exercise"]).then((j) => { if (alive && j) setJobId(j.id); });
+    if (courseId) {
+      // Retour sur la page : l'exercice en cours d'abord (lancé ici avant de partir, ou dans un autre
+      // onglet), puis celui de l'adresse (rechargement, notification de fin), puis un exercice ciblé
+      // fini pendant l'absence et pas encore affiché. Ceux d'un assistant (MCP) restent à l'assistant.
+      void Promise.all([findActiveJob(courseId, ["exercise"]), webAssistJobs(courseId, "drill")]).then(([exercise, drills]) => {
+        const running = [exercise, drills.find((j) => JOB_ACTIVE.includes(j.status))].filter((j) => j != null).sort((a, b) => b.id - a.id)[0];
+        const unseen = drills.find((j) => j.status === "done" && j.id > drillSeen(courseId));
+        const id = running?.id ?? jobInUrl(courseId) ?? unseen?.id ?? null;
+        if (alive && id) setJobId(id);
+      });
+    }
     return () => { alive = false; };
   }, [courseId]);
+
+  // Exercice ciblé affiché : il ne revient plus de lui-même au retour sur la page.
+  useEffect(() => {
+    if (drill && job && courseId) markDrillSeen(courseId, job.id);
+  }, [drill, job, courseId]);
+
+  // Exercice repris (retour, rechargement) : sa notion revient dans la zone, pour le relancer tel quel.
+  const resumed = useRef<number | null>(null);
+  useEffect(() => {
+    if (!job || resumed.current === job.id) return;
+    resumed.current = job.id;
+    // `?job=` d'un autre type (lien bricolé) : ce n'est pas un exercice, on l'ignore.
+    if (job.type !== "drill" && job.type !== "exercise") { setJobId(null); return; }
+    if (job.type !== "drill") return;
+    try {
+      const concept = String((JSON.parse(job.target ?? "{}") as { concept?: unknown }).concept ?? "").trim();
+      if (concept) setInput((cur) => cur.trim() ? cur : concept);
+    } catch { /* cible illisible */ }
+  }, [job]);
+
 
   // Deep-link ?prefill=<concept> (bouton « S'entraîner » des Faiblesses ; legacy ?drill= toléré).
   // On PRÉ-REMPLIT la box (éditable, × pour vider) — SANS lancer : l'étudiant garde la main.
@@ -110,13 +148,14 @@ export function TrainingStudio() {
   async function launchDrill(c?: string) {
     const chosen = (c ?? input).trim();
     if (!chosen || busy) return;
-    setError(null); setDrill(null); setJobId(null); setFbSent(null); setFbError(null);
+    setError(null); setJobId(null); setFbSent(null); setFbError(null);
     setShownHints(0); setShowSolution(false);
-    setDrilling(true);
-    setDrillStartedAt(Date.now());
+    setLaunching(true);
     try {
-      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen }, (status) => apiT("httpError", { status }));
-      setDrill(d.drill);
+      const d = await apiPost<{ ok: boolean; jobId: number }>("/api/drill", courseId, { concept: chosen }, (status) => apiT("httpError", { status }));
+      setJobId(d.jobId);
+      rememberJobInUrl(d.jobId, courseId);
+      notifyJobStarted();
     } catch (e) {
       const err = e as ApiError;
       setError({
@@ -126,13 +165,13 @@ export function TrainingStudio() {
           : err.message || t("generationFailed"),
       });
     } finally {
-      setDrilling(false);
+      setLaunching(false);
     }
   }
 
   async function launchArchitect() {
     if (busy) return;
-    setError(null); setDrill(null); setFbSent(null); setFbError(null); setJobId(null);
+    setError(null); setFbSent(null); setFbError(null); setJobId(null);
     setLaunching(true);
     try {
       const fd = new FormData();
@@ -142,6 +181,7 @@ export function TrainingStudio() {
       const d = await res.json().catch(() => null);
       if (!res.ok) throw { status: res.status, message: d?.error ?? apiT("httpError", { status: res.status }), code: typeof d?.code === "string" ? d.code : null, params: d?.params } as ApiError;
       setJobId(d.jobId);
+      rememberJobInUrl(d.jobId, courseId);
       notifyJobStarted();
     } catch (e) {
       const err = e as ApiError;
@@ -186,8 +226,8 @@ export function TrainingStudio() {
   }
 
   const resultLink = jobDone ? examLinkFromResultPath(job?.resultPath ?? null, courseId) : null;
-  // Demande partie, premier retour pas encore arrivé (exo direct, ou job pas encore créé).
-  const waiting = drilling || (jobRunning && !job);
+  // Demande partie, premier retour pas encore arrivé (job pas encore créé ou pas encore lu).
+  const waiting = jobRunning && !job;
   // Le panneau de résultat n'existe que s'il a quelque chose à montrer : pas de grand cadre vide
   // « ton exo apparaîtra ici » à côté du formulaire.
   const hasResult = !!drill || busy || jobDone || jobFailed;
@@ -318,19 +358,10 @@ export function TrainingStudio() {
             </div>
             <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
           </>
-        ) : drilling ? (
-          // Un seul appel au modèle, sans étapes à compter : ce qui se passe et la durée habituelle.
-          <div className="flex flex-1 flex-col justify-center gap-4">
-            <GenerationWait kind="drill" startedAt={drillStartedAt} />
-            <div className="flex flex-col gap-3" aria-hidden="true">
-              <div className="skeleton h-4 w-11/12" />
-              <div className="skeleton h-4 w-4/5" />
-              <div className="skeleton h-4 w-2/3" />
-            </div>
-          </div>
         ) : waiting || (jobRunning && job) ? (
           <div className="flex flex-1 flex-col justify-center">
-            <GenerationProgress job={job} meanwhile={false} />
+            {/* Exercice ciblé : une aide, qui ne s'annule pas (son prix est réglé au lancement). */}
+            <GenerationProgress job={job} meanwhile={false} cancelable={job?.type !== "drill"} />
           </div>
         ) : jobDone ? (
           <>

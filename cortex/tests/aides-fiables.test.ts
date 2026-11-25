@@ -139,7 +139,15 @@ for (const [what, bad] of [
     replies = [{ content: JSON.stringify(bad) }, { content: JSON.stringify(DRILL) }];
     const res = await POST(drillPost());
     assert.equal(res.status, 200, await res.clone().text());
-    const { drill } = (await res.json()) as { drill: typeof DRILL };
+    // La route lance un job (24/11/2026) : le worker écrit l'exercice, la page le lit sur le job.
+    const { jobId } = (await res.json()) as { jobId: number };
+    const { runWithCourse } = await import("../db/client");
+    const { executeDrillJob, drillOfJob } = await import("../lib/drill-job");
+    const { getJob } = await import("../lib/jobs");
+    const drill = await runWithCourse("cs-202", async () => {
+      assert.deepEqual(await executeDrillJob(jobId), { ok: true });
+      return (await drillOfJob((await getJob(jobId))!))!;
+    });
     assert.equal(calls, 2, "la réponse incomplète est redemandée");
     assert.match(userPrompt(1), /(5 indices|non vides)/);
     assert.equal(drill.hints.length, 5);

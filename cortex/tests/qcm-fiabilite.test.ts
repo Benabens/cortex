@@ -656,7 +656,7 @@ test("ETA — sans réessai, l'avancement d'un examen QCM (lots et ouvertes en p
   assert.equal(seq.at(-1)?.p, 100);
 });
 
-test("ETA — l'avancement ne recule qu'à l'ajout d'un réessai (une ouverte relancée)", async () => {
+test("ETA — un réessai ajouté (une ouverte relancée) ne fait pas reculer l'avancement", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
@@ -667,9 +667,26 @@ test("ETA — l'avancement ne recule qu'à l'ajout d'un réessai (une ouverte re
   try {
     const seq: { s: string; p: number }[] = [];
     await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 3, onStep: (s, p) => { seq.push({ s, p }); } }));
-    const back = regressions(seq);
-    assert.ok(back.every((x) => /→ nouvel essai/.test(x)), `recul hors réessai :\n${back.join("\n")}`);
+    assert.ok(seq.some((x) => /→ nouvel essai/.test(x.s)), "le réessai a bien eu lieu");
+    assert.deepEqual(regressions(seq), [], seq.map((x) => `${x.p} ${x.s}`).join("\n"));
   } finally {
     write = ok;
   }
+});
+
+test("ETA — une ronde de comblement ne fait pas reculer l'avancement (rejeu HUM-285 : 75 % → 55 %)", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({
+    items: call <= 2 ? [item(call)] : Array.from({ length: n }, (_, i) => item(call * 10 + i)),
+  });
+  const seq: { s: string; p: number }[] = [];
+  await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0, onStep: (s, p) => { seq.push({ s, p }); } }));
+  const round = seq.findIndex((x) => /lot\(s\) de comblement/.test(x.s));
+  assert.ok(round > 0, "la ronde de comblement a bien eu lieu");
+  assert.deepEqual(regressions(seq), [], seq.map((x) => `${x.p} ${x.s}`).join("\n"));
+  // Conception, vérification et revue pèsent leur durée : la ronde ne s'ouvre pas sur une barre déjà presque pleine.
+  assert.ok(seq[round].p < 90, `${seq[round].p} % à l'ouverture de la ronde`);
+  assert.equal(seq.at(-1)?.p, 100);
 });

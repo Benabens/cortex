@@ -7,7 +7,7 @@ import { Orb } from "./Orb";
 import { useCourse, withCourse, JOB_ACTIVE, type Job } from "@/lib/ux/api";
 import { useShowJob } from "./useShowJob";
 import { jobEnded } from "@/lib/ux/generation-tracker";
-import { barValue, cancelOutcome, elapsedMinutes, orbStateFor, rangeText, stageOf } from "@/lib/ux/generation";
+import { barValue, cancelOutcome, elapsedMinutes, measuredProgress, orbStateFor, rangeText, stageOf } from "@/lib/ux/generation";
 import { cn } from "@/lib/ux/cn";
 
 /**
@@ -85,17 +85,20 @@ export function GenerationProgress({ job, cancelable = true, meanwhile = true, a
             <p className="min-w-0 text-[0.92rem] font-medium text-ink-1 [overflow-wrap:anywhere]">{step}</p>
             {eta && <p className="font-data text-[0.8rem] tabular-nums text-ink-2">{eta}</p>}
           </div>
-          <div
-            role="progressbar"
-            aria-label={t("progress")}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={job ? value : undefined}
-            aria-valuetext={job ? t("progressText", { value, step: announce }) : t("launching")}
-            className="gen-track mt-2.5"
-          >
-            <div className="gen-fill" data-indeterminate={!job || undefined} style={{ transform: `scaleX(${value / 100})` }} />
-          </div>
+          {/* Un seul appel au modèle (exercice ciblé, correction) : rien à mesurer, pas de barre ; l'orbe et la durée suffisent. */}
+          {(!job || measuredProgress(job.type)) && (
+            <div
+              role="progressbar"
+              aria-label={t("progress")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={job ? value : undefined}
+              aria-valuetext={job ? t("progressText", { value, step: announce }) : t("launching")}
+              className="gen-track mt-2.5"
+            >
+              <div className="gen-fill" data-indeterminate={!job || undefined} style={{ transform: `scaleX(${value / 100})` }} />
+            </div>
+          )}
           <p className="mt-2 text-[0.78rem] leading-relaxed text-ink-3">
             {elapsed !== null && <span className="font-data tabular-nums">{t("elapsed", { minutes: elapsed })}</span>}
             {elapsed !== null && " · "}
@@ -172,33 +175,6 @@ function CancelButton({ job, courseId, onCanceled }: { job: Job; courseId: strin
         <button ref={confirmRef} type="button" className="gen-cancel gen-cancel-confirm" onClick={cancel} disabled={busy} aria-describedby={outcomeId}>
           {busy ? t("canceling") : t("cancelConfirm")}
         </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * ATTENTE COURTE SANS ÉTAPES (exercice d'entraînement, correction d'une réponse) : un seul appel
- * au modèle, rien à compter. On dit ce qui se passe, la durée habituelle, et le temps écoulé,
- * sans barre inventée.
- */
-export function GenerationWait({ kind, startedAt, className }: { kind: "drill" | "check"; startedAt: number; className?: string }) {
-  const t = useTranslations("generation");
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  const s = Math.max(0, Math.floor((now - startedAt) / 1000));
-  const clock = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  return (
-    <div className={cn("flex items-center gap-3", className)} role="status">
-      <Orb state={kind === "check" ? "solving" : "composing"} size={32} />
-      <div className="min-w-0">
-        <p className="text-[0.9rem] font-medium text-ink-1">{t(`wait.${kind}`)}</p>
-        <p className="text-[0.78rem] text-ink-3">
-          {t(`waitTypical.${kind}`)} · <span className="font-data tabular-nums" aria-hidden="true">{clock}</span>
-        </p>
       </div>
     </div>
   );

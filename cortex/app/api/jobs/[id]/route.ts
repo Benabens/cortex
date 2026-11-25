@@ -3,7 +3,9 @@ import { isOwner } from "@/lib/billing/owner";
 import { etaFields } from "@/lib/eta";
 import { apiError, requestLocale } from "@/lib/i18n/api-error";
 import { localizeJob } from "@/lib/i18n/job-text";
-import { cancelJob, getJob, jobEta } from "@/lib/jobs";
+import { cancelJob, getJob, jobEta, type Job } from "@/lib/jobs";
+import { mathInHtml } from "@/lib/math-html";
+import { sanitizeHtml } from "@/lib/sanitize-html";
 import { JOB_ACTIVE } from "@/lib/ux/job-status";
 import { redactMessage } from "@/lib/observability";
 import { useCourseOr404 } from "@/lib/req";
@@ -33,7 +35,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // débité, on ne lui promet pas de crédits. Lu seulement tant que le job tourne (bouton Annuler).
   const charged = JOB_ACTIVE.includes(job.status) ? billingEnabled() && !(await isOwner()) : undefined;
   // La fourchette du temps restant (lib/eta) : la barre de suivi l'affiche, le libellé reste celui d'avant.
-  return NextResponse.json({ ...redacted, ...localizeJob(redacted, eta, requestLocale(req)), ...etaFields(eta), charged });
+  return NextResponse.json({ ...redacted, ...localizeJob(redacted, eta, requestLocale(req)), ...etaFields(eta), charged, ...(await assistResult(job)) });
+}
+
+/** Aide en job terminée (exercice ciblé, correction) : son résultat, pour la page qui la suit. */
+async function assistResult(job: Job) {
+  if (job.status !== "done") return {};
+  if (job.type === "drill") {
+    const { drillOfJob } = await import("@/lib/drill-job");
+    const drill = await drillOfJob(job);
+    // HTML du modèle assaini ici, formules composées (lib/math-html) : la vue l'affiche par `SafeHtml math`.
+    const withFormulas = (html: string) => mathInHtml(html) ?? sanitizeHtml(html);
+    return drill ? { drill: { ...drill, statement_html: withFormulas(drill.statement_html), solution_html: withFormulas(drill.solution_html) } } : {};
+  }
+  if (job.type === "check") {
+    const { checkOfJob } = await import("@/lib/check-job");
+    const check = await checkOfJob(job);
+    return check ? { check } : {};
+  }
+  return {};
 }
 
 /** Annulation (alias historique de /cancel) : tue réellement le worker et ses enfants. */

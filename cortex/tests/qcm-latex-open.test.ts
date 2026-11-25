@@ -165,6 +165,25 @@ test("J — un examen QCM sans PDF reste ouvrable en ligne, et se recompile sans
 });
 
 
+test("carte d'examen écrit : les exercices vérifiés de l'examen, en clair, pas le rapport du moteur", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { listExams } = await import("../lib/exam");
+  const examId = await runWithCourse("ml", async () => {
+    await listExams();
+    await q.ensureColumns("exams", ["verify_summary"]);
+    const id = await q.insert(`INSERT INTO exams (format_template, status, html_path) VALUES (NULL,'ready','')`);
+    // Rapport du moteur : 1 exercice corrigé puis durci (compté deux fois), 1 durci resté non vérifié.
+    await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, "ok=1 corrigés=1 durcis=2 retirés=0 non-vérifiés=1", id);
+    for (const verified of [1, 1, null]) {
+      await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, verified) VALUES (?,?,?,?,?)`, id, "Risk", "Énoncé.", "Corrigé.", verified);
+    }
+    return id;
+  });
+  const card = (await runWithCourse("ml", () => listExams())).find((e) => e.id === examId)!;
+  assert.equal(card.verifySummary, "2 exercices vérifiés sur 3");
+});
+
 test("J × #54 — le corrigé recompilé ne ressort pas une explication à note de clé périmée", async (t) => {
   const { texAvailable } = await import("../lib/exam-latex");
   if (!texAvailable()) return t.skip("tectonic/pdflatex absent");

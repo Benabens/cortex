@@ -1702,5 +1702,29 @@
 {
 "type": "qcm",
 "step": "⚠ 11 questions sur 15 demandées (…)"
+},
+{
+"type": "exam",
+"step": "3/6 exercices rédigés ✓ (lot 2/3, 120s)"
+},
+{
+"type": "exam",
+"step": "Architecte : 2/6 exercices construits"
+},
+{
+"type": "exam",
+"step": "2/6 exercices construits par l'architecte ✓ (lot 1/3, 310s)"
+},
+{
+"type": "exam",
+"step": "Lot 2/3 : vérification à l'aveugle + durcissement (1/6 exercices vérifiés)…"
+},
+{
+"type": "exam",
+"step": "4/6 exercices vérifiés ✓ (lot 2/3, 384s)"
+},
+{
+"type": "exam",
+"step": "2/6 exercices repris du checkpoint (lot 1/3)"
 }
 ]

@@ -32,6 +32,8 @@ process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
 // Relecture de check_answer (lib/assist-review) testée dans aides-relecture.test.ts : ici, un seul appel par essai.
 process.env.CORTEX_CHECK_REVIEW = "0";
+// Aides de l'app en job : aucune place pour un worker détaché, le test exécute le job lui-même.
+process.env.MAX_GLOBAL_ASSIST_JOBS = "0";
 
 let reply: () => { status?: number; content?: string } = () => ({ content: "{}" });
 let calls = 0;
@@ -62,7 +64,7 @@ beforeEach(() => { calls = 0; bodies.length = 0; });
 
 after(async () => {
   await new Promise((r) => server.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "DAILY_ASSIST_QUOTA", "RATE_LIMIT_PER_USER_MIN", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL"]) delete process.env[k];
+  for (const k of ["MAX_GLOBAL_ASSIST_JOBS", "CORTEX_DATA_DIR", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "DAILY_ASSIST_QUOTA", "RATE_LIMIT_PER_USER_MIN", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -71,60 +73,122 @@ const post = (route: string, body: unknown) =>
     method: "POST", headers: { "content-type": "application/json", "accept-language": "fr" }, body: JSON.stringify(body),
   });
 
+type JobJson = { status: string; error?: string | null; errorInfo?: { code: string } | null; drill?: { statement_html: string }; check?: { verdict: string } };
+
+/** Aide de l'app (drill, correction) : la route lance le job, le worker l'exécute, la page lit /api/jobs/[id]. */
+async function webJob(res: Response): Promise<JobJson> {
+  assert.equal(res.status, 200, await res.clone().text());
+  const { jobId } = (await res.json()) as { jobId: number };
+  const { runWithCourse } = await import("../db/client");
+  const { getJob } = await import("../lib/jobs");
+  await runWithCourse("cs-202", async () => {
+    const job = (await getJob(jobId))!;
+    if (job.type === "drill") await (await import("../lib/drill-job")).executeDrillJob(jobId);
+    else await (await import("../lib/check-job")).executeCheckJob(jobId);
+  });
+  const { GET } = await import("../app/api/jobs/[id]/route");
+  const out = await GET(new NextRequest(`http://cortex.test/api/jobs/${jobId}?course=cs-202`, { headers: { "accept-language": "fr" } }), { params: Promise.resolve({ id: String(jobId) }) });
+  return (await out.json()) as JobJson;
+}
+
 test("drill (app) : un énoncé avec bloc de code dans du ```json est lu, en sortie structurée", async () => {
   const { POST } = await import("../app/api/drill/route");
   const drill = { concept: "groupby", statement_html: "<p>Code :</p>\n```python\nprint(df.groupby(\"sex\").mean())\n```", hints: ["a", "b", "c", "d", "e"], solution_html: "<p>Moyenne par groupe.</p>" };
   reply = () => ({ content: "```json\n" + JSON.stringify(drill, null, 2) + "\n```" });
-  const res = await POST(post("drill", { concept: "groupby" }));
-  assert.equal(res.status, 200);
-  const out = (await res.json()) as { drill: typeof drill };
-  assert.equal(out.drill.statement_html, drill.statement_html);
+  const out = await webJob(await POST(post("drill", { concept: "groupby" })));
+  assert.equal(out.drill?.statement_html, drill.statement_html);
   assert.equal(calls, 1);
   assert.ok(bodies[0].response_format, "le drill demande une sortie structurée");
 });
 
-test("drill (app) : 3 réponses illisibles → 502 au message clair, appel remboursé", async () => {
+test("drill (app) : 3 réponses illisibles → job en échec au message clair, appel remboursé", async () => {
   const { POST } = await import("../app/api/drill/route");
   const credits = await import("../lib/billing/credits");
   const before = await credits.getBalanceCenti("owner");
   reply = () => ({ content: "Voici une question d'entraînement sur groupby." });
-  const res = await POST(post("drill", { concept: "groupby" }));
-  assert.equal(res.status, 502);
-  const out = (await res.json()) as { error: string; code: string };
-  assert.equal(out.code, "llm_bad_output");
-  assert.match(out.error, /illisible/);
+  const out = await webJob(await POST(post("drill", { concept: "groupby" })));
+  assert.equal(out.status, "error");
+  assert.equal(out.errorInfo?.code, "llm_bad_output");
+  assert.match(out.error ?? "", /illisible/);
   assert.equal(calls, 3, "redemandé avec l'erreur, 3 essais");
   assert.equal(await credits.getBalanceCenti("owner"), before, "notre défaut : rien ne reste débité");
 });
 
-test("check-solution (app) : réponse illisible → 502 clair et remboursé ; réponse valide lue", async () => {
+test("check-solution (app) : réponse illisible → échec clair et remboursé ; réponse valide lue", async () => {
   const { POST } = await import("../app/api/check-solution/route");
   const credits = await import("../lib/billing/credits");
   const before = await credits.getBalanceCenti("owner");
   reply = () => ({ content: "Correct !" });
-  const bad = await POST(post("check-solution", { statement: "Que vaut 1+1 ?", answer: "2" }));
-  assert.equal(bad.status, 502);
-  assert.match(((await bad.json()) as { error: string }).error, /illisible/);
+  const bad = await webJob(await POST(post("check-solution", { statement: "Que vaut 1+1 ?", answer: "2" })));
+  assert.equal(bad.status, "error");
+  assert.match(bad.error ?? "", /illisible/);
   assert.equal(await credits.getBalanceCenti("owner"), before);
   const verdict = { verdict: "correct", feedback: "Juste.", correct_solution: "2", criteria: [
     { label: "Calcule 1+1", points: 1, achieved: true, essential: true, justification: "2 est donné." },
     { label: "Donne le résultat", points: 1, achieved: true, essential: false, justification: "Résultat donné." },
   ] };
   reply = () => ({ content: "```json\n" + JSON.stringify(verdict) + "\n```" });
-  const ok = await POST(post("check-solution", { statement: "Que vaut 1+1 ?", answer: "2" }));
-  assert.equal(ok.status, 200);
+  const ok = await webJob(await POST(post("check-solution", { statement: "Que vaut 1+1 ?", answer: "2" })));
+  assert.equal(ok.check?.verdict, "correct");
   assert.ok(bodies.at(-1)!.response_format, "la correction demande une sortie structurée");
+});
+
+test("check-solution (app) : deux réponses se corrigent en même temps ; la question corrigée est dans le job", async () => {
+  const { POST } = await import("../app/api/check-solution/route");
+  const credits = await import("../lib/billing/credits");
+  const before = await credits.getBalanceCenti("owner");
+  const first = await POST(post("check-solution", { statement: "Que vaut 1+1 ?", answer: "2", examId: 7, questionId: 3 }));
+  assert.equal(first.status, 200);
+  const { jobId } = (await first.clone().json()) as { jobId: number };
+  // Comme avant le passage en job : vérifier une autre réponse pendant que la première se corrige.
+  const second = await POST(post("check-solution", { statement: "Que vaut 2+2 ?", answer: "4", examId: 7, questionId: 4 }));
+  assert.equal(second.status, 200);
+  const { jobId: other } = (await second.clone().json()) as { jobId: number };
+  assert.notEqual(other, jobId, "chaque réponse a sa correction");
+  assert.equal(await credits.getBalanceCenti("owner"), before - 60, "chacune débitée une fois");
+  const { runWithCourse } = await import("../db/client");
+  const { getJob, listActiveJobs } = await import("../lib/jobs");
+  await runWithCourse("cs-202", async () => {
+    const job = (await getJob(jobId))!;
+    assert.deepEqual(JSON.parse(job.target!).question, { examId: 7, questionId: 3 }, "la page retrouve la question au retour");
+    assert.deepEqual((await listActiveJobs()).map((j) => j.id), [other, jobId], "suivies par la pastille");
+  });
+  reply = () => ({ content: JSON.stringify({ verdict: "correct", feedback: "Juste.", correct_solution: "2", criteria: [{ label: "Résultat", points: 1, achieved: true, essential: true, justification: "2." }] }) });
+  assert.equal((await webJob(first)).check?.verdict, "correct");
+  assert.equal((await webJob(second)).check?.verdict, "correct");
+});
+
+test("check-solution (app) : la photo de la réponse est lue par le worker, la cible ne porte que son nom", async () => {
+  const { POST } = await import("../app/api/check-solution/route");
+  const form = new FormData();
+  form.append("statement", "Calcule ∫₀¹ x dx");
+  form.append("image", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "copie.png", { type: "image/png" }));
+  const encoded = new Response(form);
+  const buf = Buffer.from(await encoded.arrayBuffer());
+  const res = await POST(new NextRequest("http://cortex.test/api/check-solution?course=cs-202", {
+    method: "POST", body: buf, headers: { "accept-language": "fr", "content-type": encoded.headers.get("content-type")!, "content-length": String(buf.length) },
+  }));
+  assert.equal(res.status, 200, await res.clone().text());
+  const { jobId } = (await res.clone().json()) as { jobId: number };
+  const { runWithCourse } = await import("../db/client");
+  const { getJob } = await import("../lib/jobs");
+  const target = JSON.parse((await runWithCourse("cs-202", () => getJob(jobId)))!.target!) as { image?: string };
+  assert.match(target.image ?? "", /^[0-9a-f-]{36}\.png$/, "un nom de fichier, jamais un chemin du serveur");
+  reply = () => ({ content: JSON.stringify({ verdict: "partial", feedback: "Presque.", correct_solution: "1/2", criteria: [{ label: "Primitive", points: 1, achieved: true, essential: true, justification: "x²/2." }] }) });
+  const out = await webJob(res);
+  assert.equal(out.check?.verdict, "partial");
+  const prompt = JSON.stringify(bodies.at(-1));
+  assert.match(prompt, new RegExp(`uploads/${target.image!.replace(".", "\\.")}`), "le worker passe la photo au modèle");
 });
 
 test("panne du fournisseur (app) : message clair, sans le texte brut du fournisseur", async () => {
   const { POST } = await import("../app/api/drill/route");
   reply = () => ({ status: 503 });
-  const res = await POST(post("drill", { concept: "groupby" }));
-  assert.equal(res.status, 502);
-  const out = (await res.json()) as { error: string; code: string };
-  assert.equal(out.code, "llm_provider_unreachable");
-  assert.match(out.error, /surchargé ou injoignable/);
-  assert.doesNotMatch(out.error, /boom|HTTP 503/);
+  const out = await webJob(await POST(post("drill", { concept: "groupby" })));
+  assert.equal(out.status, "error");
+  assert.equal(out.errorInfo?.code, "llm_provider_unreachable");
+  assert.match(out.error ?? "", /surchargé ou injoignable/);
+  assert.doesNotMatch(out.error ?? "", /boom|HTTP 503/);
 });
 
 test("connecteur MCP : chaque cause a son message et son code, jamais « unknown »", async () => {

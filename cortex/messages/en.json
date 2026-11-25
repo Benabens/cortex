@@ -1362,6 +1362,11 @@
     "refund": "{credits, plural, one {# credit refunded} other {# credits refunded}}",
     "comment": "“{comment}”"
   },
+  "examSummary": {
+    "writtenAll": "{count, plural, one {# exercise verified} other {# exercises verified}}",
+    "writtenNone": "{count, plural, one {# exercise not verified} other {# exercises not verified}}",
+    "writtenPart": "{verified} of {total, plural, one {# exercise} other {# exercises}} verified"
+  },
   "examsPage": {
     "pdfFailed": "The PDF couldn’t be regenerated.",
     "deleteConfirm": "Delete exam #{id}? The generated PDF will be lost.",
@@ -1695,7 +1700,7 @@
     "etaLate": "Taking longer than usual; the generation continues",
     "etaNoHistory": "{eta} (estimate without history)",
     "stepQueued": "Queued…",
-    "stepRunning": "{type, select, qcm {Generating the multiple-choice exam…} exam {Generating the mock exam…} exercise {Generating the exercise…} lab {Generating the exercise…} ingest {Reading your files…} prepare {Preparing the course…} format {Reading the exam format…} blueprint {Analysing the course syllabus…} drill {Writing the practice question…} other {Working…}}",
+    "stepRunning": "{type, select, qcm {Generating the multiple-choice exam…} exam {Generating the mock exam…} exercise {Generating the exercise…} lab {Generating the exercise…} ingest {Reading your files…} prepare {Preparing the course…} format {Reading the exam format…} blueprint {Analysing the course syllabus…} drill {Writing the practice question…} check {Marking your answer…} other {Working…}}",
     "stepResumed": "Worker interrupted, resuming automatically (attempt {attempt}/{max}), progress kept.",
     "stepWaiting": "In line (position {position}): the server is at full capacity; your {what, select, ingest {import} assist {request} other {generation}} starts as soon as a slot frees up.",
     "stepWaitingOwn": "In line: {what, select, ingest {your other import is running; this one starts right after it.} other {your other practice question or grading is being written; this one starts right after it, usually within 1-2 minutes.}}",
@@ -1717,7 +1722,7 @@
       "review": "Final review",
       "render": "Laying out the PDF"
     },
-    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {MCQs ready} lot {batches ready} other {questions ready}}"
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {MCQs ready} exercise {exercises ready} lot {batches ready} other {questions ready}}"
   },
   "order": {
     "product": {
@@ -1884,22 +1889,14 @@
       "free": "Stopping costs you nothing.",
       "keepsReadyFree": "Questions already done stay in an exam."
     },
-    "wait": {
-      "drill": "Writing your exercise…",
-      "check": "Marking your answer…"
-    },
-    "waitTypical": {
-      "drill": "Usually 1 to 3 min",
-      "check": "Usually 1 to 2 min"
-    },
     "pill": {
       "label": "{count, plural, one {One generation running} other {# generations running}}",
       "open": "{step}, {course}. Open progress.",
       "more": "+{count}"
     },
     "toast": {
-      "done": "{type, select, qcm {Your MCQ exam is ready} exam {Your exam is ready} prepare {Your course is ready} ingest {Your documents are read} format {The exam format is read} blueprint {The syllabus is analysed} exercise {Your exercise is ready} other {It’s ready}}",
-      "failed": "{type, select, qcm {The MCQ exam couldn’t be generated} exam {The exam couldn’t be generated} prepare {Course preparation failed} other {Generation failed}}",
+      "done": "{type, select, qcm {Your MCQ exam is ready} exam {Your exam is ready} prepare {Your course is ready} ingest {Your documents are read} format {The exam format is read} blueprint {The syllabus is analysed} exercise {Your exercise is ready} drill {Your exercise is ready} check {Your answer is marked} other {It’s ready}}",
+      "failed": "{type, select, qcm {The MCQ exam couldn’t be generated} exam {The exam couldn’t be generated} prepare {Course preparation failed} drill {The exercise couldn’t be written} check {Marking failed} other {Generation failed}}",
       "open": "Open",
       "see": "Try again",
       "close": "Dismiss",

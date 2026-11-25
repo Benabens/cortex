@@ -2,6 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { loginPersona } from "./helpers";
 import { BLOCKS_EXAM, BLOCKS_GRADE, BLOCKS_ID, CHECK_RESULT, QCM_EXAM, QCM_GRADE, QCM_ID } from "./formules-fixtures";
 
+const CHECK_JOB_ID = 9201;
+
 /**
  * FORMULES À L'ÉCRAN (demandé le 23/11/2026) : l'étudiant lisait « Soit $x_{t+1} = 2x_t$, que vaut
  * $\frac{x_3}{x_1}$ ? ». Examens fictifs servis par interception (e2e/formules-fixtures.ts) ; le
@@ -71,7 +73,9 @@ test("question composée et retour de correction : \\frac, \\sum, indices et for
   const course = await newCourse(page);
   await page.route(`**/api/qcm/${BLOCKS_ID}/grade*`, (r) => r.fulfill({ json: BLOCKS_GRADE }));
   await page.route(`**/api/qcm/${BLOCKS_ID}?*`, (r) => r.fulfill({ json: BLOCKS_EXAM }));
-  await page.route("**/api/check-solution*", (r) => r.fulfill({ json: { result: CHECK_RESULT } }));
+  // la correction est un job (lib/check-job) : la page lance, puis lit son résultat sur /api/jobs/<id>
+  await page.route("**/api/check-solution*", (r) => r.fulfill({ json: { ok: true, jobId: CHECK_JOB_ID } }));
+  await page.route(`**/api/jobs/${CHECK_JOB_ID}?*`, (r) => r.fulfill({ json: { id: CHECK_JOB_ID, type: "check", status: "done", progress: 100, target: null, check: CHECK_RESULT } }));
   // compte sans crédit : la vérification est permise quand la lecture du quota échoue (useLaunchUsage)
   await page.route("**/api/usage*", (r) => r.abort());
   await page.goto(`/mock/${BLOCKS_ID}?course=${course}`);

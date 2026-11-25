@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { test } from "node:test";
 import { ReportButton } from "../components/exam/ReportButton";
 import { OpenResponse } from "../components/exam/OpenResponse";
+import { CourseProvider } from "../lib/ux/api";
 import { ChapterAccordion } from "../components/programme/ChapterAccordion";
 import { ProgramExplorer } from "../components/programme/ProgramExplorer";
 import type { PlanChapterUi } from "../lib/ux/program";
@@ -57,14 +58,15 @@ test("ReportButton affiche son action en anglais", () => {
 });
 
 test("OpenResponse traduit le chrome et marque le corrigé fictif en français", () => {
-  const html = renderIntl(createElement(OpenResponse, {
+  // La correction est un job suivi par le cours courant (24/11/2026) : la question vit sous CourseProvider, comme dans l'app.
+  const html = renderIntl(createElement(CourseProvider, null, createElement(OpenResponse, {
     questionId: 3,
     statement: "Démontrer la convergence de la suite.",
     courseId: "fake",
     graded: true,
     solution: "<p>La suite est croissante et majorée.</p>",
     language: "fr",
-  }), "en");
+  })), "en");
   assert.match(html, /Your answer/);
   assert.match(html, /Check my answer/);
   assert.match(html, /lang="fr"><div[^>]*><p>La suite est croissante et majorée/);

@@ -1,6 +1,5 @@
 import { apiError } from "@/lib/i18n/api-error";
-import { checkSolution } from "@/lib/check-solution";
-import { LlmError, OWN_LLM_CODES, llmUserError } from "@/lib/llm";
+import { ASSIST_FROM_WEB, ReservationRefused } from "@/lib/jobs";
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { fieldTooLong } from "@/lib/field-limits";
@@ -16,7 +15,6 @@ import { currentUser } from "@/db/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 220;
 
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
@@ -29,14 +27,21 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
 })
 
+/**
+ * Lance la correction EN JOB (24/11/2026) : la requête rend `jobId` tout de suite, le worker corrige
+ * (lib/check-job), la page suit le job et lit la correction sur /api/jobs/[id]. Avant, la requête
+ * attendait le modèle une à deux minutes : quitter la page ou recharger perdait la correction payée.
+ * `examId` + `questionId` (ou `partId`) : la question corrigée, que la page retrouve au retour.
+ */
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const ct = req.headers.get("content-type") ?? "";
   let statement = "";
   let answer = "";
-  let imageRel: string | null = null;
-  let rubric: { rubric: { label: string; points: number }[]; reference: string } | null = null;
+  let image: string | undefined;
+  let part: { examId: number; partId: number } | undefined;
+  let question: { examId: number; questionId: number } | undefined;
 
   if (ct.includes("multipart/form-data")) {
     // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
@@ -53,8 +58,8 @@ async function handlePOST(req: NextRequest) {
       // Écrit aussi sur le disque local (copie du seau en stockage objet) : l'outil Read du modèle l'y lit.
       // Compte gratuit : en transit seulement, jamais au seau (lib/originals).
       await putUpload(currentCourse(), path.join(uploadsDir(), name), Buffer.from(await file.arrayBuffer()));
-      // chemin RÉEL (scopé par utilisateur en multi-user), relatif au cwd
-      imageRel = path.relative(process.cwd(), path.join(uploadsDir(), name));
+      // Le job ne garde que le NOM : le worker refait le chemin dans les envois du cours (lib/check-job).
+      image = name;
     }
   } else {
     const body = await readJson(req, ({}));
@@ -63,31 +68,29 @@ async function handlePOST(req: NextRequest) {
     // Réponse courte d'une question composée : énoncé, barème et réponse modèle viennent de la base.
     if (body.partId !== undefined) {
       const { shortPartForCheck } = await import("@/lib/blocks");
-      const part = await shortPartForCheck(Number(body.examId), Number(body.partId));
-      if (!part) return apiError(req, "exam_part_not_found", 404);
-      ({ statement } = part);
-      rubric = part;
+      const found = await shortPartForCheck(Number(body.examId), Number(body.partId));
+      if (!found) return apiError(req, "exam_part_not_found", 404);
+      ({ statement } = found);
+      part = { examId: Number(body.examId), partId: Number(body.partId) };
+      question = { examId: part.examId, questionId: part.partId };
+    } else if (Number.isInteger(body.examId) && Number.isInteger(body.questionId)) {
+      question = { examId: Number(body.examId), questionId: Number(body.questionId) };
     }
   }
 
   if (!statement) return apiError(req, "statement_missing", 400);
   const tooLong = fieldTooLong(req, "statement", statement) ?? fieldTooLong(req, "answer", answer);
   if (tooLong) return tooLong;
-  if (!answer && !imageRel) return apiError(req, "answer_required", 400);
+  if (!answer && !image) return apiError(req, "answer_required", 400);
 
   try {
-    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-    // l'appel au modèle, APRÈS validation de la demande : le prix d'une aide, rendu seulement si
-    // l'appel n'est pas parti ou si la réponse est restée illisible (lib/billing/reserve).
-    const { assistCall } = await import("@/lib/billing/reserve");
-    const result = await assistCall("check-solution", () => checkSolution({ statement, answer, imageRel, ...(rubric ? { rubric: rubric.rubric, reference: rubric.reference } : {}) }));
-    return NextResponse.json({ ok: true, result });
+    const { startCheckJob } = await import("@/lib/check-job");
+    const { jobId } = await startCheckJob({ statement, answer, ...(image ? { image } : {}), ...(part ? { part } : {}), ...(question ? { question } : {}), ...ASSIST_FROM_WEB });
+    return NextResponse.json({ ok: true, jobId });
   } catch (e: unknown) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
     if (e instanceof AssistRefused) return apiError(req, e, e.status);
-    const err = e as LlmError;
-    const status = err.code && OWN_LLM_CODES.has(err.code) ? 503 : 502;
-    // Jamais le texte brut du fournisseur : une cause lisible (lib/llm/errors).
-    return apiError(req, llmUserError(e), status, { llmCode: err.code });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
+    throw e;
   }
 }

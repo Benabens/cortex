@@ -1362,6 +1362,11 @@
     "refund": "{credits, number} crédit rendu",
     "comment": "« {comment} »"
   },
+  "examSummary": {
+    "writtenAll": "{count, plural, one {# exercice vérifié} other {# exercices vérifiés}}",
+    "writtenNone": "{count, plural, one {# exercice non vérifié} other {# exercices non vérifiés}}",
+    "writtenPart": "{verified, plural, one {# exercice vérifié} other {# exercices vérifiés}} sur {total}"
+  },
   "examsPage": {
     "pdfFailed": "Le PDF n’a pas pu être régénéré.",
     "deleteConfirm": "Supprimer l’examen #{id} ? Le PDF généré sera perdu.",
@@ -1695,7 +1700,7 @@
     "etaLate": "Plus long que d’habitude, la génération continue",
     "etaNoHistory": "{eta} (estimation sans historique)",
     "stepQueued": "En file…",
-    "stepRunning": "{type, select, qcm {Génération de l’examen QCM…} exam {Génération de l’examen…} exercise {Génération de l’exercice…} lab {Génération de l’exercice…} ingest {Lecture de tes fichiers…} prepare {Préparation du cours…} format {Lecture du format d’examen…} blueprint {Analyse du programme…} drill {Écriture de l’exercice…} other {En cours…}}",
+    "stepRunning": "{type, select, qcm {Génération de l’examen QCM…} exam {Génération de l’examen…} exercise {Génération de l’exercice…} lab {Génération de l’exercice…} ingest {Lecture de tes fichiers…} prepare {Préparation du cours…} format {Lecture du format d’examen…} blueprint {Analyse du programme…} drill {Écriture de l’exercice…} check {Correction de ta réponse…} other {En cours…}}",
     "stepResumed": "Worker interrompu, reprise automatique (tentative {attempt}/{max}), progression conservée.",
     "stepWaiting": "En file d’attente (position {position}) : le serveur est à pleine charge, {what, select, ingest {ton import démarre} assist {ta demande démarre} other {ta génération démarre}} dès qu’une place se libère.",
     "stepWaitingOwn": "En file : {what, select, ingest {ton autre import est en cours, celui-ci démarre juste après.} other {ton autre aide (exercice ou correction) s’écrit, celle-ci démarre juste après, en général d’ici 1 à 2 minutes.}}",
@@ -1717,7 +1722,7 @@
       "review": "Relecture finale",
       "render": "Mise en page du PDF"
     },
-    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {QCM prêts} lot {lots prêts} other {questions prêtes}}"
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {QCM prêts} exercise {exercices prêts} lot {lots prêts} other {questions prêtes}}"
   },
   "order": {
     "product": {
@@ -1884,22 +1889,14 @@
       "free": "Arrêter ne te coûte rien.",
       "keepsReadyFree": "Les questions déjà prêtes restent dans un examen."
     },
-    "wait": {
-      "drill": "Écriture de ton exercice…",
-      "check": "Correction de ta réponse…"
-    },
-    "waitTypical": {
-      "drill": "D’habitude 1 à 3 min",
-      "check": "D’habitude 1 à 2 min"
-    },
     "pill": {
       "label": "{count, plural, one {Une génération en cours} other {# générations en cours}}",
       "open": "{step}, {course}. Ouvrir le suivi.",
       "more": "+{count}"
     },
     "toast": {
-      "done": "{type, select, qcm {Ton examen QCM est prêt} exam {Ton examen est prêt} prepare {Ton cours est prêt} ingest {Tes documents sont lus} format {Le format d’examen est lu} blueprint {Le programme est analysé} exercise {Ton exercice est prêt} other {C’est prêt}}",
-      "failed": "{type, select, qcm {L’examen QCM n’a pas pu être généré} exam {L’examen n’a pas pu être généré} prepare {La préparation du cours a échoué} other {La génération a échoué}}",
+      "done": "{type, select, qcm {Ton examen QCM est prêt} exam {Ton examen est prêt} prepare {Ton cours est prêt} ingest {Tes documents sont lus} format {Le format d’examen est lu} blueprint {Le programme est analysé} exercise {Ton exercice est prêt} drill {Ton exercice est prêt} check {Ta correction est prête} other {C’est prêt}}",
+      "failed": "{type, select, qcm {L’examen QCM n’a pas pu être généré} exam {L’examen n’a pas pu être généré} prepare {La préparation du cours a échoué} drill {L’exercice n’a pas pu être écrit} check {La correction a échoué} other {La génération a échoué}}",
       "open": "Ouvrir",
       "see": "Relancer",
       "close": "Fermer",

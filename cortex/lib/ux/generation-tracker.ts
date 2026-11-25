@@ -12,17 +12,20 @@
  * (useSyncExternalStore côté composants) ; réseau, timers et visibilité injectables pour les tests.
  */
 import type { Job } from "./job-status";
+import type { JobQuestion } from "./generation";
 
 /** Une génération en cours vue par la pastille : le job tel que l'interface le lit, et son cours. */
 export type RunningJob = Pick<Job, "id" | "type" | "status" | "progress" | "currentStep" | "stepInfo" | "eta" | "etaRange" | "etaLate"> & {
   course: string;
   courseLabel: string;
   createdAt: string;
+  /** Correction lancée par l'app : la question d'examen corrigée, où ramener l'étudiant. */
+  question?: JobQuestion | null;
 };
 
 export type GenerationToast = {
   key: string; id: number; course: string; courseLabel: string; type: string;
-  status: "done" | "failed"; resultPath: string | null;
+  status: "done" | "failed"; resultPath: string | null; question?: JobQuestion | null;
   /** Échec : la cause, dans la langue du lecteur (GET /api/jobs/[id]). */
   error: string | null;
 };
@@ -127,6 +130,7 @@ async function settle(j: RunningJob) {
   const toast: GenerationToast = {
     key, id: j.id, course: j.course, courseLabel: j.courseLabel, type: j.type,
     status: final.status === "done" ? "done" : "failed", resultPath: final.resultPath, error: final.error ?? null,
+    ...(j.question ? { question: j.question } : {}),
   };
   emit({ toasts: [...state.toasts, toast].slice(-TOAST_LIMIT) });
 }

@@ -22,7 +22,7 @@ import { NextRequest } from "next/server";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-drill-fiable-"));
 const ENV: Record<string, string> = {
   CORTEX_DATA_DIR: tmp, DB_DRIVER: "postgres", DATABASE_URL: "pglite://memory",
-  AI_BUDGET_MARGIN: "unlimited", BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "3",
+  AI_BUDGET_MARGIN: "unlimited", BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "6",
   DAILY_ASSIST_QUOTA: "unlimited", RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited",
   // Aucune place pour un worker détaché : le job drill reste en file et le test l'exécute lui-même.
   MAX_GLOBAL_ASSIST_JOBS: "0",
@@ -83,11 +83,35 @@ const post = (body: unknown) =>
   });
 const balance = async () => (await import("../lib/billing/credits")).getBalanceCenti("owner");
 
-test("drill : son budget et son format compact sont posés (12 000 jetons, indice 5 = étape décisive)", async () => {
-  const { POST } = await import("../app/api/drill/route");
-  replies = [OK];
-  const res = await POST(post({ concept: "Bellman-Ford" }));
+type JobJson = { status: string; drill?: typeof DRILL; errorInfo?: { code: string } | null };
+const getJobJson = async (id: number): Promise<JobJson> => {
+  const { GET } = await import("../app/api/jobs/[id]/route");
+  const res = await GET(new NextRequest(`http://cortex.test/api/jobs/${id}?course=cs-202`, { headers: { "accept-language": "fr" } }), { params: Promise.resolve({ id: String(id) }) });
   assert.equal(res.status, 200);
+  return (await res.json()) as JobJson;
+};
+
+/**
+ * Le drill de l'app web (24/11/2026) : la route lance un job et rend la main tout de suite (quitter
+ * la page ou recharger ne perd plus l'exercice) ; le worker l'écrit ; la page le lit sur /api/jobs/[id].
+ */
+async function webDrill(concept: string): Promise<JobJson> {
+  const { POST } = await import("../app/api/drill/route");
+  const res = await POST(post({ concept }));
+  assert.equal(res.status, 200, await res.clone().text());
+  const { jobId } = (await res.json()) as { jobId: number };
+  assert.ok(Number.isInteger(jobId), "la route rend le job, pas l'exercice");
+  assert.equal(calls, 0, "la requête rend la main avant l'appel au modèle");
+  const { runWithCourse } = await import("../db/client");
+  const { executeDrillJob } = await import("../lib/drill-job");
+  await runWithCourse("cs-202", () => executeDrillJob(jobId));
+  return getJobJson(jobId);
+}
+
+test("drill : son budget et son format compact sont posés (12 000 jetons, indice 5 = étape décisive)", async () => {
+  replies = [OK];
+  const job = await webDrill("Bellman-Ford");
+  assert.equal(job.status, "done");
   assert.equal(calls, 1);
   assert.equal(bodies[0].max_tokens, 12_000, "le drill demande son budget, pas le défaut des aides (6 000)");
   assert.match(userPrompt(0), /étape décisive/);
@@ -95,12 +119,10 @@ test("drill : son budget et son format compact sont posés (12 000 jetons, indic
 });
 
 test("coupure : relancée UNE fois, avec une demande qui change (plus petite, corrigé abrégé), et livrée", async () => {
-  const { POST } = await import("../app/api/drill/route");
   const before = await balance();
   replies = [CUT, OK];
-  const res = await POST(post({ concept: "Bellman-Ford" }));
-  assert.equal(res.status, 200, await res.clone().text());
-  assert.equal(((await res.json()) as { drill: typeof DRILL }).drill.hints[4], DRILL.hints[4]);
+  const job = await webDrill("Bellman-Ford");
+  assert.equal(job.drill?.hints[4], DRILL.hints[4]);
   assert.equal(calls, 2);
   assert.notEqual(userPrompt(1), userPrompt(0), "la relance ne renvoie pas la même demande");
   assert.match(userPrompt(1), /TROP LONGUE/);
@@ -109,14 +131,78 @@ test("coupure : relancée UNE fois, avec une demande qui change (plus petite, co
 });
 
 test("coupé deux fois : erreur claire après 2 appels (pas 3 fois la même chose), appel remboursé", async () => {
-  const { POST } = await import("../app/api/drill/route");
   const before = await balance();
   replies = [CUT];
-  const res = await POST(post({ concept: "Dijkstra" }));
-  assert.equal(res.status, 502);
-  assert.equal(((await res.json()) as { code: string }).code, "llm_bad_output");
+  const job = await webDrill("Dijkstra");
+  assert.equal(job.status, "error");
+  assert.equal(job.errorInfo?.code, "llm_bad_output");
+  assert.equal(job.drill, undefined);
   assert.equal(calls, 2, "une seule relance, déjà changée");
   assert.equal(await balance(), before, "notre défaut : rien ne reste débité");
+});
+
+test("drill web : l'exercice lu sur /api/jobs/[id] est assaini, formules composées", async () => {
+  replies = [{ content: JSON.stringify({ ...DRILL, statement_html: "<p>Montre que $d(c)=3$.</p><img src=x onerror=alert(1)>" }) }];
+  const job = await webDrill("Bellman-Ford");
+  assert.equal(job.status, "done");
+  assert.doesNotMatch(job.drill!.statement_html, /onerror|<img/);
+  assert.match(job.drill!.statement_html, /katex/, "la formule est composée côté serveur, comme avant");
+});
+
+test("pastille : un drill lancé depuis l'app y est, celui d'un assistant non", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { startDrillJob, executeDrillJob } = await import("../lib/drill-job");
+  const { listActiveJobs } = await import("../lib/jobs");
+  const { POST } = await import("../app/api/drill/route");
+  replies = [OK];
+  const { jobId: web } = (await (await POST(post({ concept: "Bellman-Ford" }))).json()) as { jobId: number };
+  await runWithCourse("cs-202", async () => {
+    assert.deepEqual((await listActiveJobs()).map((j) => j.id), [web], "suivi de l'app : pastille et notification de fin");
+    await executeDrillJob(web);
+    const mcp = await startDrillJob("Dijkstra");
+    assert.deepEqual(await listActiveJobs(), [], "aide d'un assistant : aucune page de l'app ne la montre");
+    await executeDrillJob(mcp.jobId);
+  });
+});
+
+test("exercice ciblé : chaque demande de l'app a le sien, sur sa notion ; l'assistant n'hérite pas de celui de l'app", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { startDrillJob, executeDrillJob } = await import("../lib/drill-job");
+  const { getJob } = await import("../lib/jobs");
+  const { POST } = await import("../app/api/drill/route");
+  replies = [OK, OK, OK];
+  const { jobId: web } = (await (await POST(post({ concept: "Bellman-Ford" }))).json()) as { jobId: number };
+  // Un autre onglet, une autre notion : son propre exercice, pas celui de Bellman-Ford.
+  const { jobId: web2 } = (await (await POST(post({ concept: "Prim" }))).json()) as { jobId: number };
+  assert.notEqual(web2, web);
+  await runWithCourse("cs-202", async () => {
+    assert.equal(JSON.parse((await getJob(web2))!.target!).concept, "Prim");
+    const mcp = await startDrillJob("Dijkstra");
+    assert.equal(mcp.existing, false, "l'assistant n'hérite pas de l'exercice de l'app");
+    assert.equal(JSON.parse((await getJob(mcp.jobId))!.target!).concept, "Dijkstra");
+    assert.deepEqual(await startDrillJob("Kruskal"), { jobId: mcp.jobId, existing: true }, "un exercice d'assistant à la fois, comme avant");
+    for (const id of [web, web2, mcp.jobId]) await executeDrillJob(id);
+  });
+});
+
+test("exercice fini pendant l'absence : la page le retrouve au retour (ceux de l'app seulement)", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { startDrillJob, executeDrillJob } = await import("../lib/drill-job");
+  const { POST } = await import("../app/api/drill/route");
+  const { GET } = await import("../app/api/jobs/route");
+  replies = [OK, OK];
+  const { jobId: web } = (await (await POST(post({ concept: "Bellman-Ford" }))).json()) as { jobId: number };
+  await runWithCourse("cs-202", async () => {
+    await executeDrillJob(web);
+    const mcp = await startDrillJob("Dijkstra");
+    await executeDrillJob(mcp.jobId);
+  });
+  const res = await GET(new NextRequest("http://cortex.test/api/jobs?type=drill&assists=web&course=cs-202"));
+  const { assists } = (await res.json()) as { assists: { id: number; status: string; target: string }[] };
+  assert.equal(assists[0]?.id, web, "le dernier exercice de l'app, fini pendant l'absence");
+  assert.equal(assists[0].status, "done");
+  assert.equal(JSON.parse(assists[0].target).concept, "Bellman-Ford");
+  assert.ok(assists.every((j) => JSON.parse(j.target).from === "web"), "jamais celui d'un assistant");
 });
 
 test("job drill (connecteur) : réservé, exécuté, lu par son point de reprise ; un doublon ne débite rien", async () => {

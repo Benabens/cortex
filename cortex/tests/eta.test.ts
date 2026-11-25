@@ -104,7 +104,7 @@ test("un avancement qui précède les lots de reprise ne sous-estime pas le comp
   assert.equal(e.remainingMs, 6 * MIN, "à 4 min d'un historique de 10 min, 80 % provisoires ne doivent pas annoncer 2 min");
 });
 
-test("avancement PAR PHASE : chemin critique des phases parallèles, puis la suivante ; ne recule qu'à l'ajout d'un réessai", async () => {
+test("avancement PAR PHASE : chemin critique des phases parallèles, puis la suivante ; un réessai ajouté ne le fait pas reculer", async () => {
   const { PhaseProgress } = await import("../lib/progress");
   // QCM (2 lots, 8 min) en parallèle des ouvertes (2, 2 min), puis le PDF (30 s).
   const w = new PhaseProgress(8, [[{ name: "QCM", units: 2, ms: 8 * MIN }, { name: "Ouvertes", units: 2, ms: 2 * MIN }], [{ name: "PDF", units: 1, ms: 0.5 * MIN }]]);
@@ -114,11 +114,56 @@ test("avancement PAR PHASE : chemin critique des phases parallèles, puis la sui
   w.done("QCM");
   const half = w.pct();
   assert.ok(half > 45 && half < 55, `${half} %`);
-  w.add("QCM"); // un lot de comblement : seul cas où l'avancement recule
-  assert.ok(w.pct() < half);
-  w.done("QCM", 2);
+  // Un lot de comblement (rejeu HUM-285 : 75 % → 55 % à l'ajout d'une ronde) : la barre garde sa
+  // place, le travail ajouté se partage ce qui reste à faire.
+  w.add("QCM");
+  assert.equal(w.pct(), half);
+  w.done("QCM");
+  const next = w.pct();
+  assert.ok(next > half && next < 99, `${half} → ${next} %`);
+  w.done("QCM");
   w.done("PDF");
   assert.equal(w.pct(), 99, "jamais 100 avant l'étape finale (le worker la lit comme « terminé »)");
+});
+
+test("étapes pondérées par leur durée ; un long appel avance avec le temps sans finir avant sa fin", async () => {
+  const { PhaseProgress } = await import("../lib/progress");
+  // Une ronde de QCM au banc HUM-285 : conception 4 min, vérification 7 min, revue finale 6 min.
+  const w = new PhaseProgress(0, [[{ name: "QCM", units: 17 * MIN, ms: 17 * MIN }]]);
+  w.done("QCM", 4 * MIN);
+  assert.equal(w.pct(), 23, "la conception pèse son temps (4 sur 17 min), pas un tiers de la ronde");
+  const t0 = 1_000_000;
+  const end = w.begin("QCM", 7 * MIN, 7 * MIN, t0);
+  assert.equal(w.pct(t0), 23);
+  const at = (min: number) => w.pct(t0 + min * MIN);
+  assert.ok(at(1) > 23 && at(3) > at(1) && at(7) > at(3), `${at(1)} → ${at(3)} → ${at(7)} %`);
+  assert.ok(at(30) < 23 + 41, `un appel plus long que prévu ne remplit jamais son étape avant sa fin (${at(30)} %)`);
+  assert.ok(at(30) >= at(7), "ni ne recule");
+  end();
+  assert.equal(w.pct(t0 + 9 * MIN), 64, "fini : l'étape compte en entier (11 sur 17 min)");
+  end();
+  assert.equal(w.pct(t0 + 10 * MIN), 64, "une fin appelée deux fois ne compte qu'une fois");
+});
+
+test("avancement d'un long appel republié sans nouvelle ligne de journal, seulement s'il monte", async () => {
+  const { progressTicker } = await import("../lib/progress");
+  let value = 30;
+  const published: number[] = [];
+  const ticker = progressTicker(() => value, (p) => { published.push(p); }, 5);
+  ticker.seen(30);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(published, [], "rien de neuf depuis la dernière étape publiée");
+  value = 34;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(published, [34]);
+  ticker.seen(40);
+  value = 38;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(published, [34], "en dessous de ce qu'une étape a déjà publié : rien");
+  ticker.stop();
+  value = 60;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(published, [34], "arrêté : plus rien");
 });
 
 test("durées de phase lues dans le journal des jobs terminés (« ⏱ QCM : 5 min 12 s »)", async () => {

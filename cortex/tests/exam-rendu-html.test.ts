@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { texToHtml } from "../lib/exam-latex";
-import { examSummaryLabel, qcmSummaryText } from "../lib/exam-summary";
+import { examSummaryLabel, qcmSummaryText, writtenSummaryText } from "../lib/exam-summary";
 
 const rows = (html: string) => [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((m) => [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((c) => c[1]));
 
@@ -52,6 +52,23 @@ test("résumé d'examen : accord au singulier, aucun vérifié, examen incomplet
   assert.equal(qcmSummaryText({ count: 16, requested: 16, verified: 16, open: 2, openRequested: 2 }), "16 QCM vérifiés · 2 questions ouvertes");
   assert.equal(qcmSummaryText({ count: 3, requested: 3, verified: 1, open: 1, openRequested: 1 }), "3 QCM, dont 1 vérifié · 1 question ouverte");
   assert.equal(qcmSummaryText({ count: 3, requested: 7, verified: 0, open: 0, openRequested: 2 }), "QCM : 3 sur 7 demandés, dont aucun vérifié · 0 question ouverte sur 2");
+});
+
+test("résumé d'un examen écrit : des exercices vérifiés, jamais « ok=4 corrigés=0… », dans la langue du lecteur", () => {
+  assert.equal(writtenSummaryText({ verified: 4, total: 4 }, "fr"), "4 exercices vérifiés");
+  assert.equal(writtenSummaryText({ verified: 1, total: 1 }, "fr"), "1 exercice vérifié");
+  assert.equal(writtenSummaryText({ verified: 3, total: 4 }, "fr"), "3 exercices vérifiés sur 4");
+  assert.equal(writtenSummaryText({ verified: 0, total: 4 }, "fr"), "4 exercices non vérifiés", "aucun vérifié : pas de « 0 exercice vérifié sur 4 »");
+  assert.equal(writtenSummaryText({ verified: 0, total: 1 }, "fr"), "1 exercice non vérifié");
+  assert.equal(writtenSummaryText({ verified: 0, total: 0 }, "fr"), null, "examen sans exercice : rien");
+  assert.equal(writtenSummaryText({ verified: 4, total: 4 }, "en"), "4 exercises verified");
+  assert.equal(writtenSummaryText({ verified: 3, total: 4 }, "en"), "3 of 4 exercises verified");
+  assert.equal(writtenSummaryText({ verified: 0, total: 4 }, "en"), "4 exercises not verified");
+  // La base garde le rapport du moteur ; le compte vient des exercices de l'examen (le rapport
+  // compte deux fois un exercice corrigé puis durci, et un exercice durci mais resté non vérifié).
+  assert.equal(examSummaryLabel("ok=2 corrigés=1 durcis=2 retirés=0 non-vérifiés=1", "fr", { verified: 3, total: 4 }), "3 exercices vérifiés sur 4");
+  assert.equal(examSummaryLabel("ok=1 corrigés=0 durcis=0", "en", { verified: 1, total: 1 }), "1 exercise verified");
+  assert.equal(examSummaryLabel("ok=4 corrigés=0 durcis=0 retirés=0 non-vérifiés=0", "fr"), null, "sans le compte de l'examen : rien plutôt qu'un chiffre faux");
 });
 
 test("résumé d'examen : l'ancien format stocké en base est réécrit à la lecture", () => {

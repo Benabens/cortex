@@ -446,6 +446,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                   <OpenResponse
                     key={`${courseId}:${id}:${o.id}`}
                     questionId={o.id}
+                    examId={Number(id)}
                     statement={o.checkStatement ?? o.statement}
                     courseId={courseId ?? ""}
                     graded={!!graded}

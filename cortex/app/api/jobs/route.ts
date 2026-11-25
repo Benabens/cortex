@@ -1,6 +1,6 @@
 import { requestLocale } from "@/lib/i18n/api-error";
 import { localizeJob } from "@/lib/i18n/job-text";
-import { activeJob, isJobType, listJobs, pumpQueuedJobs, type Job } from "@/lib/jobs";
+import { activeJob, ASSIST_JOB_TYPES, isJobType, listJobs, listWebAssistJobs, pumpQueuedJobs, type Job } from "@/lib/jobs";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -21,5 +21,10 @@ export async function GET(req: NextRequest) {
     return { ...j, currentStep, error };
   };
   const active = type === null ? null : await activeJob(type);
-  return NextResponse.json({ active: active ? view(active) : active, recent: (await listJobs(8)).map(view) });
+  // `assists=web` : les aides de l'app (exercice ciblé, correction), en cours ou finies depuis peu ;
+  // la page qui les a lancées les retrouve au retour, même finies pendant l'absence.
+  const assists = req.nextUrl.searchParams.get("assists") === "web" && type && ASSIST_JOB_TYPES.includes(type)
+    ? (await listWebAssistJobs(type)).map((j) => ({ id: j.id, type: j.type, target: j.target, status: j.status }))
+    : undefined;
+  return NextResponse.json({ active: active ? view(active) : active, recent: (await listJobs(8)).map(view), ...(assists ? { assists } : {}) });
 }

@@ -70,9 +70,9 @@ test("drill : 0,65 crédit → deux appels débités (0,3 chacun), le troisième
   const credits = await import("../lib/billing/credits");
   const statuses: number[] = [];
   for (let i = 0; i < 3; i++) statuses.push((await POST(post({ concept: "inode" }))).status);
-  // Les deux premiers passent la réservation puis l'appel part et échoue (502) ;
-  // le troisième est refusé AVANT tout appel.
-  assert.deepEqual(statuses, [502, 502, 402]);
+  // Les deux premiers réservent leur 0,3 et lancent leur job (le modèle est appelé par le worker,
+  // 24/11/2026) ; le troisième est refusé AVANT tout job.
+  assert.deepEqual(statuses, [200, 200, 402]);
   assert.equal(await credits.getBalanceCenti("owner"), 5); // 65 - 30 - 30
 });
 
@@ -90,9 +90,12 @@ test("assistGate : solde pour UN appel, 5 réservations parallèles → exacteme
 
 test("aucune route d'assistance ne garde l'ancien gate sans débit", () => {
   const routes = ["drill", "check-solution", "weaknesses/mine", "weaknesses/analyze", "weaknesses/process"];
+  // Exercice ciblé et correction : la route lance un job, qui réserve au lancement (lib/drill-job, lib/check-job).
+  const jobs: Record<string, string> = { drill: "drill-job.ts", "check-solution": "check-job.ts" };
   for (const r of routes) {
     const src = fs.readFileSync(path.join(__dirname, "..", "app", "api", r, "route.ts"), "utf8");
-    assert.ok(/assist(?:Gate|Call)\(/.test(src), `${r} : pas de réservation d'assistance`);
+    const job = jobs[r] ? fs.readFileSync(path.join(__dirname, "..", "lib", jobs[r]), "utf8") : "";
+    assert.ok(/assist(?:Gate|Call)\(/.test(src) || (/start(?:Drill|Check)Job\(/.test(src) && /assistReserve\(/.test(job)), `${r} : pas de réservation d'assistance`);
     assert.ok(!src.includes('recordGeneration("assist"'), `${r} : ancien comptage sans débit encore présent`);
   }
 });
