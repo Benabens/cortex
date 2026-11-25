@@ -20,7 +20,7 @@ import { MOLD_DEFS, normalizeMold, type MoldKind } from "@/lib/molds";
 import { renderFigure, figureSpecPromptBlock, type FigureSpec } from "@/lib/figure-gen";
 import { examsDir } from "@/lib/paths";
 import type { Archetype } from "@/lib/archetypes";
-import { PhaseProgress, phaseLine } from "@/lib/progress";
+import { PhaseProgress, phaseLine, progressTicker } from "@/lib/progress";
 import { benchTrace } from "@/lib/bench/trace";
 import { examSummaryLabel, qcmSummaryText } from "@/lib/exam-summary";
 import crypto from "node:crypto";
@@ -1839,6 +1839,23 @@ function spareMargin(count: number): number {
  * des derniers jobs du cours (lib/jobs phaseHistory). Mêmes noms que les lignes « ⏱ ».
  */
 const DEFAULT_PHASE_MS: Record<string, number> = { QCM: 6 * 60_000, "Questions ouvertes": 6 * 60_000, PDF: 30_000 };
+/**
+ * DURÉE DES ÉTAPES D'UN EXAMEN QCM : leur poids dans l'avancement, et le rythme d'un long appel
+ * (lib/progress begin). Médianes du banc HUM-285 (20 QCM, 37 runs, 15-16/11/2026) : conception des
+ * lots en parallèle 4,2 min (lots de 8), vérification à l'aveugle et distracteurs 7 min, revue
+ * finale 5,9 min, puis la phase finale (ronde de comblement s'il en faut une, réparation du
+ * reliquat, porte de sortie) 7,5 min, avec ou sans ronde (22 et 7 runs). À parts égales (une unité
+ * par lot, une pour la vérification, une pour la revue) et la ronde ajoutée en cours de route, la
+ * conception faisait 60 % de la ronde en un quart de son temps, la barre restait figée deux longs
+ * appels durant, puis reculait à la ronde de comblement (rejeu : 75 % → 55 % → 78 %).
+ */
+const QCM_STEP_MS = { lotPerQuestion: 30_000, vetBase: 180_000, vetPerQuestion: 10_000, reviewBase: 150_000, reviewPerQuestion: 9_000, final: 450_000 };
+const lotMs = (bt: { topics: unknown[] }) => QCM_STEP_MS.lotPerQuestion * bt.topics.length;
+/** Lots conçus en parallèle : la conception dure le plus long lot de chaque vague. */
+const designMs = (group: { topics: unknown[] }[]) => (group.length ? Math.max(...group.map(lotMs)) * Math.ceil(group.length / batchConcurrency()) : 0);
+const vetMs = (questions: number) => QCM_STEP_MS.vetBase + QCM_STEP_MS.vetPerQuestion * questions;
+const reviewMs = (questions: number) => QCM_STEP_MS.reviewBase + QCM_STEP_MS.reviewPerQuestion * questions;
+const questionsIn = (group: { topics: unknown[] }[]) => group.reduce((a, bt) => a + bt.topics.length, 0);
 
 /**
  * RÉPARTITION D'UN EXAMEN QCM : sujets des QCM, moules, et réserve de notions pour remplacer une
@@ -1982,14 +1999,36 @@ async function planFactsOf(labels: string[], count: number, step: StepCb, langua
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
  *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number, order: { requested: number }) => void | Promise<void>; phaseMs?: Record<string, number>; checkpoint?: QcmCheckpointStore } = {}): Promise<QcmExamResult> {
+export async function generateQcmExam(opts: QcmExamOptions = {}): Promise<QcmExamResult> {
+  const live: QcmLive = { ticker: null };
+  try {
+    return await runQcmExam(opts, live);
+  } finally {
+    live.ticker?.stop();
+  }
+}
+
+type QcmExamOptions = {
+  count?: number; openCount?: number; focus?: string; onStep?: StepCb;
+  onExamReady?: (examId: number, order: { requested: number }) => void | Promise<void>;
+  phaseMs?: Record<string, number>; checkpoint?: QcmCheckpointStore;
+  /** Avancement d'un long appel, sans nouvelle étape ni ligne de journal (toutes les 5 s, s'il monte). */
+  onProgress?: (progress: number) => void | Promise<void>;
+};
+type QcmLive = { ticker: ReturnType<typeof progressTicker> | null };
+
+async function runQcmExam(opts: QcmExamOptions, live: QcmLive): Promise<QcmExamResult> {
   await ensureQcmSchema();
   const report = opts.onStep ?? (() => {});
   // TEMPS RESTANT — avancement PAR PHASE (lib/progress) dès que les lots sont connus : les
   // pourcentages des étapes sont ignorés. Lots et ouvertes en parallèle publiaient chacun les
   // leurs (82 %, puis 30 %, puis 70 %) et le journal 0 % : le temps restant remontait.
   let work: PhaseProgress | null = null;
-  const step: StepCb = (m, p) => report(m, work ? work.pct() : Math.min(p, 8));
+  const step: StepCb = (m, p) => {
+    const pct = work ? work.pct() : Math.min(p, 8);
+    live.ticker?.seen(pct);
+    return report(m, pct);
+  };
   // M — durée de chaque phase dans le journal du job (mesure avant/après).
   const tStart = Date.now();
   const logPhase = (label: string, since: number) => step(phaseLine(label, Date.now() - since), 0);
@@ -2229,13 +2268,27 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     ...takeSpare(spareMargin(count), qcmTopics).map((topic) => ({ topic, mold: null })),
   ]));
   const phaseMs = { ...DEFAULT_PHASE_MS, ...(opts.phaseMs ?? {}) };
-  // Une unité par lot conçu, une pour la vérification et la réparation, une pour la revue finale.
-  const qcmUnits = lots.length + 2;
+  // Le QCM pèse ses étapes à leur durée (QCM_STEP_MS) : conception des lots, vérification, revue
+  // finale. Repris après la vérification, les lots sont acquis : la ronde se mesure à ses candidats.
+  const roundQuestions = questionsIn(lots) || (ckVerified?.candidates.length ?? 0);
+  const qcmMs = designMs(lots) + vetMs(roundQuestions) + reviewMs(roundQuestions) + QCM_STEP_MS.final;
   work = new PhaseProgress(8, [
-    [{ name: "QCM", units: qcmUnits, ms: phaseMs.QCM }, { name: "Questions ouvertes", units: openCount, ms: phaseMs["Questions ouvertes"] }],
+    [{ name: "QCM", units: qcmMs, ms: phaseMs.QCM }, { name: "Questions ouvertes", units: openCount, ms: phaseMs["Questions ouvertes"] }],
     [{ name: "PDF", units: 1, ms: phaseMs.PDF }],
   ]);
   const progress = work;
+  // Pendant un long appel (vérification groupée, revue finale), la barre avance avec son temps
+  // attendu : republiée sans étape ni ligne de journal (lib/progress progressTicker).
+  live.ticker = progressTicker(() => progress.pct(), (p) => opts.onProgress?.(p));
+  /** Une étape sans avancement intermédiaire (un ou plusieurs appels en parallèle), pesée `ms`. */
+  const timed = async <T,>(ms: number, run: () => Promise<T>): Promise<T> => {
+    const end = progress.begin("QCM", ms, ms);
+    try {
+      return await run();
+    } finally {
+      end();
+    }
+  };
   let persistChain: Promise<void> = Promise.resolve();
   /** Enregistre le point de reprise ; les écritures se suivent (la dernière porte l'état le plus récent). Un échec ne coûte que la reprise. */
   const persist = (): Promise<void> => {
@@ -2323,19 +2376,24 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * lot illisible est redemandé avec l'erreur (completeJson) ; un lot en échec reste null et ses
    * sujets attendent le comblement. `onLot` suit chaque lot terminé (point de reprise).
    */
-  const designLots = async (group: Batch[], done: (QcmItem[] | null)[], onLot: () => Promise<void> = async () => {}) => {
+  /** `weigh` : la conception compte dans l'avancement (pas celle de la ronde de comblement, comptée dans la phase finale). */
+  const designLots = async (group: Batch[], done: (QcmItem[] | null)[], { onLot = async () => {}, weigh = true }: { onLot?: () => Promise<void>; weigh?: boolean } = {}) => {
     const todo = group.map((_, k) => k).filter((k) => !done[k]);
-    progress.done("QCM", group.length - todo.length);
+    // La conception (lots en parallèle) se partage entre ses lots ; chacun avance avec son temps.
+    const share = weigh && group.length ? designMs(group) / group.length : 0;
+    progress.done("QCM", share * (group.length - todo.length));
     await runPool(todo, batchConcurrency(), async (k) => {
       const bt = group[k];
+      const end = progress.begin("QCM", share, lotMs(bt));
       try {
         done[k] = tagged(bt, await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds }));
       } catch (e) {
         lastError = e;
         done[k] = null;
         step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
+      } finally {
+        end();
       }
-      progress.done("QCM");
       await onLot();
     });
     return done;
@@ -2476,15 +2534,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(known.map((k) => sanitizeCorpus(k.notion).slice(0, 80)))].join(" · ")}.`
       : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée : ${known.map((k) => `${sanitizeCorpus(k.notion).slice(0, 60)} (${sanitizeCorpus(k.angle || "?").slice(0, 60)})`).join(" · ")}.`;
     const extra = toLots(slots, guidance);
-    progress.add("QCM", extra.length + 2); // ronde ajoutée : le temps restant peut remonter
+    // La ronde est comptée dans la phase finale (QCM_STEP_MS.final), prévue dès le départ : la barre
+    // ne recule ni ne se fige quand elle s'ajoute.
     step(`${short} QCM manquant(s) → ${extra.length} lot(s) de comblement${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
-    const done = await designLots(extra, []);
+    const done = await designLots(extra, [], { weigh: false });
     const { candidates } = await vet(extra, done, all);
     verifiedCandidates.push(...candidates);
-    progress.done("QCM");
     // Notions reprises sous un autre angle : le critère strict (une notion = une question) ne tient plus.
     const passed = await review(candidates, all, strict && !angle);
-    progress.done("QCM");
     all.splice(0, all.length, ...selectCapped(all, passed, count));
   };
   /**
@@ -2696,12 +2753,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   if (ckFinal) {
     // Enregistré : ses figures portent déjà leur nom définitif.
     all.push(...(ckFinal.examId != null ? ckFinal.items : withFigurePresent(ckFinal.items, examsDir())));
-    progress.done("QCM", qcmUnits);
+    progress.done("QCM", qcmMs);
   } else if (ckVerified) {
     verifiedCandidates.push(...withFigurePresent(ckVerified.candidates, examsDir()));
     missing = ckVerified.missing;
     qualityDropped = ckVerified.qualityDropped;
-    progress.done("QCM", qcmUnits - 1);
+    progress.done("QCM", qcmMs - reviewMs(roundQuestions) - QCM_STEP_MS.final);
   }
   if (ck) {
     const acquired = ckFinal ? `${all.length} QCM prêts` : ckVerified ? `${verifiedCandidates.length} QCM déjà conçus et vérifiés` : `${resumedDesign.flat().filter(Boolean).length} QCM déjà conçus`;
@@ -2714,17 +2771,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         ckDesigned = frozen({ lots, items: done, nextSpare, used: [...used], usedFacts: [...usedFacts] });
         return persist();
       };
-      await designLots(lots, done, saveDesigned);
-      const vetted = await vet(lots, done, []);
+      await designLots(lots, done, { onLot: saveDesigned });
+      const vetted = await timed(vetMs(roundQuestions), () => vet(lots, done, []));
       verifiedCandidates.push(...vetted.candidates);
       missing = vetted.missing;
       ckVerified = frozen({ candidates: verifiedCandidates, missing, qualityDropped, nextSpare, used: [...used], usedFacts: [...usedFacts] });
       await persist();
-      progress.done("QCM");
     }
     step(`${verifiedCandidates.length} QCM construits + vérifiés pour ${count} places → revue finale…`, 78);
-    const passed = await review(verifiedCandidates, []);
-    progress.done("QCM");
+    const passed = await timed(reviewMs(roundQuestions), () => review(verifiedCandidates, []));
     // Le budget de la phase finale démarre ici, APRÈS la revue finale : la revue est un seul appel,
     // toujours fait (≈ 5 min au banc HUM-285 du 16/11) ; armé avant elle, le budget de 6 min de
     // #108 ne laissait plus rien à la porte de sortie, dont la réécriture des explications sautait
@@ -2733,6 +2788,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Étape honnête : au-delà, l'avancement reste à 99 % (lib/progress) ; l'étudiant lit ce qui se
     // passe et combien de temps cela peut encore prendre, au lieu de « moins d'une minute » pendant 40 min.
     finalPhaseDeadline = Date.now() + finalPhaseBudgetMs();
+    // Phase finale (comblement, réparation, porte de sortie) : avance avec son temps attendu.
+    const endFinal = progress.begin("QCM", QCM_STEP_MS.final, QCM_STEP_MS.final);
     step(`Dernière vérification de l'examen (doublons, clés, distracteurs) : au plus ${Math.ceil(finalPhaseBudgetMs() / 60_000)} min de plus`, 78);
     all.splice(0, all.length, ...selectCapped([], passed, count));
     if (!finalPhaseExhausted()) await topUp(missing);
@@ -2761,6 +2818,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // enregistré sans passer ici, sur l'ensemble final, reprise comprise — seul un ensemble qui l'a
     // déjà franchie (point de reprise `final`) ne la repasse pas.
     if (all.length) await exitGate();
+    endFinal();
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");

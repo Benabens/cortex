@@ -333,7 +333,9 @@ async function main() {
       const onExamReady = async (examId: number, order: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order.requested }); };
       // Poids de l'avancement par phase : durées mesurées des derniers examens QCM du cours.
       // Point de reprise : un worker tué (redéploiement, crash) et repris repart de ce qui est acquis.
-      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, phaseMs: await phaseHistory("qcm"), checkpoint: jobCheckpointStore(jobId) });
+      // Pendant un long appel, l'avancement seul (un job terminé ne se rouvre pas, lib/jobs setJob).
+      const onProgress = async (progress: number) => { await setJob(jobId, { progress }); };
+      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, onProgress, phaseMs: await phaseHistory("qcm"), checkpoint: jobCheckpointStore(jobId) });
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
       const { doneStep, settleShortfallDetail } = await import("../lib/jobs");
       const shortfall = await settleShortfallDetail(job, res.count + res.open, res.requested + res.openRequested);
