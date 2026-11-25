@@ -1,5 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 
+/** Rien ne fait défiler la page de côté (mobile 390 px) : 1 px de tolérance pour les arrondis. */
+export async function expectNoHorizontalScroll(page: Page) {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow, "la page défile horizontalement").toBeLessThanOrEqual(1);
+}
+
 export async function loginPersona(page: Page, name = "alice") {
   // Preview de PR : clé persona (secret GitHub E2E_PERSONA_KEY) ; rien en local.
   const key = process.env.E2E_PERSONA_KEY ? `&persona_key=${encodeURIComponent(process.env.E2E_PERSONA_KEY)}` : "";

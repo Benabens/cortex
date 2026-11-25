@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { loginPersona } from "./helpers";
+import { expectNoHorizontalScroll, loginPersona } from "./helpers";
 import { BLOCKS_EXAM, BLOCKS_GRADE, BLOCKS_ID, CHECK_RESULT, QCM_EXAM, QCM_GRADE, QCM_ID } from "./formules-fixtures";
 
 const CHECK_JOB_ID = 9201;
@@ -22,11 +22,6 @@ async function expectNoRawFormula(page: Page) {
   expect(text).not.toMatch(/\$/);
   expect(text).not.toMatch(/\\(?:frac|sum|sqrt|le|\(|\[)/);
   expect(text).not.toMatch(/x_\{t\+1\}/);
-}
-
-async function expectNoHorizontalScroll(page: Page) {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow, "la page défile horizontalement").toBeLessThanOrEqual(1);
 }
 
 async function newCourse(page: Page): Promise<string> {
