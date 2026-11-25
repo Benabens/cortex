@@ -12,7 +12,7 @@
  * Le contrôle déterministe des notions de la clé (absentCourseTerms) reste en amont, inchangé.
  */
 import { corpusWindows, evidencePassages } from "@/lib/course-grounding";
-import { completeJson } from "@/lib/llm";
+import { hardTaskEffort, completeJson } from "@/lib/llm";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { FORMULA_RULE } from "@/lib/tex-rich";
 
@@ -136,7 +136,7 @@ export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<Secon
   ].join("\n");
   try {
     const r = await completeJson<{ second_look: { index: number; off_course?: string; scope?: string }[] }>(
-      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: SECOND_LOOK_SCHEMA } },
+      { prompt, model: "sonnet", timeoutMs: 300_000, json: { schema: SECOND_LOOK_SCHEMA } },
       { check: (v) => (Array.isArray(v?.second_look) ? null : "le champ « second_look » (tableau) manque") },
     );
     const byIndex = new Map(r.second_look.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, x]));
@@ -218,7 +218,7 @@ function rewriteBlock<T extends RewriteQuestion>(questions: T[], oldMax: number,
 async function requestRewrites(prompt: string, n: number): Promise<(string | null)[]> {
   try {
     const r = await completeJson<{ explanations: { index: number; explanation?: string }[] }>(
-      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
+      { prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
       { check: (v) => (Array.isArray(v?.explanations) ? null : "le champ « explanations » (tableau) manque") },
     );
     const byIndex = new Map(r.explanations.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.explanation === "string" ? x.explanation.trim() : ""]));
@@ -324,7 +324,7 @@ export async function writeJustifications(targets: JustificationTarget[], langua
   ].join("\n");
   try {
     const r = await completeJson<{ justifications: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] }>(
-      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: JUSTIFICATIONS_SCHEMA } },
+      { prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 300_000, json: { schema: JUSTIFICATIONS_SCHEMA } },
       { check: (v) => (Array.isArray(v?.justifications) ? null : "le champ « justifications » (tableau) manque") },
     );
     const byIndex = new Map(r.justifications.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, x]));

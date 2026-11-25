@@ -204,7 +204,7 @@ test("nouveau compte à 0 crédit : import et consultation gratuits, préparatio
   await expect(usage).not.toContainText("$");
 
   const denied = await api<{ error: string }>(page, `/api/exams/generate?course=${encodeURIComponent(created.body.course.id)}`, { method: "POST", body: "{}" });
-  expect(denied.status).toBe(402); expect(denied.body.error).toMatch(/6 crédit/i);
+  expect(denied.status).toBe(402); expect(denied.body.error).toMatch(/30 crédit/i);
 
   await page.context().clearCookies(); await loginPersona(page, "owner");
   const owner = await api<{ quotas: { gen: number | null; assist: number | null } }>(page, "/api/billing");

@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * ANNULATION D'UN EXAMEN QCM DÉJÀ VISIBLE — banc HUM-285 du 16/11/2026 : 20/20 QCM vérifiés à
  * 46 min, questions visibles dans l'examen, puis annulation à 90 min (garde du banc, ou

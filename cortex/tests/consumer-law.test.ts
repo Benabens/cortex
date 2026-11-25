@@ -20,6 +20,7 @@ test("les deux achats recueillent des consentements juridiquement distincts", as
     type: "pack",
     text: "Je demande l’accès immédiat à mes crédits et reconnais perdre mon droit de rétractation dès leur première utilisation.",
   });
+  assert.deepEqual(consentForPlan("credits_40"), consentForPlan("credits_10"), "tout pack recueille le consentement d'un pack");
   assert.deepEqual(consentForPlan("pro_monthly"), {
     type: "subscription",
     text: "Je demande que mon abonnement commence immédiatement. Si je me rétracte sous 14 jours, le montant proportionnel au service déjà fourni restera dû.",

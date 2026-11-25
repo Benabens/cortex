@@ -83,6 +83,16 @@ test("commande lue sur la facture Stripe : numéro, ligne, réduction par son NO
   assert.deepEqual(o.customer, { name: "Alice Martin", email: "alice@example.com", address: ["12 rue des Lilas", "75011 Paris", "FR"] });
 });
 
+test("pack de 40 sans plan connu : reconnu à son montant avant remise, reçu au bon nom", async () => {
+  const { orderFromInvoice } = await import("../lib/billing/orders");
+  const o = orderFromInvoice(fakeInvoice({ subtotal: 3600, total: 3600, amount_paid: 3600, total_discount_amounts: [] }), { kind: "pack" });
+  assert.equal(o.plan, "credits_40");
+  assert.equal(orderFromInvoice(fakeInvoice(), { kind: "pack" }).plan, "credits_10", "9 € (même remisé) reste le pack de 10");
+  const { receiptEmail } = await import("../lib/billing/receipt-email");
+  const mail = receiptEmail(o, { locale: "fr", accountUrl: "https://app.cortexexam.com/compte", invoiceUrl: "https://app.cortexexam.com/api/billing/invoices/cs_40", contact: "contact@cortexexam.com" });
+  assert.match(mail.subject, /pack de 40 crédits/);
+});
+
 test("réduction sans nom : le code promo saisi, sinon « Réduction » — jamais l'id du coupon", async () => {
   const { orderFromInvoice } = await import("../lib/billing/orders");
   const withCode = orderFromInvoice(fakeInvoice({ total_discount_amounts: [{ amount: 270, discount: { id: "di_2", object: "discount", source: { type: "coupon", coupon: { id: "QxJO9DZs", name: null } }, promotion_code: { id: "promo_1", code: "RENTREE26" } } }] }), { kind: "pack" });

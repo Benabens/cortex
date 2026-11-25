@@ -379,9 +379,10 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    |---|---|---|
    | Cortex Pro — mensuel (récurrent) | 14,90 €/mois | `cortex_pro_monthly` |
    | Cortex Pro — annuel (récurrent) | 149 €/an | `cortex_pro_yearly` |
+   | Pack de 40 crédits (paiement unique) | 36 € | `cortex_credits_40` |
    | Pack de 10 crédits (paiement unique) | 9 € | `cortex_credits_10` |
-   Pro = 20 crédits par mois, non reportables (`SUBSCRIPTION_MONTHLY_CREDITS`),
-   consommés avant les crédits achetés ; le pack est permanent. Active aussi le
+   Pro = 30 crédits par mois, non reportables (`SUBSCRIPTION_MONTHLY_CREDITS`),
+   consommés avant les crédits achetés ; les packs sont permanents. Active aussi le
    **portail client** (Paramètres → Facturation → Portail client) pour la
    résiliation en fin de période.
 4. **Développeurs → Webhooks → Ajouter une destination** :

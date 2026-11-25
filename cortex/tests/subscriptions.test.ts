@@ -1,3 +1,7 @@
+// Mécanique écrite avec le Pro à 20 crédits/mois (défaut avant le 25/11/2026, 30 depuis) : figé ici.
+process.env.SUBSCRIPTION_MONTHLY_CREDITS = "20";
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * ABONNEMENT PRO SUR LE LEDGER DURCI — deux poches de crédits :
  *  - ACHETÉS (packs, palier gratuit) : ledger `credit_transactions`, permanents ;

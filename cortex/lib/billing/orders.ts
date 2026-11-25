@@ -67,8 +67,9 @@ export function discountName(discount: unknown): string | null {
 export function orderFromInvoice(inv: InvoiceLike, o: { kind: OrderKind; plan?: PlanKey | null }): Order {
   const lines = inv.lines?.data ?? [];
   const period = o.kind === "subscription" ? lines.find((l) => l.period && l.period.end > l.period.start)?.period ?? null : null;
-  // Le plan connu du webhook prime ; sinon : un pack est le pack, un abonnement de plus de deux mois l'annuel.
-  const plan: PlanKey = o.plan ?? (o.kind === "pack" ? "credits_10" : period && period.end - period.start > 60 * DAY_S ? "pro_yearly" : "pro_monthly");
+  // Le plan connu du webhook prime ; sinon : un pack de plus de 9 € (avant remise) est celui de 40, un
+  // abonnement de plus de deux mois l'annuel.
+  const plan: PlanKey = o.plan ?? (o.kind === "pack" ? (inv.subtotal > 900 ? "credits_40" : "credits_10") : period && period.end - period.start > 60 * DAY_S ? "pro_yearly" : "pro_monthly");
   const a = inv.customer_address;
   const cityLine = [a?.postal_code, a?.city].filter(Boolean).join(" ");
   return {

@@ -16,10 +16,11 @@ import { dropReceipt, queueReceipt } from "./receipts";
  * cohérence livemode/clé, puis appelle `handleStripeEvent(event)`.
  *
  * OFFRES, référencées par LOOKUP_KEY (aucun id en dur → bascule test/live sans code) :
- *  - cortex_pro_monthly / cortex_pro_yearly → abonnement Pro (20 crédits/mois,
- *    non reportables, attribués par facture payée : l'annuel reçoit 20/mois par
- *    recharge paresseuse) ;
- *  - cortex_credits_10 → pack unique de 10 crédits, permanents.
+ *  - cortex_pro_monthly / cortex_pro_yearly → abonnement Pro (30 crédits/mois depuis le
+ *    25/11/2026, SUBSCRIPTION_MONTHLY_CREDITS ; non reportables, attribués par facture payée :
+ *    l'annuel reçoit ses crédits du mois par recharge paresseuse) ;
+ *  - cortex_credits_40 / cortex_credits_10 → packs uniques de 40 et de 10 crédits, permanents
+ *    (même prix du crédit, 0,90 €).
  *
  * IDEMPOTENCE, trois remparts : `processed_events` (event.id) ; la référence
  * de l'objet métier (`stripe:cs:<session>` pour un pack, `stripe_invoices`
@@ -80,12 +81,14 @@ export type StripeLookup = {
 };
 export type HandleOptions = { lookup?: StripeLookup };
 
-export type PlanKey = "pro_monthly" | "pro_yearly" | "credits_10";
+export type PlanKey = "pro_monthly" | "pro_yearly" | "credits_40" | "credits_10";
 export type PlanSpec = { lookupKey: string; mode: "subscription" | "payment"; credits?: number; label: string };
 
 export const PLANS: Record<PlanKey, PlanSpec> = {
   pro_monthly: { lookupKey: "cortex_pro_monthly", mode: "subscription", label: "Pro mensuel" },
   pro_yearly: { lookupKey: "cortex_pro_yearly", mode: "subscription", label: "Pro annuel" },
+  // Pack de 40 (36 €, 25/11/2026) : un examen blanc complet coûte 30 crédits, le pack de 10 n'en paie plus un.
+  credits_40: { lookupKey: "cortex_credits_40", mode: "payment", credits: 40, label: "Pack de 40 crédits" },
   credits_10: { lookupKey: "cortex_credits_10", mode: "payment", credits: 10, label: "Pack de 10 crédits" },
 };
 
@@ -418,7 +421,12 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
     }
     log("info", "stripe.free_session_allowed", { session: s.id, promotionCode: promo });
   }
-  const credits = Number(s.metadata?.credits ?? 0);
+  const asked = Number(s.metadata?.credits ?? 0);
+  // Un code gratuit de la liste blanche offre le pack de 10, quel que soit le pack choisi : le coupon live
+  // (100 %, tous produits) offrirait sinon 40 crédits sur le pack de 40 (25/11/2026).
+  const freeCap = PLANS.credits_10.credits!;
+  const credits = free && asked > freeCap ? freeCap : asked;
+  if (credits !== asked) log("warn", "stripe.free_session_capped", { session: s.id, asked, credited: credits });
   if (!userId || !(credits > 0)) return { ok: false, action: "pack", error: "métadonnées manquantes" };
   // Idempotence par SESSION (+ lignes créditées par l'ancien code sous l'id d'événement).
   const legacy = await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, eventId);

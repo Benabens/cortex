@@ -74,7 +74,7 @@ export function legalReady(env: Partial<NodeJS.ProcessEnv> = process.env): boole
  * LEGAL_TERMS_VERSION prime et doit être changée le jour de la publication.
  */
 export function termsVersion(env: Partial<NodeJS.ProcessEnv> = process.env): string {
-  return env.LEGAL_TERMS_VERSION?.trim() || "2026-11-18";
+  return env.LEGAL_TERMS_VERSION?.trim() || "2026-11-25";
 }
 
 export function stripeConfigured(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {

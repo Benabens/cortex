@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * Durcissement post-review — chaque test verrouille UN finding
  * confirmé par la review adversariale :
@@ -150,7 +152,7 @@ test("annulation : remboursée AVANT travail, PAS après (sinon générations gr
     process.env.CREDITS_COST_JSON = '{"exam":9}';           // hausse de tarif
     await credits.refundGeneration("exam", refB, "dave");
     assert.equal(await credits.getBalance("dave"), solde0, "le remboursement doit rendre 6, pas 9");
-    delete process.env.CREDITS_COST_JSON;
+    process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
   }));
   delete process.env.SIGNUP_FREE_CREDITS;
 });

@@ -6,7 +6,7 @@ import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, evidencePassages } from "@/lib/c
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
 import { BLOCK_PART_KINDS, examLanguageFor, type BlockFormat, type BlockPartKind, type PartShape } from "@/lib/exam-format";
-import { HARD_STOP_CODES, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
+import { HARD_STOP_CODES, hardTaskEffort, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { untypesetChars } from "@/lib/tex-escape";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
@@ -104,6 +104,29 @@ const BLOCK_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * Ce qui trahit un distracteur à qui ne connaît pas le cours : les marqueurs de la rubrique du banc
+ * (lib/bench/rubric), plus le fait du scénario contredit (consigne (2) du générateur), et ce que la
+ * relance demande d'y faire. Banc rs-composite du 23/11 : 12 rejets sur 15 de Q1-Q3 pour des
+ * distracteurs « éliminables sans le cours », les mêmes étiquettes de la typologie du cours rejetées
+ * puis acceptées telles quelles ; et, relancé sur l'option seule, le générateur lui ajoutait une
+ * justification que le scénario dément, aussitôt rejetée.
+ */
+const TELLS: Record<string, string> = {
+  absurde: "absurde ou réfutable par le bon sens : remplace-la par une notion du cours de même nature",
+  hors_sujet: "ne répond pas à la question posée : remplace-la par une notion du cours de même nature, sur le même axe",
+  absolu: "un mot absolu la trahit : retire-le",
+  grammaire: "ne s'accorde pas avec l'énoncé : accorde-la",
+  longueur: "sa forme ou sa longueur la trahit : aligne-la sur la bonne réponse",
+  contredit_enonce: "contredit un fait du scénario ou de l'énoncé : seul le cours doit la réfuter, n'y ajoute aucune justification que le scénario dément",
+};
+/** Le marqueur en tête d'un texte du juge (« contredit_enonce : … », « absolu/contredit_enonce (…) », « hors sujet »), "" sinon. */
+function tellOf(x: unknown): string {
+  if (typeof x !== "string") return "";
+  const t = x.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/\bl['’]/g, "").replace(/[\s'’-]+/g, "_");
+  return Object.keys(TELLS).find((k) => t.startsWith(k)) ?? "";
+}
+
 const VERDICT_SCHEMA = {
   type: "object",
   properties: {
@@ -126,7 +149,7 @@ const VERDICT_SCHEMA = {
     trivial_distractors: {
       type: "array",
       description: "Choix unique : les options qu'un étudiant élimine sans connaître le cours.",
-      items: { type: "object", properties: { index: { type: "integer" }, options: { type: "array", items: { type: "string" } } }, required: ["index", "options"], additionalProperties: false },
+      items: { type: "object", properties: { index: { type: "integer" }, options: { type: "array", items: { type: "string" } }, tell: { type: "string", enum: Object.keys(TELLS) } }, required: ["index", "options", "tell"], additionalProperties: false },
     },
   },
   required: ["verdicts", "off_course", "definition_mismatch", "trivial_distractors"],
@@ -411,6 +434,23 @@ async function runCodeParts(b: ExamBlock, language: string | undefined): Promise
   return issues;
 }
 
+/**
+ * Ce que le juge relève dans « off_course » ou « definition_mismatch », vide s'il ne relève rien.
+ * Banc rs-composite (22/11 et 23/11) : 100 % des verdicts les rendaient en TABLEAU, une entrée par
+ * sous-question ({ index, notion | issue | note | options }), et seule une chaîne était lue : ces deux
+ * contrôles ne rejetaient jamais (d8c07f17 : un bloc livré malgré « taxonomie absente des extraits »).
+ * Une entrée vide (« options: [] ») ou un « none » ne relève rien.
+ */
+export function flagText(x: unknown): string {
+  if (typeof x === "string") return NO_FLAG.test(x.trim()) ? "" : x.trim();
+  if (Array.isArray(x)) return x.map(flagText).filter(Boolean).join(" ; ");
+  if (!x || typeof x !== "object") return "";
+  const { index, ...rest } = x as Record<string, unknown>;
+  const said = Object.values(rest).map(flagText).filter(Boolean).join(", ");
+  const at = Number.isInteger(index) ? LETTER[index as number]?.toLowerCase() : typeof index === "string" && /^[a-h]$/i.test(index) ? index.toLowerCase() : null;
+  return said && at ? `(${at}) ${said}` : said;
+}
+
 /** Juge à l'aveugle (sans clé ni barème) : ce qu'il reproche au bloc, vide s'il passe. null : juge indisponible. */
 async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[], language: string | undefined): Promise<string[] | null> {
   const body = b.parts.map((p, i) => [
@@ -421,7 +461,8 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   const system = [
     `Tu es un correcteur indépendant. Résous chaque sous-question de cette question d'examen composée, SANS corrigé, avec les DÉFINITIONS DES EXTRAITS DU COURS (jamais celles d'une autre source).`,
     `Pour chaque sous-question (index 0 = a) : "answer" = la lettre de l'option juste (scq), la sortie exacte du code (code_output), ou ta réponse en une ou deux phrases (short) ; ok=false si elle est ambiguë, sans réponse unique, ou contraire au cours, et dis pourquoi dans "issue".`,
-    `off_course : toute notion employée absente des extraits. definition_mismatch : une définition employée (scénario, énoncés, options) plus étroite (une condition ajoutée) ou plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues. trivial_distractors : les options qu'on élimine sans connaître le cours.`,
+    `off_course : toute notion employée absente des extraits. definition_mismatch : une définition employée (scénario, énoncés, options) plus étroite (une condition ajoutée) ou plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues.`,
+    `trivial_distractors : les options fausses qu'un étudiant qui ne connaît PAS le cours élimine quand même, chacune avec le marqueur qui la trahit ("tell") : absurde (réfutable par le bon sens), hors_sujet (ne répond pas à la question posée, notion d'un autre chapitre), absolu (« toujours », « jamais », « garantit »…), grammaire (ne s'accorde pas avec l'énoncé), longueur (forme ou longueur qui la distingue des autres), contredit_enonce (contredit un fait donné par le scénario ou l'énoncé). Une notion du cours de même nature que la bonne réponse, qu'on n'écarte qu'en appliquant sa définition au scénario, n'est PAS triviale : c'est ce que la question évalue. Sans marqueur, ne la cite pas.`,
     `Réponds UNIQUEMENT avec un objet JSON {"verdicts":[{"index","answer","ok","issue"}],"off_course","definition_mismatch","trivial_distractors":[{"index","options"}]}.`,
   ].join("\n");
   const prompt = [
@@ -429,18 +470,18 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
     `SCÉNARIO :\n${b.scenario}`,
     `SOUS-QUESTIONS :\n${body}`,
   ].join("\n\n");
-  let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: string; definition_mismatch?: string; trivial_distractors?: { index: number; options: string[] }[] };
+  let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: unknown; definition_mismatch?: unknown; trivial_distractors?: { index: number; options: string[]; tell?: unknown }[] };
   try {
     // Un verdict par sous-question, sinon rien n'est vérifié (jamais de faux « vérifié »).
     const covers = (v: typeof res) => b.parts.every((_, i) => v.verdicts?.some((x) => x.index === i));
-    res = await completeJson({ system, prompt, model: "opus", timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
+    res = await completeJson({ system, prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
       check: (v: typeof res) => (!Array.isArray(v?.verdicts) ? "le champ « verdicts » manque" : covers(v) ? null : `un verdict par sous-question (index 0 à ${b.parts.length - 1})`),
     });
   } catch {
     return null;
   }
   const issues: string[] = [];
-  const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
+  const said = (x: unknown) => (passages.length ? flagText(x) : "");
   for (const [i, p] of b.parts.entries()) {
     const v = res.verdicts!.find((x) => x.index === i)!;
     const at = `(${LETTER[i].toLowerCase()})`;
@@ -461,19 +502,29 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   // fait planter tout l'examen (« t.options.slice(...).join is not a function »).
   for (const t of Array.isArray(res.trivial_distractors) ? res.trivial_distractors : []) {
     const raw: unknown = t?.options;
-    const opts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
+    const entries: unknown[] = Array.isArray(raw) ? raw : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
     // Le juge nomme les options par leur lettre, dans l'ordre MÉLANGÉ après la génération : la relance
     // les cite par leur texte, sinon le générateur corrige au hasard (banc rs-composite, 22/11).
     const options = b.parts[t.index]?.options ?? [];
-    const named = opts.map((o) => {
+    const tells = new Set<string>();
+    const named = entries.flatMap((e) => {
+      // Run du 24/11 (claude-code, schéma non imposé) : le marqueur vient à côté des options (« tell »),
+      // dans chacune ({ option, tell }), ou en tête de la raison (« A: hors_sujet (…) »).
+      const o = e && typeof e === "object" ? e as { option?: unknown; tell?: unknown } : null;
+      const text = o ? String(o.option ?? "") : String(e);
       // « B », « (B) texte », « B (raison) », « B : raison » ; « A, B — … » reste tel quel.
-      const m = /^\s*\(?([A-H])\)?(?=$|[\s(:.—–-])[\s(:.—–-]*(.*)$/.exec(o);
+      const m = /^\s*\(?([A-H])\)?(?=$|[\s(:.—–-])[\s(:.—–-]*(.*)$/.exec(text);
       const option = m ? options[LETTER.indexOf(m[1])] : undefined;
-      // La raison perd la parenthèse fermante de « B (raison) ».
-      const reason = m?.[2]?.trim().replace(/\)$/, "").slice(0, 160);
-      return option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : o;
+      // La raison perd la parenthèse fermante de « B (raison) », pas celle de « hors_sujet (raison) ».
+      const said = (o && typeof o.tell === "string" ? o.tell : m?.[2] ?? "").trim();
+      const reason = (said.split(")").length > said.split("(").length ? said.replace(/\)$/, "") : said).slice(0, 160);
+      // Sans marqueur concret, l'avis ne tient pas d'une version à l'autre (c519f840) : il ne rejette rien.
+      const tell = tellOf(t?.tell) || tellOf(reason);
+      if (!tell) return [];
+      tells.add(tell);
+      return [option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : text];
     });
-    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")}`);
+    if (named.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${named.slice(0, 3).join(" ; ")} — ${[...tells].map((k) => TELLS[k]).join(" ; ")} ; les options gardent la même forme (un nom de notion reste un nom seul)`);
   }
   return issues;
 }

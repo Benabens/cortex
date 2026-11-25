@@ -9,7 +9,7 @@
  *    lib/review-login). Refus si c'est un compte propriétaire (CORTEX_OWNER_*) :
  *    le relecteur doit payer en crédits comme un client, pour voir le devis puis
  *    la confirmation.
- * 2. 20 crédits par une ligne de grand livre `review_grant`, une fois par lot
+ * 2. 80 crédits par une ligne de grand livre `review_grant`, une fois par lot
  *    (référence `review_grant:<compte>:<lot>`, lot « 1 » par défaut). Ce ne sont
  *    pas des revenus : le budget lié au revenu ne lit que les paiements Stripe
  *    (lib/billing/revenue). Ils sont servis comme des crédits achetés (tout ce
@@ -27,7 +27,9 @@ import path from "node:path";
 
 const DEMO_CODE = "DEMO-101";
 const DEMO_NAME = "Probabilités (démo)";
-const GRANT_CREDITS = 20;
+// Préparation (2), l'examen blanc lancé avant la revue et celui du relecteur (30 chacun depuis les
+// prix du 23/11/2026), une quinzaine d'aides (0,5) : 20 crédits ne payaient plus un seul examen.
+const GRANT_CREDITS = 80;
 const SOURCES = [
   { file: "lecture-notes.md", title: "DEMO-101 lecture notes", category: "lecture" },
   { file: "past-exam.md", title: "DEMO-101 practice final", category: "past_exam" },

@@ -134,7 +134,7 @@ test("checkout : aucun moyen de paiement figé par le code, c'est le tableau de 
   const { checkoutParams } = await import("../lib/billing/checkout-params");
   const { PLANS } = await import("../lib/billing/stripe-events");
   const plans = Object.keys(PLANS) as Array<keyof typeof PLANS>;
-  assert.deepEqual([...plans].sort(), ["credits_10", "pro_monthly", "pro_yearly"]);
+  assert.deepEqual([...plans].sort(), ["credits_10", "credits_40", "pro_monthly", "pro_yearly"]);
   for (const plan of plans) {
     const params = checkoutParams({ plan, priceId: "price_test", userId: "alice", email: "alice@example.com" });
     assert.equal("payment_method_types" in params, false, `${plan} : une liste figée (['card']) retirerait Link`);

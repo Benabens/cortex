@@ -161,6 +161,7 @@ Deux façons d'aller au bout, à trancher (aucune n'est faite par le code) :
 
 | Produit | Prix | Facturation | `lookup_key` |
 |---|---|---|---|
+| Cortex : pack de 40 crédits | 36,00 EUR | paiement unique | `cortex_credits_40` |
 | Cortex : pack de 10 crédits | 9,00 EUR | paiement unique | `cortex_credits_10` |
 | Cortex Pro | 14,90 EUR | récurrent, mensuel | `cortex_pro_monthly` |
 | Cortex Pro | 149,00 EUR | récurrent, annuel | `cortex_pro_yearly` |

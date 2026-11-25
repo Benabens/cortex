@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * PORTÉE cortex.write ET OUTILS D'AJOUT DE COURS — par les vrais points OAuth et
  * `POST /mcp` (client MCP v2 en mémoire), sur Postgres réel (PGlite).
@@ -63,6 +65,8 @@ function fakeLlm(req: http.IncomingMessage, res: http.ServerResponse) {
 
 before(async () => {
   delete process.env.CORTEX_USER;
+  const { setStatfsForTests } = await import("../lib/storage-quota");
+  setStatfsForTests(() => ({ free: 100 * 1024 ** 3, total: 200 * 1024 ** 3 }));
   llm = http.createServer(fakeLlm);
   await new Promise<void>((r) => llm.listen(0, "127.0.0.1", r));
   process.env.LLM_BASE_URL = `http://127.0.0.1:${(llm.address() as AddressInfo).port}/v1`;
@@ -75,6 +79,8 @@ before(async () => {
 
 after(async () => {
   await new Promise((r) => llm.close(r));
+  const { setStatfsForTests } = await import("../lib/storage-quota");
+  setStatfsForTests(null);
   const { closePostgres } = await import("../db/driver-postgres");
   await closePostgres();
   for (const k of ENV_KEYS) delete process.env[k];
@@ -552,7 +558,7 @@ test("quota de stockage atteint : refusé AVANT de télécharger (le serveur ne 
   } finally {
     delete process.env.STORAGE_QUOTA_MB;
     delete process.env.SOURCE_FETCH_PER_HOUR;
-    setStatfsForTests(null);
+    setStatfsForTests(() => ({ free: 100 * 1024 ** 3, total: 200 * 1024 ** 3 }));
   }
 });
 

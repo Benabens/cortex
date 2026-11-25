@@ -14,7 +14,8 @@
  * portail étiquetée `app=cortex`, webhooks dont l'URL est celle de Cortex.
  *
  * Un prix existant dont le montant diffère est SIGNALÉ, jamais modifié : c'est
- * de l'argent, la décision n'appartient pas à un script.
+ * de l'argent, la décision n'appartient pas à un script. La DESCRIPTION d'un
+ * produit Cortex, elle, est remise à celle du code (texte affiché au paiement).
  *
  * COUPONS : ce script n'en crée aucun. S'il en crée un jour, toujours avec un
  * `name` : sans nom, Stripe affiche l'identifiant du coupon (« QxJO9DZs ») sur ses
@@ -28,17 +29,21 @@ import { HANDLED_EVENTS, PLANS } from "./stripe-events";
 export const PORTAL_APP_TAG = "cortex";
 export const WEBHOOK_PATH = "/api/billing/webhook";
 
-type ProductKey = "pro" | "pack";
+type ProductKey = "pro" | "pack40" | "pack";
+// Descriptions = celles du compte live (24/11/2026), seul le nombre de crédits du Pro a changé : la mise en place les
+// remet à ces textes, elle ne réécrit donc rien d'autre.
 const PRODUCTS: Record<ProductKey, { id: string; name: string; description: string; statement_descriptor?: string }> = {
   // Le libellé de relevé d'un abonnement est celui de son produit (un pack reçoit le sien au paiement : checkout-params).
-  pro: { id: "cortex_pro", name: "Cortex Pro", description: "Abonnement Cortex Pro : 20 crédits de génération par mois.", statement_descriptor: "BENABENS CORTEX" },
-  pack: { id: "cortex_credits_10", name: "Cortex : pack de 10 crédits", description: "10 crédits de génération, sans date d'expiration." },
+  pro: { id: "cortex_pro", name: "Cortex Pro", description: "30 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.", statement_descriptor: "BENABENS CORTEX" },
+  pack40: { id: "cortex_credits_40", name: "Cortex : pack de 40 crédits", description: "40 crédits de génération d'examens d'entraînement, sans date d'expiration." },
+  pack: { id: "cortex_credits_10", name: "Cortex : pack de 10 crédits", description: "10 crédits de génération d'examens d'entraînement, sans date d'expiration." },
 };
 
-/** Les trois prix de l'offre, en centimes d'euro. Les lookup_keys sont celles que lit l'app (PLANS). */
+/** Les quatre prix de l'offre, en centimes d'euro. Les lookup_keys sont celles que lit l'app (PLANS). */
 export const OFFERS: ReadonlyArray<{ lookupKey: string; product: ProductKey; unitAmount: number; interval: "month" | "year" | null; nickname: string }> = [
   { lookupKey: PLANS.pro_monthly.lookupKey, product: "pro", unitAmount: 1490, interval: "month", nickname: "Pro mensuel 14,90 €" },
   { lookupKey: PLANS.pro_yearly.lookupKey, product: "pro", unitAmount: 14900, interval: "year", nickname: "Pro annuel 149 €" },
+  { lookupKey: PLANS.credits_40.lookupKey, product: "pack40", unitAmount: 3600, interval: null, nickname: "Pack de 40 crédits 36 €" },
   { lookupKey: PLANS.credits_10.lookupKey, product: "pack", unitAmount: 900, interval: null, nickname: "Pack de 10 crédits 9 €" },
 ];
 
@@ -160,9 +165,10 @@ export async function setupStripe(s: Stripe, o: SetupOptions): Promise<SetupRepo
     if (!product) {
       if (!o.dryRun) product = await s.products.create({ id: spec.id, name: spec.name, description: spec.description, url: o.landing, metadata: { app: PORTAL_APP_TAG }, ...(spec.statement_descriptor ? { statement_descriptor: spec.statement_descriptor } : {}) });
       say("produit", "créé", "à créer", `${spec.id} « ${spec.name} »`);
-    } else if (!product.active || (spec.statement_descriptor && !product.statement_descriptor)) {
-      if (!o.dryRun) await s.products.update(product.id, { active: true, ...(spec.statement_descriptor ? { statement_descriptor: spec.statement_descriptor } : {}) });
-      say("produit", "mis à jour", "à mettre à jour", `${product.id} « ${product.name} » (actif${spec.statement_descriptor ? `, libellé de relevé ${spec.statement_descriptor}` : ""})`);
+    } else if (!product.active || (spec.statement_descriptor && !product.statement_descriptor) || product.description !== spec.description) {
+      const describe = product.description !== spec.description;
+      if (!o.dryRun) await s.products.update(product.id, { active: true, ...(spec.statement_descriptor ? { statement_descriptor: spec.statement_descriptor } : {}), ...(describe ? { description: spec.description } : {}) });
+      say("produit", "mis à jour", "à mettre à jour", `${product.id} « ${product.name} » (actif${spec.statement_descriptor ? `, libellé de relevé ${spec.statement_descriptor}` : ""}${describe ? `, description « ${spec.description} »` : ""})`);
     } else {
       steps.push({ what: "produit", action: "inchangé", detail: `${product.id} « ${product.name} »` });
     }

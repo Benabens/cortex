@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * SORTIES CONFORMES AU SCHÉMA PUBLIÉ — claude.ai valide `structuredContent` contre
  * l'`outputSchema` de `tools/list` et REJETTE la réponse au moindre écart (« data must

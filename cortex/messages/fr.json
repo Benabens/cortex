@@ -720,7 +720,7 @@
       "dailyGen": "Par jour et par compte : {gen, plural, one {{genFormatted} génération} other {{genFormatted} générations}}.",
       "dailyAssist": "Par jour et par compte : {assist, plural, one {{assistFormatted} aide} other {{assistFormatted} aides}}.",
       "storage": "Stockage : {value} Mo de fichiers.",
-      "costSummary": "Un examen blanc coûte {exam, plural, one {{examFormatted} crédit} other {{examFormatted} crédits}}, un examen blanc QCM ou un exercice {qcm, plural, one {{qcmFormatted} crédit} other {{qcmFormatted} crédits}}, une aide (exercice d’entraînement, correction) {assist}.",
+      "costSummary": "Un examen blanc coûte {exam, plural, one {{examFormatted} crédit} other {{examFormatted} crédits}}, un examen blanc QCM {qcm, plural, one {{qcmFormatted} crédit} other {{qcmFormatted} crédits}}, un exercice {exercise, plural, one {{exerciseFormatted} crédit} other {{exerciseFormatted} crédits}}, une aide (exercice d’entraînement, correction) {assist, plural, one {{assistFormatted} crédit} other {{assistFormatted} crédits}}.",
       "refresh": "Actualiser le solde",
       "paymentConfirmed": "Paiement confirmé. Tes crédits apparaissent dès que Stripe nous l’a notifié : quelques secondes en général. Actualise si besoin.",
       "paymentCanceled": "Paiement annulé. Rien n’a été débité.",
@@ -793,7 +793,8 @@
       "plans": {
         "pro_monthly": "Pro mensuel",
         "pro_yearly": "Pro annuel",
-        "credits_10": "Pack de 10 crédits"
+        "credits_10": "Pack de 10 crédits",
+        "credits_40": "Pack de 40 crédits"
       }
     },
     "usage": {
@@ -1726,6 +1727,7 @@
   "order": {
     "product": {
       "credits_10": "Pack de 10 crédits",
+      "credits_40": "Pack de 40 crédits",
       "pro_monthly": "Cortex Pro mensuel",
       "pro_yearly": "Cortex Pro annuel"
     },
@@ -1735,6 +1737,7 @@
   "receipt": {
     "subject": {
       "credits_10": "Votre reçu Cortex : pack de 10 crédits",
+      "credits_40": "Votre reçu Cortex : pack de 40 crédits",
       "pro_monthly": "Votre reçu Cortex : abonnement Pro mensuel",
       "pro_yearly": "Votre reçu Cortex : abonnement Pro annuel"
     },

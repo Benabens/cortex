@@ -1,9 +1,10 @@
 import { currentCourse } from "@/db/client";
-import { EXAM_OUTPUT_MAX_TOKENS, completeText, extractJson } from "@/lib/llm";
+import { EXAM_OUTPUT_MAX_TOKENS, hardTaskEffort, completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
+import { findTexHazards } from "@/lib/tex-guard";
 import { arithmeticSlips, missingSubquestions, namesLabel, subquestionLabels } from "@/lib/verify-arith";
 import { verifyV2Enabled } from "@/lib/verif-switches";
 import { examsDir } from "@/lib/paths";
@@ -250,7 +251,7 @@ async function verifyOneLegacy(q: ExamQuestion, opts?: VerifyOpts): Promise<Veri
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
     // Sans limite propre, l'API coupait à 16 000 tokens la vérification qui trouve l'erreur et
     // réécrit le corrigé (banc du 17/11 : 65 % d'entre elles) → exercice livré « non vérifié ».
-    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
+    const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
     const r = extractJson<VerifyResult>(text);
     if (!r || !r.verdict) return null;
     // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
@@ -320,8 +321,11 @@ const isInvalid = (r: VerifyResult | null) =>
  * Une correction du vérificateur ne remplace le corrigé que si elle est COMPLÈTE : chaque
  * sous-question de l'énoncé y figure et rien ne renvoie à des parties « inchangées » du corrigé
  * proposé. Banc du 16/11 (ex9) : correction partielle substituée → corrigé livré réduit à 3.4.
+ * Ni aucune primitive que lib/tex-guard refuse : banc du 24/11, un corrigé réparé écrivait « \read »
+ * (l'appel système) et l'examen entier échouait au rendu du PDF.
  */
 function isCompleteCorrection(corrected: string, statement: string): boolean {
+  if (findTexHazards(corrected).length) return false;
   if (/inchang|unchanged|sans changement|identiques? (?:au|à|to)|cf\.? (?:le )?corrigé/i.test(corrected)) return false;
   return subquestionLabels(statement).every((l) => namesLabel(corrected, l));
 }
@@ -337,7 +341,7 @@ function repairOf(q: ExamQuestion, r: VerifyResult): ExamQuestion | null {
   if (r.verdict === "wrong") return isCompleteCorrection(sol, q.statement_tex) ? { ...q, solution_tex: sol } : null;
   if (r.verdict !== "ambiguous") return null;
   const st = r.corrected_statement_tex?.trim() ?? "";
-  if (st.length < q.statement_tex.length / 2) return null;
+  if (st.length < q.statement_tex.length / 2 || findTexHazards(st).length) return null;
   if (subquestionLabels(st).join("|") !== subquestionLabels(q.statement_tex).join("|")) return null;
   return isCompleteCorrection(sol, st) ? { ...q, statement_tex: st, solution_tex: sol } : null;
 }
