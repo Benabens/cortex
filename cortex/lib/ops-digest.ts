@@ -2,8 +2,11 @@ import { authAll, authGet } from "@/db/auth-store";
 import { runWithCourse } from "@/db/client";
 import { runWithUser } from "@/db/context";
 import { dbDriverName, q } from "@/db/q";
+import { DELTA_CENTI } from "@/lib/billing/credits";
+import { GENERATION_DEBIT_SQL } from "@/lib/billing/usage";
 import { claimOnce, releaseClaim, settleClaim } from "@/lib/claim-once";
 import { ensureCoursesLoaded, listCourses } from "@/lib/courses";
+import { JOB_TYPES } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import type { EmailOutcome } from "@/lib/email";
 
@@ -46,7 +49,7 @@ function num(name: string, fallback: number): number {
 export function digestThresholds() {
   return {
     /** Heure de Zurich à partir de laquelle le passage du jour a lieu. */
-    hour: num("OPS_DIGEST_HOUR", 8),
+    hour: Math.min(23, num("OPS_DIGEST_HOUR", 8)),
     /** Taux d'échec des générations (fraction) au-delà duquel on alerte… */
     failRate: num("OPS_ALERT_FAIL_RATE", 0.05),
     /** …sur au moins ce nombre de jobs terminés. */
@@ -94,10 +97,14 @@ export function isoWeek(day: string): number {
 const stamp = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
 const parseStamp = (s: string | Date) => (s instanceof Date ? s.getTime() : Date.parse(`${String(s).replace(" ", "T")}Z`));
 
-type JobRow = { owner: string; type: string; status: string; created: number; updated: number; code: string | null; ref: string | null };
-type RawJob = { type: string; status: string; created_at: string; updated_at: string; error_json: string | null; credit_ref: string | null };
+type JobRow = { owner: string; type: string; status: string; created: number; updated: number; alive: number; code: string | null; ref: string | null };
+type RawJob = { type: string; status: string; created_at: string; updated_at: string; heartbeat_at: string | null; error_json: string | null; credit_ref: string | null };
 
-const JOB_COLUMNS = `type, status, created_at, updated_at, error_json, credit_ref`;
+const JOB_COLUMNS = `type, status, created_at, updated_at, heartbeat_at, error_json, credit_ref`;
+/** États où un worker travaille (lib/jobs ACTIVE_STATES, la file en moins). */
+const WORKING = new Set(["running", "verifying", "compiling"]);
+/** Jobs qui génèrent pour l'étudiant (le taux d'échec ne compte qu'eux, pas ingestion ni préparation). */
+const GENERATIONS = new Set(["exam", "exercise", "lab-exercise", "qcm", "drill", "check"]);
 
 function errorCode(json: string | null): string | null {
   if (!json) return null;
@@ -115,21 +122,33 @@ function errorCode(json: string | null): string | null {
  * coût) ; SQLite : une base par cours.
  */
 async function readJobs(since: Date): Promise<JobRow[]> {
-  const where = `WHERE updated_at >= ? OR status IN ('queued', 'running')`;
+  const where = `WHERE updated_at >= ? OR status IN ('queued', 'running', 'verifying', 'compiling')`;
   const out: JobRow[] = [];
   const push = (owner: string, rows: RawJob[]) => {
     for (const r of rows) {
-      out.push({ owner, type: r.type, status: r.status, created: parseStamp(r.created_at), updated: parseStamp(r.updated_at), code: errorCode(r.error_json), ref: r.credit_ref });
+      // Un type hors de la liste ne part pas tel quel dans le mail : la colonne est du texte.
+      const updated = parseStamp(r.updated_at);
+      // Dernier signe de vie : le battement du worker (toutes les 30 s), sinon la dernière étape.
+      const alive = Math.max(updated, r.heartbeat_at ? parseStamp(r.heartbeat_at) : 0);
+      out.push({ owner, type: (JOB_TYPES as readonly string[]).includes(r.type) ? r.type : "autre", status: r.status, created: parseStamp(r.created_at), updated, alive, code: errorCode(r.error_json), ref: r.credit_ref });
     }
   };
   if (dbDriverName() === "postgres") {
     const tenants = await authAll<{ user_id: string; schema_name: string }>(`SELECT user_id, schema_name FROM public.tenants`);
+    let skipped = 0;
     for (const t of tenants) {
       if (!/^[a-z0-9_]+$/.test(t.schema_name)) continue;
       try {
+        // Exception à l'invariant 4 (search_path), comme le rapport de coût et l'export de compte :
+        // lecture seule d'un schéma nommé par public.tenants et filtré ci-dessus, sans passer par le
+        // store (qui amorcerait le tenant, donc écrirait).
         push(t.user_id, await authAll<RawJob>(`SELECT ${JOB_COLUMNS} FROM "${t.schema_name}".jobs ${where}`, stamp(since)));
-      } catch { /* tenant sans table jobs */ }
+      } catch {
+        // Sans table jobs, ou jamais rouvert depuis l'ajout d'une colonne : compté, pour qu'un sous-comptage se voie.
+        skipped++;
+      }
     }
+    if (skipped) log("warn", "ops_digest.tenants_skipped", { skipped, total: tenants.length });
     return out;
   }
   await ensureCoursesLoaded();
@@ -154,22 +173,24 @@ async function readLedger(since: Date): Promise<Ledger> {
   const billed = new Map<string, number>();
   const refunded = new Map<string, number>();
   const refunds: Ledger["refunds"] = [];
-  const centi = `CASE WHEN unit = 'centi' THEN delta ELSE delta * 100 END`;
+  const byMarker = new Map<string, Ledger["refunds"][number]>();
   try {
     for (const r of await authAll<{ ref: string; delta: number | string; sub_amount: number | string | null }>(
-      `SELECT ref, ${centi} AS delta, sub_amount FROM credit_transactions WHERE reason LIKE 'génération %' AND created_at >= ?`, stamp(new Date(since.getTime() - 86_400_000)),
+      `SELECT ref, ${DELTA_CENTI} AS delta, sub_amount FROM credit_transactions WHERE ${GENERATION_DEBIT_SQL} AND created_at >= ?`, stamp(new Date(since.getTime() - 86_400_000)),
     )) {
       billed.set(r.ref, Math.max(0, -Number(r.delta)) + Math.max(0, Number(r.sub_amount ?? 0)));
     }
     for (const r of await authAll<{ user_id: string; ref: string; delta: number | string; created_at: string }>(
-      `SELECT user_id, ref, ${centi} AS delta, created_at FROM credit_transactions WHERE (ref LIKE 'refund:%' OR ref LIKE 'offered:refund:%') AND created_at >= ?`, stamp(since),
+      `SELECT user_id, ref, ${DELTA_CENTI} AS delta, created_at FROM credit_transactions WHERE (ref LIKE 'refund:%' OR ref LIKE 'offered:refund:%') AND created_at >= ? ORDER BY id`, stamp(since),
     )) {
       const marker = r.ref.startsWith("offered:") ? r.ref.slice("offered:".length) : r.ref;
       const target = marker.slice("refund:".length).replace(/:(?:[a-z_]+)$/, "");
-      refunded.set(target, (refunded.get(target) ?? 0) + Math.max(0, Number(r.delta)));
-      // La part d'abonnement accompagne le marqueur : un seul remboursement compté.
-      if (!r.ref.startsWith("offered:")) refunds.push({ user: r.user_id, centi: Math.max(0, Number(r.delta)), at: parseStamp(r.created_at) });
-      else if (refunds.length) refunds[refunds.length - 1].centi += Math.max(0, Number(r.delta));
+      const centi = Math.max(0, Number(r.delta));
+      refunded.set(target, (refunded.get(target) ?? 0) + centi);
+      // La part d'abonnement (offered:refund:…) accompagne SON marqueur : un seul remboursement compté.
+      const one = byMarker.get(marker) ?? { user: r.user_id, centi: 0, at: parseStamp(r.created_at) };
+      one.centi += centi;
+      if (!byMarker.has(marker)) { byMarker.set(marker, one); refunds.push(one); }
     }
   } catch { /* registre absent (facturation jamais activée) */ }
   return { billed, refunded, refunds };
@@ -245,12 +266,13 @@ async function dailyAlerts(f: Facts, now: Date): Promise<string[]> {
   const alerts: string[] = [];
   const recent = f.jobs.filter((j) => TERMINAL.has(j.status) && j.updated >= since);
 
-  const failed = recent.filter((j) => j.status === "error");
-  if (recent.length >= t.failMinJobs && recent.length > 0 && failed.length / recent.length > t.failRate) {
+  const gens = recent.filter((j) => GENERATIONS.has(j.type));
+  const failed = gens.filter((j) => j.status === "error");
+  if (gens.length >= t.failMinJobs && gens.length > 0 && failed.length / gens.length > t.failRate) {
     const codes = new Map<string, number>();
     for (const j of failed) codes.set(j.code ?? "inconnu", (codes.get(j.code ?? "inconnu") ?? 0) + 1);
     const top = [...codes].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c, n]) => `${c} × ${n}`).join(", ");
-    alerts.push(`Taux d'échec : ${plural(failed.length, "échec", "échecs")} sur ${recent.length} jobs (${pct(failed.length / recent.length)}) — codes : ${top}.`);
+    alerts.push(`Taux d'échec : ${plural(failed.length, "échec", "échecs")} sur ${gens.length} jobs (${pct(failed.length / gens.length)}) — codes : ${top}.`);
   }
 
   const refunds = f.ledger.refunds.filter((r) => r.at >= since);
@@ -273,16 +295,21 @@ async function dailyAlerts(f: Facts, now: Date): Promise<string[]> {
   }
 
   if (f.capPerCredit !== null) {
+    const over: Array<{ type: string; cost: number; cap: number }> = [];
     for (const j of recent) {
       const billed = j.ref ? f.ledger.billed.get(j.ref) ?? 0 : 0;
       const cost = j.ref ? f.costs.get(j.ref) ?? 0 : 0;
       if (billed <= 0) continue;
       const cap = (billed / 100) * f.capPerCredit;
-      if (cost > t.costCapRatio * cap) alerts.push(`Coût : ${j.type} : ${usd(cost)} pour un plafond de ${usd(cap)} (${pct(cost / cap)}).`);
+      if (cost > t.costCapRatio * cap) over.push({ type: j.type, cost, cap });
     }
+    // Les trois pires seulement : un mauvais jour ne fait pas un mail de cent lignes.
+    over.sort((a, b) => b.cost / b.cap - a.cost / a.cap);
+    for (const o of over.slice(0, 3)) alerts.push(`Coût : ${o.type} : ${usd(o.cost)} pour un plafond de ${usd(o.cap)} (${pct(o.cost / o.cap)}).`);
+    if (over.length > 3) alerts.push(`Coût : ${over.length - 3} autres jobs au-delà de ${pct(t.costCapRatio)} de leur plafond.`);
   }
 
-  const stuck = f.jobs.filter((j) => j.status === "running" && now.getTime() - j.updated > t.stuckMinutes * 60_000);
+  const stuck = f.jobs.filter((j) => WORKING.has(j.status) && now.getTime() - j.alive > t.stuckMinutes * 60_000);
   if (stuck.length) {
     const types = [...new Set(stuck.map((j) => j.type))].join(", ");
     alerts.push(`Bloqués : ${plural(stuck.length, "job", "jobs")} sans avancer depuis plus de ${t.stuckMinutes} min (${types}).`);
@@ -360,6 +387,12 @@ function hints(types: TypeStats[], f: Facts): string[] {
 
 // ── mise en forme ────────────────────────────────────────────────────────────────────────
 
+/** « 16/11 08:30 → 23/11 08:30 », heure de Zurich. */
+function period(from: number, to: number): string {
+  const f = (t: number) => new Intl.DateTimeFormat("fr-CH", { timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(t)).replace(",", "");
+  return `${f(from)} → ${f(to)}`;
+}
+
 const pad = (s: string, n: number) => s + " ".repeat(Math.max(2, n - s.length));
 
 function weeklyText(w: ReturnType<typeof weeklyStats>, f: Facts): { text: string; rows: string[][][] } {
@@ -389,7 +422,7 @@ function weeklyText(w: ReturnType<typeof weeklyStats>, f: Facts): { text: string
   return { text, rows: [volume, cost, duration] };
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 function html(title: string, alerts: string[], rows: string[][][], tail: string[], links: string): string {
   const table = (r: string[][]) => `<table style="border-collapse:collapse;font:13px ui-monospace,monospace;margin:8px 0">${r.map((row) => `<tr>${row.map((c) => `<td style="padding:2px 12px 2px 0">${esc(c)}</td>`).join("")}</tr>`).join("")}</table>`;
@@ -435,11 +468,14 @@ export async function runOpsDigest(deps: Deps = {}): Promise<DigestResult> {
 
   const key = `ops_digest:${z.day}`;
   let token: string | null = null;
+  let chain: string | null = null;
+  let mailed = false;
   if (!manual) {
     const claim = await claimOnce(key);
     if (claim.state === "sent") return { status: "already_done" };
     if (claim.state === "busy") return { status: "busy" };
     token = claim.token;
+    chain = claim.chain;
   }
   try {
     const weekStart = now.getTime() - 7 * 86_400_000;
@@ -471,7 +507,7 @@ export async function runOpsDigest(deps: Deps = {}): Promise<DigestResult> {
     const l = links();
     const text = [
       alerts.length ? `Alertes (dernières 24 h) :\n${alerts.map((a) => `- ${a}`).join("\n")}` : "Aucune alerte sur les dernières 24 h.",
-      ...(body ? ["", `Bilan des 7 derniers jours`, "", body.text] : []),
+      ...(body ? ["", `Bilan des 7 derniers jours (${period(weekStart, now.getTime())})`, "", body.text] : []),
       ...(w ? ["", "Pistes d'optimisation :", ...(ideas.length ? ideas.map((h) => `- ${h}`) : ["- Rien à signaler."])] : []),
       "",
       l.text,
@@ -481,21 +517,29 @@ export async function runOpsDigest(deps: Deps = {}): Promise<DigestResult> {
     const mail: OpsMail = {
       to, subject, text,
       html: html(base, alerts, body?.rows ?? [], w ? [`Remboursements : ${w.refunds}`, `Étudiants touchés par une erreur : ${w.touched}`, ...ideas] : [], l.html),
-      idempotencyKey: manual ? undefined : `${key}:${token}`,
+      // La chaîne, pas le jeton : une reprise après un envoi incertain garde la même clé chez Resend.
+      idempotencyKey: chain ? `${key}:${chain}` : undefined,
     };
     if (deps.dryRun) return { status: "sent", subject, alerts, reason: text };
     const send = deps.send ?? (await import("@/lib/email")).sendEmail;
     const out = await send(mail);
-    if (!out.ok && !out.uncertain) {
-      if (token) await releaseClaim(key, token);
-      log("error", "ops_digest.send_failed", { reason: out.reason.slice(0, 200) });
+    if (!out.ok) {
+      // Incertain (peut-être parti) : la réclamation reste, reprise dans un quart d'heure avec la
+      // même clé d'idempotence, sans doublon. Refus durable (4xx hors 429 : clé, domaine) : le jour
+      // est clos, réessayer toutes les dix minutes n'y changerait rien. Sinon la clé est rendue.
+      const lasting = !out.uncertain && out.status !== undefined && out.status >= 400 && out.status < 500 && out.status !== 429;
+      if (token && lasting) await settleClaim(key, token, `sent refused ${out.status}`);
+      else if (token && !out.uncertain) await releaseClaim(key, token);
+      log("error", "ops_digest.send_failed", { reason: out.reason.slice(0, 200), uncertain: !!out.uncertain, status: out.status });
       return { status: "failed", subject, alerts, reason: out.reason };
     }
+    mailed = true;
     if (token) await settleClaim(key, token, `sent ${new Date().toISOString()}`);
     return { status: "sent", subject, alerts };
   } catch (e) {
-    // Rien n'est parti : la clé est rendue, le passage suivant réessaie.
-    if (token) await releaseClaim(key, token).catch(() => {});
+    // Rien n'est parti : la clé est rendue, le passage suivant réessaie. Parti, mais la clé n'a pas
+    // pu être close : elle reste réclamée, la reprise garde la chaîne (Resend dédoublonne).
+    if (token && !mailed) await releaseClaim(key, token).catch(() => {});
     log("error", "ops_digest.failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     return { status: "failed", reason: e instanceof Error ? e.message : String(e) };
   }

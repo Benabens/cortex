@@ -239,6 +239,25 @@ test("job bloqué en cours depuis plus d'une heure → alerte", async () => {
   assert.match(sent[0].text, /1 job sans avancer depuis plus de 60 min \(exam\)/);
 });
 
+test("job en compilation sans battement depuis plus d'une heure → alerte ; un job vivant (battement récent) n'en fait pas", async () => {
+  await calmDay();
+  await job({ owner: ALICE, course: "reseaux-fictif", type: "exam", status: "compiling", endedMinAgo: 95, minutes: 5 });
+  const alive = await job({ owner: BOB, course: "proba-fictif", type: "exam", status: "running", endedMinAgo: 95, minutes: 5 });
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithUser(BOB, () => runWithCourse("proba-fictif", () => q.run(`UPDATE jobs SET heartbeat_at = ? WHERE id = ?`, at(TUESDAY, 1), alive)));
+  await run(TUESDAY);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /1 job sans avancer depuis plus de 60 min \(exam\)/);
+});
+
+test("le taux d'échec ne compte que les générations : une ingestion ratée n'en fait pas une alerte", async () => {
+  await calmDay();
+  await job({ owner: ALICE, course: "reseaux-fictif", type: "ingest", status: "error", endedMinAgo: 30, minutes: 1, errorCode: "job_failed" });
+  assert.equal((await run(TUESDAY)).status, "quiet");
+});
+
 test("volume presque plein (moins de 20 % libres) → alerte", async () => {
   const { setStatfsForTests } = await import("../lib/storage-quota");
   setStatfsForTests(() => ({ free: 12, total: 100 }));
@@ -265,14 +284,35 @@ test("idempotence : la tâche qui tourne deux fois (deux process en même temps,
   assert.equal((await runOpsDigest({ now: TUESDAY, send })).status, "already_done");
 });
 
-test("refus net du fournisseur d'e-mails : le jour est rendu, la tâche suivante réessaie", async () => {
+test("refus passager du fournisseur d'e-mails (503) : le jour est rendu, la tâche suivante réessaie", async () => {
   await calmDay();
   await job({ owner: ALICE, course: "reseaux-fictif", type: "qcm", status: "error", endedMinAgo: 30, minutes: 5, errorCode: "job_failed" });
   const { runOpsDigest } = await import("../lib/ops-digest");
-  const refused = await runOpsDigest({ now: TUESDAY, send: async () => ({ ok: false, reason: "HTTP 422", status: 422 }) });
+  const refused = await runOpsDigest({ now: TUESDAY, send: async () => ({ ok: false, reason: "HTTP 503", status: 503 }) });
   assert.equal(refused.status, "failed");
   assert.equal((await runOpsDigest({ now: TUESDAY, send })).status, "sent");
   assert.equal(sent.length, 1);
+});
+
+test("refus durable (422 : domaine non vérifié) : le jour est clos, pas un essai toutes les dix minutes", async () => {
+  await calmDay();
+  await job({ owner: ALICE, course: "reseaux-fictif", type: "qcm", status: "error", endedMinAgo: 30, minutes: 5, errorCode: "job_failed" });
+  const { runOpsDigest } = await import("../lib/ops-digest");
+  assert.equal((await runOpsDigest({ now: TUESDAY, send: async () => ({ ok: false, reason: "HTTP 422", status: 422 }) })).status, "failed");
+  assert.equal((await runOpsDigest({ now: TUESDAY, send })).status, "already_done");
+  assert.equal(sent.length, 0);
+});
+
+test("envoi incertain (Resend sans réponse) : la réclamation reste, pas de second envoi tout de suite, même clé d'idempotence à la reprise", async () => {
+  await calmDay();
+  await job({ owner: ALICE, course: "reseaux-fictif", type: "qcm", status: "error", endedMinAgo: 30, minutes: 5, errorCode: "job_failed" });
+  const { runOpsDigest } = await import("../lib/ops-digest");
+  const keys: Array<string | undefined> = [];
+  const r = await runOpsDigest({ now: TUESDAY, send: async (m) => { keys.push(m.idempotencyKey); return { ok: false, reason: "délai dépassé", uncertain: true }; } });
+  assert.equal(r.status, "failed");
+  assert.equal((await runOpsDigest({ now: TUESDAY, send })).status, "busy", "un autre passage ne renvoie pas pendant le quart d'heure");
+  assert.equal(sent.length, 0);
+  assert.match(keys[0] ?? "", /^ops_digest:2026-11-24:[0-9a-f-]{36}$/);
 });
 
 test("lundi : le bilan de la semaine part toujours, avec volumes, échecs, coûts, marges, durées, étudiants touchés et pistes", async () => {
@@ -304,6 +344,7 @@ test("lundi : le bilan de la semaine part toujours, avec volumes, échecs, coût
   assert.match(text, /Étudiants touchés par une erreur : 2/);
   // Pistes d'optimisation, par règles
   assert.match(text, /drill : coût moyen 0,62 \$ pour 0,5 crédit ≈ 0,32 \$ facturé, marge négative/);
+  assert.match(text, /Bilan des 7 derniers jours \(16\.11 09:30 → 23\.11 09:30\)/);
   assert.match(text, /https:\/\/sentry\.io\//);
   assert.match(text, /https:\/\/railway\.com\//);
   assert.ok(html && html.includes("<table"), "chiffres en tableau dans la version HTML");
