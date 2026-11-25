@@ -248,10 +248,56 @@ test("ingestion : fichiers illisibles → UN événement ingest_files_failed ; u
 });
 
 test("corrigé non compilé (énoncé en PDF) : UN événement answer_key_pdf_failed", async () => {
-  const { reportFailure } = await import("../lib/failure-report");
-  // Le chemin réel compile avec tectonic (absent en CI) : la garde vérifie l'appel depuis les deux générateurs.
+  const { reportAnswerKeyPdfFailure } = await import("../lib/failure-report");
+  // Le chemin réel compile avec tectonic (absent en CI) : la garde vérifie l'appel depuis les trois sites.
   const sources = ["lib/exam-latex.ts", "lib/qcm-latex.ts"].map((f) => fs.readFileSync(path.join(process.cwd(), f), "utf8"));
-  for (const s of sources) assert.match(s, /failure: "answer_key_pdf_failed"/);
-  reportFailure({ failure: "answer_key_pdf_failed", level: "warning", code: "answer_key_pdf", jobType: "exam" });
+  assert.equal(sources.join("\n").split("reportAnswerKeyPdfFailure()").length - 1, 3);
+  const { setCurrentJob, clearCurrentJob } = await import("../lib/billing/usage-context");
+  setCurrentJob(3, "exam");
+  try { reportAnswerKeyPdfFailure(); } finally { clearCurrentJob(); }
   assert.equal(captured.length, 1);
+  assert.equal(captured[0].tags.failure, "answer_key_pdf_failed");
+  assert.equal(captured[0].tags.job_type, "exam");
+});
+
+test("refus voulu (plafond de dépense, cours sans support) : job_failed en avertissement, pas en erreur", async () => {
+  const { recordJobFailure } = await import("../lib/jobs");
+  const id = await reservedJob(STUDENT, "qcm");
+  await asStudent(() => recordJobFailure(id, "Plafond atteint", { code: "llm_reservation_spend_cap" }));
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].level, "warning");
+  assert.equal(captured[0].tags.error_code, "llm_reservation_spend_cap");
+});
+
+test("étape de contrôle sautée en cours de job (relecture en échec) : UN avertissement generation_degraded, cause = code du modèle", async () => {
+  const { reportDegraded } = await import("../lib/failure-report");
+  const { LlmError } = await import("../lib/llm/types");
+  const { setCurrentJob, clearCurrentJob } = await import("../lib/billing/usage-context");
+  setCurrentJob(5, "qcm");
+  try {
+    await asStudent(async () => reportDegraded("qcm_final_review", new LlmError("529 overloaded : prompt du cours algo", "OVERLOADED", true)));
+  } finally { clearCurrentJob(); }
+  assert.equal(captured.length, 1, JSON.stringify(captured.map((c) => c.tags)));
+  const [c] = captured;
+  assert.equal(c.level, "warning");
+  assert.equal(c.tags.failure, "generation_degraded");
+  assert.equal(c.tags.error_code, "qcm_final_review");
+  assert.equal(c.tags.cause, "overloaded");
+  assert.deepEqual(c.fingerprint, ["cortex", "generation_degraded", "qcm", "qcm_final_review"]);
+  assertNoPersonalData(c, "prompt du cours", "algo");
+  // Les sites d'appel : relectures et vérifications qui laissaient passer l'échec sans un mot.
+  const src = ["lib/qcm.ts", "lib/exam.ts", "lib/check-solution.ts"].map((f) => fs.readFileSync(path.join(process.cwd(), f), "utf8")).join("\n");
+  for (const step of ["qcm_final_review", "qcm_distractors", "exam_verify", "check_second_review"]) assert.match(src, new RegExp(`reportDegraded\\("${step}"`));
+});
+
+test("hors contexte de cours (webhook de paiement) : course_kind « unknown », pas le cours par défaut", async () => {
+  const { reportFailure } = await import("../lib/failure-report");
+  const saved = process.env.CORTEX_COURSE;
+  delete process.env.CORTEX_COURSE;
+  try {
+    reportFailure({ failure: "refund_failed", level: "error", code: "refund_exception", jobType: "assist_drill", extra: { area: "forge" } });
+  } finally { if (saved !== undefined) process.env.CORTEX_COURSE = saved; }
+  assert.equal(captured[0].tags.course_kind, "unknown");
+  assert.equal(captured[0].tags.job_type, "drill", "même vocabulaire que le job");
+  assert.equal(captured[0].tags.area, "billing", "une étiquette en plus n'écrase pas les étiquettes de base");
 });

@@ -1,4 +1,5 @@
 import { currentCourse } from "@/db/client";
+import { reportDegraded } from "@/lib/failure-report";
 import { completeJson, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 import { coursePassages } from "@/lib/course-grounding";
@@ -286,7 +287,7 @@ export async function checkSolution(input: { statement: string; answer?: string;
       model: "opus", timeoutMs: 200_000, json: { schema: CHECK_REVIEW_SCHEMA }, ...CHECK_LIMITS,
     },
     { check: (v) => (typeof v?.agree !== "boolean" ? "agree (booléen) est requis" : v.agree || isLegacyResult(v) ? null : "agree=false exige verdict, feedback et correct_solution") },
-  ).catch(() => null);
+  ).catch((e) => { reportDegraded("check_second_review", e); return null; });
   const issue = typeof review?.issue === "string" ? review.issue : "";
   if (!review || review.agree !== false || !isLegacyResult(review)) {
     benchTrace("check.review", { outcome: review ? (review.agree ? "agree" : "fix-unusable") : "unreviewed", draft: first });
