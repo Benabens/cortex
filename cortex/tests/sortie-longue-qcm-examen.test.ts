@@ -165,7 +165,7 @@ test("job QCM : vérification et conception à effort moyen, réparation et revu
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
   assert.deepEqual(efforts.get("autre"), undefined, `appel non reconnu : ${[...efforts.keys()].join(", ")}`);
-  const expected: Record<string, string | undefined> = { "conception QCM": "medium", "vérification QCM": "medium", "revue finale": undefined, "remplacement de distracteurs": undefined };
+  const expected: Record<string, string | undefined> = { "conception QCM": "medium", "vérification QCM": "medium", "revue finale": "high", "remplacement de distracteurs": "high" };
   for (const [step, effort] of Object.entries(expected)) {
     const got = efforts.get(step);
     assert.ok(got?.length, `l'étape « ${step} » a tourné`);
@@ -182,6 +182,6 @@ test("examen écrit (voie des cours sans architecte) : un lot d'exercices garde 
   const { generateExamViaClaudeCode } = await import("../lib/exam");
   const r = await runWithCourse("ml", () => generateExamViaClaudeCode({ count: 2, verify: false }));
   assert.equal(r.produced, 2);
-  assert.deepEqual([...new Set(efforts.get("conception d'exercices"))], [undefined]);
+  assert.deepEqual([...new Set(efforts.get("conception d'exercices"))], ["high"]);
   assert.ok((maxTokens.get("conception d'exercices") ?? []).every((m) => (m ?? 0) >= 32_000), `max_tokens : ${maxTokens.get("conception d'exercices")}`);
 });

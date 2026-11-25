@@ -79,13 +79,16 @@ test("compte vide : produits, prix, portail et webhook sont créés, et le secre
   const report = await setupStripe(client, OPTIONS);
 
   const byKey = Object.fromEntries(db.prices.map((p) => [String(p.lookup_key), p]));
-  assert.deepEqual(Object.keys(byKey).sort(), ["cortex_credits_10", "cortex_pro_monthly", "cortex_pro_yearly"]);
+  assert.deepEqual(Object.keys(byKey).sort(), ["cortex_credits_10", "cortex_credits_40", "cortex_pro_monthly", "cortex_pro_yearly"]);
   assert.deepEqual([byKey.cortex_pro_monthly.unit_amount, byKey.cortex_pro_monthly.currency, byKey.cortex_pro_monthly.recurring], [1490, "eur", { interval: "month" }]);
   assert.deepEqual([byKey.cortex_pro_yearly.unit_amount, byKey.cortex_pro_yearly.recurring], [14900, { interval: "year" }]);
   assert.deepEqual([byKey.cortex_credits_10.unit_amount, byKey.cortex_credits_10.recurring], [900, undefined], "le pack est un paiement unique");
   assert.equal(byKey.cortex_pro_monthly.product, byKey.cortex_pro_yearly.product, "les deux prix Pro partagent un produit");
+  assert.deepEqual([byKey.cortex_credits_40.unit_amount, byKey.cortex_credits_40.recurring], [3600, undefined], "le pack de 40 : 36 €, paiement unique");
   assert.notEqual(byKey.cortex_credits_10.product, byKey.cortex_pro_monthly.product);
-  assert.equal(db.products.length, 2);
+  assert.notEqual(byKey.cortex_credits_40.product, byKey.cortex_credits_10.product, "un produit par pack : son nom s'affiche au paiement");
+  assert.equal(db.products.length, 3);
+  assert.equal(db.products.find((r) => r.id === "cortex_pro")?.description, "30 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.");
 
   const portal = db.portals[0] as unknown as Stripe.BillingPortal.Configuration;
   assert.equal(portal.metadata?.app, "cortex");
@@ -114,6 +117,18 @@ test("relancé sur un compte déjà en place : aucune écriture, aucun secret (i
   assert.ok(again.steps.every((s) => s.action === "inchangé"), JSON.stringify(again.steps));
 });
 
+test("compte existant au Pro à 20 crédits : la description du produit est remise à celle du code, ses prix ne bougent pas", async () => {
+  const { client, db, writes } = fakeStripe();
+  await setupStripe(client, OPTIONS);
+  const pro = db.products.find((r) => r.id === "cortex_pro")!;
+  pro.description = "20 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.";
+  writes.length = 0;
+  const report = await setupStripe(client, OPTIONS);
+  assert.deepEqual(writes, ["products.update cortex_pro"]);
+  assert.equal(pro.description, "30 crédits par mois, non reportables d'un mois sur l'autre. Résiliable à tout moment.");
+  assert.ok(report.steps.some((s) => s.what === "produit" && s.action === "mis à jour" && s.detail.includes("30 crédits")), JSON.stringify(report.steps));
+});
+
 test("essai à blanc : rien n'est écrit, le compte rendu dit ce qui serait fait", async () => {
   const { client, db, writes } = fakeStripe();
   const report = await setupStripe(client, { ...OPTIONS, dryRun: true });
@@ -121,7 +136,7 @@ test("essai à blanc : rien n'est écrit, le compte rendu dit ce qui serait fait
   assert.deepEqual([db.prices.length, db.products.length, db.portals.length, db.webhooks.length], [0, 0, 0, 0]);
   assert.equal(report.webhookSecret, null);
   assert.ok(report.steps.some((s) => s.what === "webhook" && s.action === "à créer"));
-  assert.ok(report.steps.filter((s) => s.what === "prix" && s.action === "à créer").length === 3);
+  assert.ok(report.steps.filter((s) => s.what === "prix" && s.action === "à créer").length === 4);
 });
 
 test("prix déjà présent mais à un autre montant : signalé, jamais modifié (c'est de l'argent, la décision n'est pas au script)", async () => {

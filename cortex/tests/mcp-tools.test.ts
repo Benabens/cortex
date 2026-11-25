@@ -627,7 +627,7 @@ test("solde insuffisant : refusé dès le devis avec le solde, aucun appel au mo
   }
 });
 
-test("examen blanc : devis au tarif de l'app (6 crédits, +1 au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
+test("examen blanc : devis au tarif de l'app (6 crédits, +3 par tranche au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
   const { access } = await tokenFor(CAROL);
   const { client } = await connect(access);
   const credits = await import("../lib/billing/credits");
@@ -636,7 +636,7 @@ test("examen blanc : devis au tarif de l'app (6 crédits, +1 au-delà de 8 exerc
   assert.equal((base.structuredContent as { confirmation: { cost_credits: number } }).confirmation.cost_credits, 6);
   const big = await call(client, "generate_mock_exam", { exercise_count: 12 });
   const conf = (big.structuredContent as { confirmation: { cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } }).confirmation;
-  assert.equal(conf.cost_credits, 7);
+  assert.equal(conf.cost_credits, 9);
   assert.equal(conf.daily_quota.kind, "generations");
   const before = await balance(CAROL);
   // Cours sans corpus : le pré-check de l'app refuse AVANT toute réservation.

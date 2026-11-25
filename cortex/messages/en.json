@@ -720,7 +720,7 @@
       "dailyGen": "Per day and account: {gen, plural, one {{genFormatted} generation} other {{genFormatted} generations}}.",
       "dailyAssist": "Per day and account: {assist, plural, one {{assistFormatted} assistance request} other {{assistFormatted} assistance requests}}.",
       "storage": "Storage: {value} MB of files.",
-      "costSummary": "A mock exam costs {exam, plural, one {{examFormatted} credit} other {{examFormatted} credits}}, a multiple-choice mock exam or exercise costs {qcm, plural, one {{qcmFormatted} credit} other {{qcmFormatted} credits}}, and assistance (practice exercise, marking) costs {assist}.",
+      "costSummary": "A mock exam costs {exam, plural, one {{examFormatted} credit} other {{examFormatted} credits}}, a multiple-choice mock exam {qcm, plural, one {{qcmFormatted} credit} other {{qcmFormatted} credits}}, an exercise {exercise, plural, one {{exerciseFormatted} credit} other {{exerciseFormatted} credits}}, and assistance (practice exercise, marking) {assist, plural, one {{assistFormatted} credit} other {{assistFormatted} credits}}.",
       "refresh": "Refresh balance",
       "paymentConfirmed": "Payment confirmed. Your credits will appear as soon as Stripe notifies us, usually within a few seconds. Refresh if needed.",
       "paymentCanceled": "Payment cancelled. Nothing was charged.",
@@ -793,7 +793,8 @@
       "plans": {
         "pro_monthly": "Pro monthly",
         "pro_yearly": "Pro yearly",
-        "credits_10": "10-credit pack"
+        "credits_10": "10-credit pack",
+        "credits_40": "40-credit pack"
       }
     },
     "usage": {
@@ -1721,6 +1722,7 @@
   "order": {
     "product": {
       "credits_10": "10-credit pack",
+      "credits_40": "40-credit pack",
       "pro_monthly": "Cortex Pro monthly",
       "pro_yearly": "Cortex Pro yearly"
     },
@@ -1730,6 +1732,7 @@
   "receipt": {
     "subject": {
       "credits_10": "Your Cortex receipt: 10-credit pack",
+      "credits_40": "Your Cortex receipt: 40-credit pack",
       "pro_monthly": "Your Cortex receipt: Pro monthly subscription",
       "pro_yearly": "Your Cortex receipt: Pro yearly subscription"
     },

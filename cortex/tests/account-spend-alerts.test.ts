@@ -57,10 +57,10 @@ async function hourAlerts(fn: () => Promise<unknown>): Promise<Record<string, un
     .filter((o): o is Record<string, unknown> => !!o && o.evt === "spend_alert.account_hour");
 }
 
-test("seuil : défaut 5 $ en déploiement gardé, jamais au-dessus du fusible du jour, coupé hors garde ou par `unlimited`", () => {
+test("seuil : défaut 20 $ en déploiement gardé, jamais au-dessus du fusible du jour, coupé hors garde ou par `unlimited`", () => {
   assert.equal(alerts.accountHourAlertUsd(), null, "dev nu : aucune alerte");
   process.env.AUTH_ENABLED = "1";
-  assert.equal(alerts.accountHourAlertUsd(), 5);
+  assert.equal(alerts.accountHourAlertUsd(), 20);
   process.env.SPEND_CAP_PER_USER_USD = "3";
   assert.equal(alerts.accountHourAlertUsd(), 3, "le seuil ne dépasse pas le fusible du jour");
   process.env.SPEND_ALERT_PER_USER_HOUR_USD = "unlimited";

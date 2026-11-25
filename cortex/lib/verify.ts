@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { EXAM_OUTPUT_MAX_TOKENS, completeText, extractJson } from "@/lib/llm";
+import { EXAM_OUTPUT_MAX_TOKENS, hardTaskEffort, completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { LATEX_FORMULA_RULE } from "@/lib/tex-rich";
@@ -250,7 +250,7 @@ async function verifyOneLegacy(q: ExamQuestion, opts?: VerifyOpts): Promise<Veri
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
     // Sans limite propre, l'API coupait à 16 000 tokens la vérification qui trouve l'erreur et
     // réécrit le corrigé (banc du 17/11 : 65 % d'entre elles) → exercice livré « non vérifié ».
-    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
+    const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
     const r = extractJson<VerifyResult>(text);
     if (!r || !r.verdict) return null;
     // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :

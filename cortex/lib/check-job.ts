@@ -14,7 +14,7 @@ import { userError } from "@/lib/i18n/user-error";
  * sans réponse (le drill coupait à 187 s, cf. lib/drill-job). Comme generate_drill, check_answer
  * rend donc un job_id ; get_job_status rend la correction.
  *
- * Facturation d'une aide, inchangée : son prix réservé AVANT le job (rafale, quota du jour des
+ * Facturation d'une aide, inchangée : le prix d'une aide réservé AVANT le job (rafale, quota du jour des
  * aides, solde : refus immédiat, sans job), sous une référence de job que la réconciliation sait
  * reprendre ; le worker appelle le modèle sous cette preuve d'aide et rend le crédit selon la règle
  * de assistCall. La correction de l'app web reste synchrone (route /api/check-solution).

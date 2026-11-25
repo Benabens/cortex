@@ -46,9 +46,15 @@ export async function stripePrices(): Promise<Record<string, PriceInfo>> {
 }
 
 export async function listOffers(): Promise<Offer[]> {
-  const prices = await stripePrices();
-  const perMonth = fromCenti(subscriptionMonthlyCreditsCenti());
-  return (Object.keys(PLANS) as PlanKey[]).map((plan) => {
+  return offersFrom(await stripePrices(), fromCenti(subscriptionMonthlyCreditsCenti()));
+}
+
+/** Les offres à partir des prix Stripe résolus (pur, testé sans réseau). */
+export function offersFrom(prices: Record<string, Pick<PriceInfo, "amount" | "currency">>, perMonth: number): Offer[] {
+  // Stripe joignable mais un pack sans prix (pas encore créé dans ce compte) : on le cache plutôt
+  // que d'afficher une offre impossible à acheter. Sans aucun prix, tout reste affiché « indisponible ».
+  const resolved = Object.keys(prices).length > 0;
+  return (Object.keys(PLANS) as PlanKey[]).filter((plan) => !resolved || PLANS[plan].mode !== "payment" || !!prices[PLANS[plan].lookupKey]).map((plan) => {
     const spec = PLANS[plan];
     const p = prices[spec.lookupKey];
     return {

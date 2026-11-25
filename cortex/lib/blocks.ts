@@ -6,7 +6,7 @@ import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, evidencePassages } from "@/lib/c
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
 import { BLOCK_PART_KINDS, examLanguageFor, type BlockFormat, type BlockPartKind, type PartShape } from "@/lib/exam-format";
-import { HARD_STOP_CODES, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
+import { HARD_STOP_CODES, hardTaskEffort, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { untypesetChars } from "@/lib/tex-escape";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
@@ -474,7 +474,7 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   try {
     // Un verdict par sous-question, sinon rien n'est vérifié (jamais de faux « vérifié »).
     const covers = (v: typeof res) => b.parts.every((_, i) => v.verdicts?.some((x) => x.index === i));
-    res = await completeJson({ system, prompt, model: "opus", timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
+    res = await completeJson({ system, prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
       check: (v: typeof res) => (!Array.isArray(v?.verdicts) ? "le champ « verdicts » manque" : covers(v) ? null : `un verdict par sous-question (index 0 à ${b.parts.length - 1})`),
     });
   } catch {

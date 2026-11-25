@@ -70,7 +70,7 @@ if (!setupKey) {
   if (!dryRun) die("Aucune clé de mise en place.");
   // Essai à blanc sans clé : aucune lecture possible, on décrit seulement.
   console.log(`▶ Stripe ${mode.toUpperCase()} — essai à blanc SANS clé : rien n'est lu ni écrit. Avec une clé, le script retrouverait ou créerait :`);
-  console.log("   · produits « Cortex Pro » et « Cortex : pack de 10 crédits »");
+  console.log("   · produits « Cortex Pro », « Cortex : pack de 40 crédits » et « Cortex : pack de 10 crédits »");
   for (const o of OFFERS) console.log(`   · prix ${o.nickname} — lookup_key ${o.lookupKey}`);
   console.log("   · portail client propre à Cortex (résiliation en fin de période, pas de changement d'offre)");
   console.log(`   · webhook ${site}/api/billing/webhook, et désactivation de l'ancien sur ${legacyHosts.join(", ") || "(aucun ancien hôte)"}`);

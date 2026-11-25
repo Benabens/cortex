@@ -1,3 +1,5 @@
+// Mécanique écrite avec le Pro à 20 crédits/mois (défaut avant le 25/11/2026, 30 depuis) : figé ici.
+process.env.SUBSCRIPTION_MONTHLY_CREDITS = "20";
 /**
  * STRIPE — attribution et reprise des crédits par le webhook (c'est de l'argent).
  * Charges d'événements SIMULÉES, traitées par handleStripeEvent (sans signature —
@@ -69,6 +71,11 @@ test("pack → +10 crédits (permanents)", async () => {
 test("rejeu du même événement pack → PAS de double attribution", async () => {
   await handleStripeEvent(checkoutPack("evt_pack_1", "buyer")); // même id
   assert.equal(await credits.getBalance("buyer"), 10, "toujours 10, pas 20");
+});
+
+test("pack de 40 → +40 crédits (permanents), pris sur la métadonnée de la session", async () => {
+  await handleStripeEvent(ev("evt_pack40_1", "checkout.session.completed", { id: "cs_pack40_1", mode: "payment", payment_status: "paid", payment_intent: "pi_pack40_1", metadata: { cortexUserId: "buyer40", plan: "credits_40", credits: "40" } }));
+  assert.equal(await credits.getBalance("buyer40"), 40);
 });
 
 test("abonnement : checkout (lien) + invoice.paid → +20 crédits du mois", async () => {
@@ -216,6 +223,10 @@ test("code promo à 0 € : crédité seulement si son id promo_ est dans STRIPE
     assert.equal(await credits.getBalance("promo-user"), 10);
     assert.equal((await handleStripeEvent(freeSession("evt_promo_5", "cs_promo_5", "promo-user", [{ promotion_code: { id: "promo_AUTRE" } }]))).credited, true);
     assert.equal(await credits.getBalance("promo-user"), 20);
+    // Pack de 40 à 0 € par le même code (coupon 100 % sur tous les produits) : le cadeau reste le pack de 10.
+    const pack40 = ev("evt_promo_6", "checkout.session.completed", { id: "cs_promo_6", mode: "payment", payment_status: "no_payment_required", amount_total: 0, payment_intent: null, discounts: [{ promotion_code: "promo_TEST0" }], metadata: { app: "cortex", cortexUserId: "promo40", plan: "credits_40", credits: "40" } });
+    assert.equal((await handleStripeEvent(pack40)).credited, true);
+    assert.equal(await credits.getBalance("promo40"), 10, "10 offerts, pas 40");
   } finally {
     if (prev === undefined) delete process.env.STRIPE_FREE_PROMO_CODES; else process.env.STRIPE_FREE_PROMO_CODES = prev;
   }

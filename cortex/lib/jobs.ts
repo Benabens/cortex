@@ -246,7 +246,9 @@ export class ReservationRefused extends UserFacingError {
  * demander 40 QCM ou 12 exercices pour le prix d'un mock standard.
  *  - qcm : 1 unité = le mock standard (20 QCM + 3 ouvertes, une ouverte
  *    comptant double → 26 équivalents) ; au-delà, une unité par tranche ;
- *  - exam : 8 exercices inclus, puis 1 crédit par tranche de 4.
+ *  - exam : 8 exercices inclus, puis chaque tranche de 4 au prix de 4 exercices de la base (la
+ *    moitié du tarif, arrondie au crédit supérieur) : depuis Opus 5.5, un exercice coûte autant
+ *    au-delà de 8 qu'en deçà ; « 1 crédit par tranche » datait d'un examen à 6 crédits.
  * Sans target (défauts du moteur) = tarif de base ; CREDITS_COST_JSON reste la base.
  */
 const QCM_UNIT_EQUIV = 20 + 2 * 3;
@@ -264,7 +266,8 @@ export function costForJob(type: JobType, target?: string | null): number {
   }
   if (type === "exam") {
     const count = typeof t.count === "number" ? t.count : 0;
-    return count > 8 ? base + CENTI * Math.ceil((count - 8) / 4) : base;
+    const perFour = CENTI * Math.ceil(base / 2 / CENTI);
+    return count > 8 ? base + perFour * Math.ceil((count - 8) / 4) : base;
   }
   return base;
 }

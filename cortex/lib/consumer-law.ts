@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
-import type { PlanKey } from "@/lib/billing/stripe-events";
+import { PLANS, type PlanKey } from "@/lib/billing/stripe-events";
 
 export type PurchaseType = "pack" | "subscription";
 
 export function consentForPlan(plan: PlanKey): { type: PurchaseType; text: string } {
-  return plan === "credits_10"
+  return PLANS[plan].mode === "payment"
     ? { type: "pack", text: "Je demande l’accès immédiat à mes crédits et reconnais perdre mon droit de rétractation dès leur première utilisation." }
     : { type: "subscription", text: "Je demande que mon abonnement commence immédiatement. Si je me rétracte sous 14 jours, le montant proportionnel au service déjà fourni restera dû." };
 }

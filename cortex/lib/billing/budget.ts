@@ -66,12 +66,11 @@ export function aiBudgetFreeUsd(): number {
 }
 
 /**
- * Coût IA ATTENDU d'un job, en dollars, par unité de prix : haut de la fourchette mesurée en
- * prod (QCM 2 à 2,9 $ au 17/11/2026 après #106 ; examen 2,2 $) ; aide : p95 du drill Opus 5.5
- * à l'effort haut au banc du 23/11. Surcharge : AI_JOB_COST_USD_JSON.
- * Inconnu → 1 $.
+ * Coût IA ATTENDU d'un job, en dollars, par unité de prix : p95 mesuré au banc sur Opus 5.5 en effort
+ * high (23/11/2026 : QCM standard 7,4 $, examen écrit de 8 exercices 12,5 $, exercice 2,9 $, aide
+ * 0,21 $ ; préparation sur Sonnet 5.5, inchangée). Surcharge : AI_JOB_COST_USD_JSON. Inconnu → 1 $.
  */
-const DEFAULT_JOB_COST_USD: Record<string, number> = { qcm: 2.9, exam: 2.2, prepare: 0.15, assist: 0.21 };
+const DEFAULT_JOB_COST_USD: Record<string, number> = { qcm: 7.4, exam: 12.5, exercise: 2.9, "lab-exercise": 2.9, prepare: 0.15, assist: 0.21 };
 
 export function expectedJobCostUsd(kind: string, costCenti?: number): number {
   let table = DEFAULT_JOB_COST_USD;
@@ -104,7 +103,7 @@ function defaultDailyFloorUsd(): number {
 
 /** Plafond de dépense du JOUR d'un compte, cohérent avec son budget. null : pas de plafond. */
 export function dailySpendCapUsd(budgetUsd: number): number | null {
-  const fuse = floatLimit("SPEND_CAP_PER_USER_USD", 15);
+  const fuse = floatLimit("SPEND_CAP_PER_USER_USD", 50);
   const floorRaw = Number(process.env.SPEND_CAP_PER_USER_FLOOR_USD);
   const floor = Number.isFinite(floorRaw) && floorRaw >= 0 ? floorRaw : defaultDailyFloorUsd();
   const v = Math.max(floor, 0.25 * Math.max(0, budgetUsd));

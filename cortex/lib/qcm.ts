@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
-import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
+import { HARD_STOP_CODES, hardTaskEffort, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { DEFAULT_ANSWER_MODE, OPTIONS_MIN, QCM_DEFAULT, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, requestedFormat, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
@@ -774,7 +774,7 @@ export async function replaceTrivialDistractorsBatch(items: QcmItem[], step: Ste
     it.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(it.sourceFact).slice(0, 400)}` : "",
   ].filter(Boolean).join("\n")).join("\n\n");
   const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string; why_wrong?: string }[]; explanation?: string }[] }>({
-    model: "opus", ...QCM_CALL_LIMITS, ...(structured ? { json: { schema: REPLACEMENTS_JSON_SCHEMA } } : {}),
+    model: "opus", effort: hardTaskEffort(), ...QCM_CALL_LIMITS, ...(structured ? { json: { schema: REPLACEMENTS_JSON_SCHEMA } } : {}),
     prompt: [
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
@@ -1730,7 +1730,7 @@ export async function finalReview(items: QcmItem[], opts: { strict: boolean; pre
     ? { ...base, properties: { ...base.properties, justifications: AUDIT_JUSTIFICATIONS }, required: [...base.required, "justifications"] }
     : base;
   const out = await completeJson<{ verdicts: FinalQualityVerdict[]; justifications?: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] } & DupAnswer>({
-    model: "opus", ...QCM_CALL_LIMITS, json: { schema },
+    model: "opus", effort: hardTaskEffort(), ...QCM_CALL_LIMITS, json: { schema },
     prompt: [
       `Tu es un examinateur exigeant. Voici les QCM d'un même examen, avec leur clé, leur explication et le fait du cours qui les prouve. Deux contrôles, rendus dans le même objet JSON.`,
       `1. AUDIT (verdicts) : pour chaque QCM, tranche selon les extraits du cours.`,

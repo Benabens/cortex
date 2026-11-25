@@ -1,8 +1,9 @@
 /**
- * MODÈLE PAR SITE, ÉTAPE 1 (23/11/2026) : Opus 5.5 à l'effort haut pour le drill et la correction
- * (aides à 0,3 crédit, prix inchangé), Sonnet 5.5 pour le mécanique (extraction, classement, OCR, plan, analyse
- * d'un point faible) ; examens, QCM et exercices gardent leur modèle (Sonnet 5) et leur prix en
- * attendant la décision de Ben. Verrouillé :
+ * MODÈLE PAR SITE (décisions de Ben des 23 et 24/11/2026) : Opus 5.5 à l'effort haut pour le
+ * difficile (rédiger un énoncé ou un corrigé, corriger une réponse, vérifier), Sonnet 5.5 pour le
+ * mécanique (extraction, classement, OCR, plan, analyse d'un point faible). Étape 1 (24/11) :
+ * LLM_ALLOW_OPUS=assist, Opus pour le drill et la correction seulement ; étape 2 (01/12, prix
+ * 30 / 18 / 8 / 0,5) : LLM_ALLOW_OPUS=1, Opus sur tous les sites difficiles. Verrouillé :
  *  - LLM_ALLOW_OPUS=assist : « opus » → claude-opus-5-5 pour une aide, claude-sonnet-5 pour un job ;
  *    LLM_ALLOW_OPUS=1 : claude-opus-5-5 partout ; absent : claude-sonnet-5 ; « sonnet » → claude-sonnet-5-5 ;
  *  - un drill et une correction partent sur claude-opus-5-5 à l'effort haut — l'ancienne règle
@@ -161,6 +162,13 @@ test("classement des sites : le mécanique demande sonnet, le difficile opus", (
     assert.match(src, /model: "sonnet"|\?\? "sonnet"/, `${f} appelle le modèle en « sonnet »`);
   }
   for (const f of HARD) assert.match(fs.readFileSync(path.join(root, f), "utf8"), /model: "opus"/, `${f} est difficile : « opus »`);
+  // architect : P1-P3 difficiles, l'identification d'une image mécanique ; qcm-evidence : le second
+  // regard hors cours est un classement, la réécriture des explications une rédaction.
+  for (const f of ["lib/architect.ts", "lib/qcm-evidence.ts"]) {
+    const src = fs.readFileSync(path.join(root, f), "utf8");
+    assert.match(src, /model: "opus"/);
+    assert.match(src, /model: "sonnet"/);
+  }
 });
 
 test("grille de prix : Opus 5.5 4/20 $ (cache 0,20/5), Sonnet 5.5 2/10 $ (cache 0,10/2,5), Opus 4.x inchangé", async () => {
@@ -171,4 +179,19 @@ test("grille de prix : Opus 5.5 4/20 $ (cache 0,20/5), Sonnet 5.5 2/10 $ (cache 
   assert.equal(rateFor("claude-sonnet-5").cacheReadPerM, 0.2);
   // 10 k tokens de sortie Opus 5.5 = 0,20 $.
   assert.equal(Math.round(estimateCostUsd("claude-opus-5-5", 0, 10_000) * 100) / 100, 0.2);
+});
+
+test("effort des sites difficiles : défaut du code, LLM_HARD_EFFORT le règle, une valeur inconnue garde le défaut", async () => {
+  const { hardTaskEffort, HARD_TASK_EFFORT_DEFAULT } = await import("../lib/llm/types");
+  const prev = process.env.LLM_HARD_EFFORT;
+  try {
+    delete process.env.LLM_HARD_EFFORT;
+    assert.equal(hardTaskEffort(), HARD_TASK_EFFORT_DEFAULT);
+    process.env.LLM_HARD_EFFORT = " High ";
+    assert.equal(hardTaskEffort(), "high");
+    process.env.LLM_HARD_EFFORT = "max";
+    assert.equal(hardTaskEffort(), HARD_TASK_EFFORT_DEFAULT, "max n'existe pas dans LlmEffort");
+  } finally {
+    if (prev === undefined) delete process.env.LLM_HARD_EFFORT; else process.env.LLM_HARD_EFFORT = prev;
+  }
 });

@@ -48,9 +48,9 @@ test("migration : un ledger hérité (crédits entiers) est converti ×100 une s
 test("nouvelles écritures en centièmes : palier gratuit, coûts, débit, remboursement", async () => {
   const credits = await import("../lib/billing/credits");
   assert.equal(await credits.getBalanceCenti("bob"), 200); // 2 crédits offerts = 200 centièmes
-  assert.equal(credits.creditCost("exam"), 600);
-  assert.equal(credits.creditCost("qcm"), 400);
-  assert.equal(credits.creditCost("assist"), 30); // 0,3 crédit : l'assistance n'est plus gratuite
+  assert.equal(credits.creditCost("exam"), 3000);
+  assert.equal(credits.creditCost("qcm"), 1800);
+  assert.equal(credits.creditCost("assist"), 50); // 0,5 crédit : l'assistance n'est plus gratuite
   process.env.CREDITS_COST_JSON = JSON.stringify({ assist: 0.25, exam: 3 });
   assert.equal(credits.creditCost("assist"), 25);
   assert.equal(credits.creditCost("exam"), 300);

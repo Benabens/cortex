@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * Remboursement d'un job selon ce qu'il a produit :
  *  - ÉCHEC (rien produit) → rendu EN ENTIER, même si des appels ont coûté :
@@ -136,4 +138,3 @@ test("examen INCOMPLET → remboursé au prorata des questions manquantes, et le
     assert.equal(await jobs.settleShortfall({ id: 4, type: "qcm" }, 7, 7), null);
   }));
 });
-

@@ -1,3 +1,5 @@
+// Mécanique écrite avec le Pro à 20 crédits/mois (défaut avant le 25/11/2026, 30 depuis) : figé ici.
+process.env.SUBSCRIPTION_MONTHLY_CREDITS = "20";
 /**
  * ABONNEMENT ANNUEL ET FACTURES À 0 € (audit fuites I1, I2).
  *

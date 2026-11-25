@@ -4,7 +4,7 @@ import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { annaleExercisePoints, exercisePoints } from "@/lib/exam-points";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
-import { EXAM_OUTPUT_MAX_TOKENS, HARD_STOP_CODES, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
+import { EXAM_OUTPUT_MAX_TOKENS, HARD_STOP_CODES, hardTaskEffort, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
@@ -565,7 +565,7 @@ export async function generateTargetedExercise(
   const prompt = buildTargetedPrompt(ctx, { target, note: norm.note, imageRel });
 
   step(imageRel ? "Lecture de l'image + génération (LLM)…" : "Génération de l'exercice (LLM)…", 30);
-  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 480_000 });
   let q = extractJson<ExamQuestion>(text);
   step("Vérification à l'aveugle + durcissement…", 70);
   let report: VerifyReport | undefined;
@@ -622,8 +622,9 @@ const ONE_EX_SCHEMA = {
 } as const;
 
 /** Délai d'un appel qui conçoit des exercices (lot ou régénération) : un lot de 3 << un appel de 6 ;
- *  surchargeable (P3 : « augmente le timeout par lot »). */
-const exerciseTimeoutMs = () => Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000;
+ *  surchargeable (P3 : « augmente le timeout par lot »). 15 min depuis Opus 5.5 en effort high : son
+ *  appel le plus long au banc du 23/11/2026 a duré 554 s, trop près des 10 min d'avant. */
+const exerciseTimeoutMs = () => Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 900_000;
 
 /** Régénère UN exercice ciblé (même catégorie/barème) en corrigeant le diagnostic — boucle de durcissement. */
 export async function regenerateExercise(q: ExamQuestion, diagnostic: string): Promise<ExamQuestion> {
@@ -641,7 +642,7 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
   // Le délai de la conception d'un exercice : à 420 s, 2 régénérations sur 3 expiraient au banc du
   // 16/11 (ex9 ; la réussie a pris 305 s), et l'exercice gardait son corrigé jugé faux.
   // Sortie mesurée au banc (17/11) : 30 k tokens en moyenne, jamais sous la limite par défaut de 16 000.
-  const text = await completeText({ prompt, model: "opus", timeoutMs: exerciseTimeoutMs(), maxTokens: EXAM_OUTPUT_MAX_TOKENS });
+  const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: exerciseTimeoutMs(), maxTokens: EXAM_OUTPUT_MAX_TOKENS });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: q.category, points: q.points };
 }
@@ -703,13 +704,13 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
   // Réponse illisible → redemandée avec l'erreur (completeJson) ; sortie structurée si le fournisseur l'offre.
   const r = await completeJson<{ questions: ExamQuestion[] }>({
     prompt: buildBatchPrompt(ctx, slots as any),
-    model: "opus",
+    model: "opus", effort: hardTaskEffort(),
     timeoutMs: exerciseTimeoutMs(),
     json: { schema: BATCH_SCHEMA },
     // Prod du 13/11 (job 2) : la réflexion d'un lot de 2 exercices remplissait les 16 000 tokens
     // de sortie (15 760 en moyenne) : lots coupés, facturés, puis refaits exercice par exercice.
-    // L'effort reste celui par défaut (à effort moyen, banc du 15/11 : clés et explications moins
-    // justes) ; la limite laisse au lot la place de finir (banc du 17/11 : jusqu'à 62 k tokens).
+    // Effort des sites difficiles (lib/llm/types : high, plus de clés justes au banc jugé du 23/11) ;
+    // la limite laisse au lot la place de finir (banc du 17/11 : jusqu'à 62 k tokens).
     maxTokens: EXAM_OUTPUT_MAX_TOKENS,
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];

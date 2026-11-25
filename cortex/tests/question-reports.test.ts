@@ -1,3 +1,5 @@
+process.env.CREDITS_COST_JSON = JSON.stringify({ exam: 6, qcm: 4, exercise: 1, "lab-exercise": 1, blueprint: 1, format: 1, prepare: 2, assist: 0.3 });
+
 /**
  * BOUCLE DE RELECTURE (lib/question-reports) — relecture du mock 4 de CS-290 par
  * Ben : chaque relecture doit améliorer le moteur pour tous. Un signalement

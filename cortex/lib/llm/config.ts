@@ -36,7 +36,16 @@ const MODEL_ENV: Record<string, string> = {
   haiku: "LLM_MODEL_HAIKU",
 };
 
-/** Ids par défaut côté API Anthropic (alignés sur l'historique GEN_MODEL pour opus). */
+/**
+ * Ids par défaut côté API Anthropic. Chaque site d'appel choisit son alias selon ce qu'il fait
+ * (décision de Ben du 23/11/2026) :
+ *  - « opus » (Opus 5.5) pour le DIFFICILE : rédiger un énoncé ou un corrigé (examen, QCM, drill,
+ *    labs), corriger la réponse d'un étudiant, vérifier ou juger un exercice généré ;
+ *  - « sonnet » (Sonnet 5.5, même prix que Sonnet 5) pour le MÉCANIQUE : extraction, classement,
+ *    OCR, plan du cours, résumés courts, analyse d'un point faible ;
+ *  - « haiku » pour l'outil gratuit.
+ * tests/modeles-par-site.test.ts garde la liste des sites mécaniques.
+ */
 const ANTHROPIC_DEFAULTS: Record<string, string> = {
   opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5-5",
@@ -59,8 +68,8 @@ export function isLlmModel(v: unknown): v is LlmModel {
 
 /**
  * Modèle d'un site « opus » quand Opus n'y est pas autorisé : Sonnet 5, celui des examens, QCM et
- * exercices jusqu'ici. Étape 1 du 23/11/2026 : ces sites gardent leur modèle (et leur prix) en
- * attendant la décision de Ben ; seul le mécanique passe sur Sonnet 5.5 (alias « sonnet »).
+ * exercices jusqu'à l'étape 2 (25/11/2026, LLM_ALLOW_OPUS=1). Le mécanique est sur Sonnet 5.5
+ * (alias « sonnet »).
  */
 const OPUS_FALLBACK = "claude-sonnet-5";
 

@@ -163,7 +163,7 @@ Un compte Google dédié a été écarté : Google défie souvent une connexion 
    `2027-01-31T23:59:59Z`). Vérifier que `TRUST_PROXY=1` est posée : sans elle, la limite par IP devient globale.
 4. Compte, crédits et cours, dans le conteneur de l'app :
    `cd /app/cortex && node_modules/.bin/tsx scripts/review-account.ts` (idempotent ; `--dry-run` pour voir).
-   Il crée le compte, ajoute **20 crédits** par une ligne `review_grant` (une fois par lot, `--lot` pour un second
+   Il crée le compte, ajoute **80 crédits** par une ligne `review_grant` (une fois par lot, `--lot` pour un second
    lot), et le cours **DEMO-101 « Probabilités (démo) »**, examen dans 30 jours, avec un polycopié, une annale
    corrigée et une fiche d'examen **écrits pour la démo** (`scripts/review-demo/`, en anglais pour les relecteurs).
    Il ne lance pas la préparation.
@@ -171,10 +171,11 @@ Un compte Google dédié a été écarté : Google défie souvent une connexion 
    examen blanc une fois, pour que `get_results` et `get_job_status` aient des données.
 
 **Crédits.** Le compte démo n'est pas propriétaire : il paie en crédits, pour que le relecteur voie le devis puis la
-confirmation. Les 20 crédits `review_grant` ne sont **pas** un revenu (le budget lié au revenu ne lit que les
+confirmation. Les 80 crédits `review_grant` (20 jusqu'aux prix du 23/11/2026 : un compte démo déjà doté ne paie plus un
+examen à 30 crédits, lui ajouter un lot avec `--lot 2`) ne sont **pas** un revenu (le budget lié au revenu ne lit que les
 paiements Stripe, vérifié par `tests/review-login.test.ts`) ; ils sont servis comme des crédits achetés, sinon un
-compte sans paiement aurait un budget nul et la revue échouerait au premier devis. Coût réel borné par ces 20
-crédits.
+compte sans paiement aurait un budget nul et la revue échouerait au premier devis. Coût réel borné par ces 80
+crédits (≈ 34 $ au plus).
 
 **Identifiants à donner au relecteur** : dans le champ prévu du formulaire de soumission, jamais dans ce dossier.
 
