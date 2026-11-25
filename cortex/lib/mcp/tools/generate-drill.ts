@@ -3,7 +3,7 @@ import { creditCost } from "@/lib/billing/credits";
 import { startDrillJob } from "@/lib/drill-job";
 import { AssistRefused } from "@/lib/billing/reserve";
 import { errorText } from "@/lib/i18n/user-error";
-import { activeJob, getJob, ReservationRefused, type Job } from "@/lib/jobs";
+import { activeAssistantJob, getJob, ReservationRefused, type Job } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
 import { FIELD_LIMITS } from "@/lib/field-limits";
@@ -76,7 +76,7 @@ export default defineTool({
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "1-3", track_with: `get_job_status with course="${c.id}" and job_id=${jobId}` });
       // Un drill déjà en cours dans ce cours est rendu tel quel : rien à confirmer, rien de débité.
       // Sa notion à lui, pas celle demandée : l'assistant ne doit pas annoncer un exercice sur un autre sujet.
-      const running = await activeJob("drill");
+      const running = await activeAssistantJob("drill");
       if (running) return { ...base, concept: clip(conceptOfJob(running) ?? concept, FIELD_LIMITS.concept), status: "already_running" as const, job: track(running.id) };
       const decision = await ctx.confirm(
         { bucket: "assist", kind: "drill", costCenti: creditCost("assist"), summary: `Generate one practice question with five hints and a worked solution on “${clip(concept, 80)}” for ${courseLabel(c)}.` },

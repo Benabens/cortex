@@ -4,7 +4,7 @@ import { AssistRefused } from "@/lib/billing/reserve";
 import { CheckAlreadyRunning, startCheckJob } from "@/lib/check-job";
 import { FIELD_LIMITS } from "@/lib/field-limits";
 import { errorText } from "@/lib/i18n/user-error";
-import { activeJob, ReservationRefused } from "@/lib/jobs";
+import { activeAssistantJob, ReservationRefused } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
 import { courseLabel } from "../courses";
@@ -63,8 +63,9 @@ export default defineTool({
       const base = { course: courseRefOf(c), confirmation: null, declined: null, result: null, job: null };
       const statement = args.statement.trim();
       const answer = args.answer.trim();
-      // Une correction à la fois par cours : refusée AVANT le devis (on ne fait pas confirmer l'impossible).
-      const running = await activeJob("check");
+      // Une correction d'assistant à la fois par cours (celles de l'app à côté) : refusée AVANT le
+      // devis (on ne fait pas confirmer l'impossible).
+      const running = await activeAssistantJob("check");
       if (running) throw busy(running.id, c.id);
       const decision = await ctx.confirm(
         { bucket: "assist", kind: "check", costCenti: creditCost("assist"), summary: `Grade an answer using ${courseLabel(c)}’s rubric.` },

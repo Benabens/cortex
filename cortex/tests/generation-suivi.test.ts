@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { barValue, cancelOutcome, elapsedMinutes, orbStateFor, pageOfJob, rangeText } from "@/lib/ux/generation";
+import { barValue, cancelOutcome, elapsedMinutes, finishedHref, launchedFromApp, measuredProgress, orbStateFor, pageOfJob, questionOfTarget, rangeText } from "@/lib/ux/generation";
 import { STAGES } from "@/lib/job-stage";
 
 const MIN = 60_000;
@@ -56,4 +56,30 @@ test("page d'une génération, et ce que garde une annulation", () => {
   // Propriétaire, facturation coupée : pas de crédits à promettre.
   assert.equal(cancelOutcome({ type: "exam", progress: 8, resultId: null, charged: false }), "free");
   assert.equal(cancelOutcome({ type: "qcm", progress: 60, resultId: 12, charged: false }), "keepsReadyFree");
+});
+
+test("exercice ciblé et correction (jobs de l'app) : leur page, le lien de fin, une barre sans pourcentage", () => {
+  const question = questionOfTarget(JSON.stringify({ statement: "…", answer: "2", question: { examId: 7, questionId: 3 }, from: "web" }));
+  assert.deepEqual(question, { examId: 7, questionId: 3 });
+  assert.equal(questionOfTarget(JSON.stringify({ question: { examId: "7", questionId: 3 } })), null);
+  assert.equal(questionOfTarget("pas du JSON"), null);
+  assert.equal(questionOfTarget(null), null);
+  // Une aide d'assistant (MCP) n'a pas de marque : la page ne la reprend pas.
+  assert.equal(launchedFromApp(JSON.stringify({ concept: "Récursion", from: "web" })), true);
+  assert.equal(launchedFromApp(JSON.stringify({ concept: "Récursion" })), false);
+  assert.equal(launchedFromApp("{"), false);
+  // La pastille ramène à la question corrigée ; sans question (assistant), aucune page.
+  assert.equal(pageOfJob("check", "ml", question), "/mock/7?course=ml");
+  assert.equal(pageOfJob("drill", "ml"), "/entrainement?course=ml");
+  // La notification de fin ouvre le résultat lui-même : la page le relit par son job.
+  assert.equal(finishedHref({ type: "drill", course: "ml", id: 12, status: "done", resultPath: null }), "/entrainement?course=ml&job=12");
+  assert.equal(finishedHref({ type: "check", course: "cs 202", id: 55, status: "done", resultPath: null, question }), "/mock/7?course=cs%20202&job=55");
+  assert.equal(finishedHref({ type: "check", course: "ml", id: 55, status: "failed", resultPath: null, question }), "/mock/7?course=ml");
+  assert.equal(finishedHref({ type: "exam", course: "ml", id: 9, status: "done", resultPath: "/mock/3" }), "/mock/3?course=ml");
+  assert.equal(finishedHref({ type: "exam", course: "ml", id: 9, status: "done", resultPath: "/api/exams/3/pdf" }), "/api/exams/3/pdf");
+  assert.equal(finishedHref({ type: "exam", course: "ml", id: 9, status: "failed", resultPath: null }), "/examens?course=ml");
+  // Un seul appel au modèle : l'avancement ne mesure rien, la barre ne montre pas de pourcentage.
+  assert.equal(measuredProgress("exam"), true);
+  assert.equal(measuredProgress("drill"), false);
+  assert.equal(measuredProgress("check"), false);
 });

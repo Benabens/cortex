@@ -4,6 +4,8 @@
  * sondeur (lib/ux/job-watch) et par les composants.
  */
 import type { IngestReport } from "@/lib/ingest-report";
+import type { CheckResult } from "@/lib/check-solution";
+import type { Drill } from "./training";
 
 export type Job = {
   id: number;
@@ -27,6 +29,11 @@ export type Job = {
   resultId?: number | null;
   /** false : la génération ne coûte rien à ce compte (propriétaire, facturation coupée). */
   charged?: boolean;
+  /** Ce que le job a reçu (JSON) : la page qui le reprend y relit sa demande (série de labo, question corrigée…). */
+  target?: string | null;
+  /** Aides en job terminées (GET /api/jobs/[id]) : l'exercice ciblé, la correction. */
+  drill?: Drill;
+  check?: CheckResult;
 };
 
 export const JOB_ACTIVE = ["queued", "running", "verifying", "compiling"];

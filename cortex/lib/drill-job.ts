@@ -3,9 +3,8 @@ import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { generateDrill, type Drill } from "@/lib/drill";
 import { q } from "@/db/q";
-import { fmtCreditsBack } from "@/lib/billing/credits";
-import { jobErrorOf, type JobError } from "@/lib/i18n/job-text";
-import { activeJob, getJob, insertReservedJob, loadJobCheckpoint, logJob, ReservationRefused, saveJobCheckpoint, setJob, startWorker, type Job } from "@/lib/jobs";
+import type { JobError } from "@/lib/i18n/job-text";
+import { activeAssistantJob, ASSIST_FROM_WEB, assistJobFailed, getJob, insertReservedJob, loadJobCheckpoint, logJob, ReservationRefused, saveJobCheckpoint, setJob, startWorker, type Job } from "@/lib/jobs";
 import { userError } from "@/lib/i18n/user-error";
 
 /**
@@ -17,16 +16,24 @@ import { userError } from "@/lib/i18n/user-error";
  * des aides, solde : un refus revient tout de suite, sans job), sous une référence de job
  * (`job:<user>:<cours>:<uuid>`) que la réconciliation sait reprendre ; le worker appelle le modèle
  * sous cette preuve d'aide (modèle et taille bornés, lib/llm) et rend le crédit selon la règle de
- * assistCall. Le drill de l'app web reste synchrone (route /api/drill) : rien ne change pour lui.
+ * assistCall. Le drill de l'app web passe par le même job depuis le 24/11/2026 (route /api/drill) :
+ * la page quittée ou rechargée ne perdait plus que l'attente, jamais l'exercice payé.
  */
 
 /** Ce que le job range dans son point de reprise : l'exercice prêt (une reprise le livre sans rappeler le modèle). */
 type DrillCheckpoint = { drill?: Drill };
 
-/** Lance (ou retrouve) le drill du cours. Lève AssistRefused / ReservationRefused sans rien débiter. */
-export async function startDrillJob(concept: string): Promise<{ jobId: number; existing: boolean }> {
-  const running = await activeJob("drill");
-  if (running) return { jobId: running.id, existing: true };
+/**
+ * Lance le drill. Lève AssistRefused / ReservationRefused sans rien débiter.
+ * `fromWeb` : lancé par l'app, son suivi a la pastille et la notification de fin (lib/jobs, ASSIST_FROM_WEB) ;
+ * chaque demande a le sien (sa notion, son onglet), comme la route synchrone d'avant. Un assistant
+ * (MCP) en a un à la fois, rendu tel quel s'il s'écrit déjà, et n'hérite jamais de celui de l'app.
+ */
+export async function startDrillJob(concept: string, opts: { fromWeb?: boolean } = {}): Promise<{ jobId: number; existing: boolean }> {
+  if (!opts.fromWeb) {
+    const running = await activeAssistantJob("drill");
+    if (running) return { jobId: running.id, existing: true };
+  }
   const user = currentUser();
   const course = currentCourse();
   const { isCourseDeleting } = await import("@/lib/course-deletion");
@@ -35,7 +42,7 @@ export async function startDrillJob(concept: string): Promise<{ jobId: number; e
   const ref = `job:${user}:${course}:${crypto.randomUUID()}`;
   const r = await assistReserve("drill", ref);
   if ("issue" in r) throw new AssistRefused(r.issue);
-  const res = await insertReservedJob("drill", JSON.stringify({ concept }), ref);
+  const res = await insertReservedJob("drill", JSON.stringify({ concept, ...(opts.fromWeb ? ASSIST_FROM_WEB : {}) }), ref, opts.fromWeb ? "none" : "assistant");
   if (res.existing) {
     // Un autre appel a créé le drill pendant la réservation : la nôtre n'a servi à rien.
     const { refundGeneration } = await import("@/lib/billing/credits");
@@ -80,11 +87,7 @@ export async function executeDrillJob(jobId: number): Promise<{ ok: true } | { o
   await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Écriture de l'exercice…", progress: 10 });
   const r = await runDrill(job, creditRef);
   if (!r.ok) {
-    const raw = (r.error as Error)?.message || String(r.error);
-    const message = r.backCenti > 0 ? `${raw} — ${fmtCreditsBack(r.backCenti)}.` : raw;
-    const info: JobError = r.backCenti > 0 ? { ...jobErrorOf(r.error), creditsBackCenti: r.backCenti } : jobErrorOf(r.error);
-    await setJob(jobId, { status: "error", error: message, errorInfo: info });
-    await logJob(jobId, "ERREUR : " + message);
+    const { message, info } = await assistJobFailed(jobId, r.error, r.backCenti);
     return { ok: false, message, info };
   }
   await setJob(jobId, { status: "done", progress: 100, currentStep: "Exercice prêt ✓", stepInfo: { key: "done" } });

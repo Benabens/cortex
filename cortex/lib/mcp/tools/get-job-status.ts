@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import { examQuestions } from "@/lib/exam";
 import { localizeJob } from "@/lib/i18n/job-text";
-import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
+import { activeAssistantJob, activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
 import { getBlockExam } from "@/lib/blocks";
 import { sectionLabel } from "@/lib/section-label";
 import { getQcmExam } from "@/lib/qcm";
@@ -168,7 +168,8 @@ function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jo
  * le relancer.
  */
 async function runningJob(): Promise<Job | null> {
-  return (await activeJob()) ?? (await activeJob("drill")) ?? (await activeJob("check"));
+  // Les aides de l'assistant : celles de l'app ont leur suivi dans l'app.
+  return (await activeJob()) ?? (await activeAssistantJob("drill")) ?? (await activeAssistantJob("check"));
 }
 
 /**

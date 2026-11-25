@@ -6,7 +6,7 @@ import { useTranslations } from "use-intl/react";
 import { Check, AlertTriangle, X } from "lucide-react";
 import { Orb } from "./Orb";
 import { dismissToast, jobKey, subscribeTracker, trackerState, type GenerationToast } from "@/lib/ux/generation-tracker";
-import { orbStateFor, pageOfJob } from "@/lib/ux/generation";
+import { finishedHref, measuredProgress, orbStateFor, pageOfJob } from "@/lib/ux/generation";
 import { useCourse } from "@/lib/ux/api";
 
 const SERVER_STATE = { jobs: [], toasts: [], shown: new Set<string>() };
@@ -26,9 +26,10 @@ export function GenerationPill({ placement }: { placement: "topbar" | "dock" }) 
   const visible = jobs.filter((j) => !shown.has(jobKey(j.course, j.id)));
   if (!visible.length) return null;
   const job = visible[0];
-  const href = pageOfJob(job.type, job.course) ?? "/";
+  const href = pageOfJob(job.type, job.course, job.question) ?? "/";
   const step = job.currentStep ?? t(job.status === "queued" ? "queued" : "running");
-  const pct = job.status === "queued" ? null : `${Math.round(job.progress)} %`;
+  // Un seul appel au modèle (exercice ciblé, correction) : pas de pourcentage, il ne mesurerait rien.
+  const pct = job.status === "queued" || !measuredProgress(job.type) ? null : `${Math.round(job.progress)} %`;
   // Le nom accessible reprend le texte visible (étape, pourcentage), puis le cours et l'action.
   const name = t("pill.open", { step: pct ? `${step} ${pct}` : step, course: job.courseLabel });
   const dock = placement === "dock";
@@ -90,11 +91,8 @@ export function GenerationToasts() {
 function Toast({ toast }: { toast: GenerationToast }) {
   const t = useTranslations("generation");
   const ref = useRef<HTMLDivElement>(null);
-  // Même lien que le compositeur (examHref) : un examen en ligne porte son cours, un PDF est servi tel quel.
-  const href = toast.status === "done" && toast.resultPath?.startsWith("/mock/")
-    ? `${toast.resultPath}?course=${encodeURIComponent(toast.course)}`
-    : toast.status === "done" && toast.resultPath?.startsWith("/") ? toast.resultPath
-    : pageOfJob(toast.type, toast.course);
+  // Le résultat lui-même : examen en ligne (avec son cours), PDF, exercice ou correction relus par leur job.
+  const href = finishedHref(toast);
   useEffect(() => {
     if (toast.status !== "done") return;
     let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => dismissToast(toast.key), 15_000);

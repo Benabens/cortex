@@ -28,6 +28,8 @@ process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 process.env.MAX_COURSES_PER_USER = "unlimited";
+// Correction de l'app en job : aucune place pour un worker détaché, le test exécute le job lui-même.
+process.env.MAX_GLOBAL_ASSIST_JOBS = "0";
 
 type Part = { kind: string; prompt: string; code: string; options: string[]; correct: number; answer: string; criteria: { label: string; points: number }[]; points: number; explanation: string };
 const scq = (tag: string): Part => ({ kind: "scq", prompt: `Which phenomenon is at work (${tag})?`, code: "", options: ["Right: a reinforcing feedback loop", "A balancing loop", "Illusory truth effect", "Malinformation"], correct: 0, answer: "", criteria: [], points: 1, explanation: "The course: a reinforcing loop amplifies its own cause." });
@@ -96,7 +98,7 @@ before(async () => {
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER", "MAX_GLOBAL_ASSIST_JOBS"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -221,7 +223,14 @@ test("C — réponse courte : correction critère par critère sur le barème fi
   const sh = exam.blocks.flatMap((b) => b.parts).find((p) => p.kind === "short")!;
   prompts.length = 0;
   const res = await POST(new NextRequest(`http://cortex.test/api/check-solution?course=${examCourse}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ examId, partId: sh.id, answer: "It is a reinforcing loop." }) }));
-  const d = await res.json() as { result: { criteria: { label: string; points: number; achieved: boolean }[]; score: { earned: number; total: number }; verdict: string } };
+  assert.equal(res.status, 200, await res.clone().text());
+  // La correction est un job : le worker relit le barème de la question dans la base.
+  const { jobId } = await res.json() as { jobId: number };
+  const { executeCheckJob } = await import("../lib/check-job");
+  await runWithCourse(examCourse, () => executeCheckJob(jobId));
+  const { GET } = await import("../app/api/jobs/[id]/route");
+  const out = await GET(new NextRequest(`http://cortex.test/api/jobs/${jobId}?course=${examCourse}`), { params: Promise.resolve({ id: String(jobId) }) });
+  const d = { result: (await out.json() as { check: { criteria: { label: string; points: number; achieved: boolean }[]; score: { earned: number; total: number }; verdict: string } }).check };
   assert.match(prompts[0] ?? "", /BARÈME IMPOSÉ[\s\S]*Names the reinforcing loop \(1 pt\)[\s\S]*Explains the amplification \(1 pt\)/);
   assert.match(prompts[0] ?? "", /A video platform ranks posts/, "le scénario fait partie de l'énoncé");
   assert.deepEqual(d.result.criteria.map((x) => [x.label, x.points, x.achieved]), [["Names the reinforcing loop", 1, true], ["Explains the amplification", 1, false]]);

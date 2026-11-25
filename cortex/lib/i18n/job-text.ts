@@ -116,9 +116,13 @@ function errorOf(job: LocalizableJob, locale: Locale, generic: boolean): string 
     // Sans code rangé : l'échec dit en clair ; ailleurs (examen livré, PDF en échec), un détail technique.
     return job.status === "error" ? errorText(locale, { code: "job_failed" }) : null;
   }
-  const text = errorText(locale, info);
-  if (!info.creditsBackCenti || info.creditsBackCenti <= 0) return text;
-  const back = credits(info.creditsBackCenti);
+  return withCreditsBack(errorText(locale, info), info.creditsBackCenti, locale);
+}
+
+/** La cause d'un échec et ce qui a été rendu : « Le fournisseur est surchargé (2 crédits rendus). » */
+export function withCreditsBack(text: string, backCenti: number | undefined, locale: Locale): string {
+  if (!backCenti || backCenti <= 0) return text;
+  const back = credits(backCenti);
   return translator(locale)("jobText.errorBack", { error: text.replace(/[.\s]+$/u, ""), credits: fmt(locale).number(back), back });
 }
 

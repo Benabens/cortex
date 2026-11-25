@@ -12,6 +12,17 @@ async function api<T>(page: Page, path: string, init: RequestInit = {}): Promise
   }, { path, init });
 }
 
+/** Le job fini (status done), interrogé comme le fait la page ; échoue s'il rate ou dépasse 2 min. */
+async function finishedJob<T>(page: Page, jobId: number, course: string): Promise<T> {
+  let job: { status: string } & T = { status: "queued" } as { status: string } & T;
+  await expect.poll(async () => {
+    job = (await api<{ status: string } & T>(page, `/api/jobs/${jobId}?course=${encodeURIComponent(course)}`)).body;
+    return job.status;
+  }, { timeout: 120_000, intervals: [1_000] }).toMatch(/^(done|failed|canceled)$/);
+  expect(job.status).toBe("done");
+  return job;
+}
+
 function minimalPdf(): Buffer {
   const stream = "BT /F1 12 Tf 30 100 Td (Annale integrales E2E) Tj ET\n";
   const objects = [
@@ -45,10 +56,15 @@ test("@principal onboarding complet, PDF, préparation, drill, correction et exa
   const catalog = await api<{ courses: Array<{ id: string; name: string }> }>(page, "/api/courses");
   const course = catalog.body.courses.find((item) => item.name === courseName)?.id; expect(course).toBeTruthy();
 
-  const drill = await api<{ drill: { statement_html: string } }>(page, `/api/drill?course=${encodeURIComponent(course!)}`, { method: "POST", body: JSON.stringify({ concept: "intégrales" }) });
-  expect(drill.status).toBe(200); expect(drill.body.drill.statement_html).toContain("Calcule");
-  const correction = await api<{ result: { verdict: string } }>(page, `/api/check-solution?course=${encodeURIComponent(course!)}`, { method: "POST", body: JSON.stringify({ statement: "Calcule ∫₀¹ x dx", answer: "1" }) });
-  expect(correction.status).toBe(200); expect(correction.body.result.verdict).toBe("wrong");
+  // Exercice ciblé et correction : des jobs (lib/drill-job, lib/check-job), lus une fois finis sur /api/jobs/<id>.
+  const drillStart = await api<{ jobId: number }>(page, `/api/drill?course=${encodeURIComponent(course!)}`, { method: "POST", body: JSON.stringify({ concept: "intégrales" }) });
+  expect(drillStart.status).toBe(200);
+  const drill = await finishedJob<{ drill: { statement_html: string } }>(page, drillStart.body.jobId, course!);
+  expect(drill.drill.statement_html).toContain("Calcule");
+  const checkStart = await api<{ jobId: number }>(page, `/api/check-solution?course=${encodeURIComponent(course!)}`, { method: "POST", body: JSON.stringify({ statement: "Calcule ∫₀¹ x dx", answer: "1" }) });
+  expect(checkStart.status).toBe(200);
+  const correction = await finishedJob<{ check: { verdict: string } }>(page, checkStart.body.jobId, course!);
+  expect(correction.check.verdict).toBe("wrong");
   const exam = await api<{ ok: boolean }>(page, `/api/exams/generate?dry=1&course=${encodeURIComponent(course!)}`, { method: "POST", body: "{}" });
   expect(exam.status).toBe(200); expect(exam.body.ok).toBeTruthy();
   await page.goto("/examens"); await expect(page.getByRole("heading", { name: "Examens prêts" })).toBeVisible();

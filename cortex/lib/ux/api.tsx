@@ -322,13 +322,52 @@ export function asText(v: unknown): string | null {
  * Le job actif le plus récent du cours parmi ces types (GET /api/jobs?type=) : une génération
  * lancée avant (page quittée, rechargement, autre onglet) dont la page reprend le suivi.
  */
-export async function findActiveJob(courseId: string, types: readonly string[]): Promise<{ id: number; type: string } | null> {
+export async function findActiveJob(courseId: string, types: readonly string[]): Promise<{ id: number; type: string; target: string | null } | null> {
   const found = await Promise.all(types.map((type) =>
     fetch(withCourse(`/api/jobs?type=${encodeURIComponent(type)}`, courseId))
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { active?: { id: number; type: string } | null } | null) => d?.active ?? null)
+      .then((d: { active?: { id: number; type: string; target: string | null } | null } | null) => d?.active ?? null)
       .catch(() => null)));
   return found.filter((j) => j !== null).sort((a, b) => b.id - a.id)[0] ?? null;
+}
+
+export type WebAssistJob = { id: number; type: string; target: string | null; status: string };
+const assistLists = new Map<string, { at: number; list: Promise<WebAssistJob[]> }>();
+
+/**
+ * Les aides de l'app (exercice ciblé, correction) du cours, en cours ou finies depuis peu, les plus
+ * récentes d'abord (GET /api/jobs?assists=web) : la page qui les a lancées les retrouve au retour.
+ * Un seul appel pour toutes les questions d'un examen montées ensemble.
+ */
+export function webAssistJobs(courseId: string, type: "drill" | "check"): Promise<WebAssistJob[]> {
+  const key = `${courseId}:${type}`;
+  const hit = assistLists.get(key);
+  if (hit && Date.now() - hit.at < 2000) return hit.list;
+  const list = fetch(withCourse(`/api/jobs?type=${type}&assists=web`, courseId))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d: { assists?: WebAssistJob[] } | null) => d?.assists ?? [])
+    .catch(() => [] as WebAssistJob[]);
+  assistLists.set(key, { at: Date.now(), list });
+  return list;
+}
+
+/**
+ * L'adresse de la page garde le job qu'elle vient de lancer (`job=`, avec son cours) : un
+ * rechargement relit l'exercice ou la correction au lieu de les perdre. La notification de fin
+ * mène à la même adresse (lib/ux/generation finishedHref).
+ */
+export function rememberJobInUrl(jobId: number, courseId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("course", courseId);
+  url.searchParams.set("job", String(jobId));
+  window.history.replaceState(window.history.state, "", url);
+}
+
+/** Le job désigné par l'adresse (`job=`), s'il est de ce cours : un id de job n'a de sens que dans son cours. */
+export function jobInUrl(courseId: string): number | null {
+  const params = new URLSearchParams(window.location.search);
+  const id = Number(params.get("job"));
+  return params.get("course") === courseId && Number.isInteger(id) && id > 0 ? id : null;
 }
 
 export type { Job } from "./job-status";

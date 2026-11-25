@@ -1,7 +1,7 @@
 /**
  * Types Entraînement — formes réelles :
  * GET /api/drill → { due: string[] (concepts dus, libellés), weaknesses: string[] } (500 sur cs-202).
- * POST /api/drill {concept} → SYNCHRONE { ok, drill } (moteur LLM ; 503 si absent).
+ * POST /api/drill {concept} → { ok, jobId } : le job écrit l’exercice, lu sur GET /api/jobs/[id] (champ drill).
  * POST /api/exercises/generate {target} | multipart {target?, note?, image?} → JOB.
  * GET /api/labs/generate → { series:[{ lab:{id,label}, exams:[…] }] } (contenu Labs = cs-202).
  * POST /api/labs/generate {lab?|topic?} → JOB.

@@ -32,6 +32,27 @@ export const isJobType = (s: unknown): s is JobType => typeof s === "string" && 
 
 /** Aides du connecteur exécutées en job : file à part, sans fichiers du cours, jamais relancées par « réessayer ». */
 export const ASSIST_JOB_TYPES: readonly JobType[] = ["drill", "check"];
+/** Marque, dans la cible d'une aide en job, celles lancées par l'app web : elles ont leur suivi (pastille, fin notifiée). */
+export const ASSIST_FROM_WEB = { from: "web" } as const;
+function assistFromWeb(target: string | null): boolean {
+  try { return (JSON.parse(target ?? "{}") as { from?: unknown }).from === ASSIST_FROM_WEB.from; } catch { return false; }
+}
+
+/**
+ * Aide en job en échec (drill, check) : la cause LISIBLE est rangée (celle que la route synchrone
+ * montrait : « fournisseur surchargé », « réponse illisible »…), avec ce qui a été rendu ; la phrase
+ * brute du fournisseur reste au journal du job, jamais affichée.
+ */
+export async function assistJobFailed(jobId: number, error: unknown, backCenti: number): Promise<{ message: string; info: JobError }> {
+  const { jobErrorOf, withCreditsBack } = await import("@/lib/i18n/job-text");
+  const { errorText } = await import("@/lib/i18n/user-error");
+  const cause = jobErrorOf(error);
+  const info: JobError = backCenti > 0 ? { ...cause, creditsBackCenti: backCenti } : cause;
+  const message = withCreditsBack(errorText("fr", cause), backCenti, "fr");
+  await setJob(jobId, { status: "error", error: message, errorInfo: info });
+  await logJob(jobId, "ERREUR : " + ((error as Error)?.message || String(error)));
+  return { message, info };
+}
 /** Examen blanc généré par l'étudiant (QCM ou composé) — pour l'événement marketing `first_mock_exam`. */
 export const MOCK_EXAM_JOB_TYPES: readonly JobType[] = ["qcm", "exam"];
 export type Job = {
@@ -159,16 +180,22 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
 }
 
 /**
- * Insertion EXCLUSIVE d'un job dont la réservation est déjà faite par l'appelant (aide en job,
- * lib/drill-job : le prix d'une aide réservé comme une aide, pas comme une génération). Le job actif du
- * même type est re-vérifié dans la transaction ; s'il existe, l'appelant rend sa réservation.
+ * Insertion d'un job dont la réservation est déjà faite par l'appelant (aide en job,
+ * lib/drill-job : le prix d'une aide réservé comme une aide, pas comme une génération). Le job actif
+ * concurrent est re-vérifié dans la transaction ; s'il existe, l'appelant rend sa réservation.
+ * `exclusive` : « all », un job actif du type à la fois ; « assistant », une aide d'assistant (MCP) à
+ * la fois, celles de l'app à côté ; « none », chaque demande a son job (aides de l'app : une par
+ * notion, par réponse, comme la route synchrone d'avant).
  */
-export async function insertReservedJob(type: JobType, target: string, ref: string): Promise<{ id: number; existing: boolean }> {
+export async function insertReservedJob(type: JobType, target: string, ref: string, exclusive: "all" | "assistant" | "none" = "all"): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
   return q.tx(async () => {
     await lockJobCreation(type);
-    const active = await q.get<{ id: number }>(`SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`, type);
-    if (active) return { id: active.id, existing: true };
+    if (exclusive !== "none") {
+      const rows = await q.all<{ id: number; target: string | null }>(`SELECT id, target FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC`, type);
+      const active = rows.find((r) => exclusive === "all" || !assistFromWeb(r.target));
+      if (active) return { id: active.id, existing: true };
+    }
     const id = await q.insert(
       `INSERT INTO jobs (type, target, status, current_step, progress, credit_ref) VALUES (?,?,'queued','En file…',0,?)`,
       type, target, ref,
@@ -974,14 +1001,39 @@ function orderedUnits(target: string | null): number | null {
 }
 
 /**
- * Les générations en cours du cours courant (pastille de suivi, /api/jobs/running), sans les aides
- * en job (drill, check) : lancées depuis un assistant, aucune page de l'app ne les montre.
+ * Les générations en cours du cours courant (pastille de suivi, /api/jobs/running). Les aides en
+ * job (drill, check) seulement lancées depuis l'app (ASSIST_FROM_WEB) : celles d'un assistant
+ * n'ont aucune page de l'app qui les montre.
  */
 export async function listActiveJobs(limit = 4): Promise<Job[]> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  const notAssist = ASSIST_JOB_TYPES.map(() => "?").join(",");
-  return (await q.all<JobRow>(`SELECT * FROM jobs WHERE status IN ${ACTIVE_STATES} AND type NOT IN (${notAssist}) ORDER BY id DESC LIMIT ?`, ...ASSIST_JOB_TYPES, limit)).map(rowToJob);
+  // Peu de jobs actifs par cours (un par type) : le tri des aides se fait ici, sur leur cible.
+  const rows = await q.all<JobRow>(`SELECT * FROM jobs WHERE status IN ${ACTIVE_STATES} ORDER BY id DESC`);
+  return rows.map(rowToJob).filter((j) => !ASSIST_JOB_TYPES.includes(j.type) || assistFromWeb(j.target)).slice(0, limit);
+}
+
+/** L'aide (drill, check) en cours la plus récente demandée par un assistant (MCP) : celles de l'app ont leur suivi. */
+export async function activeAssistantJob(type: JobType): Promise<Job | null> {
+  await ensureJobsSchema();
+  await reconcileStaleJobs();
+  const rows = await q.all<JobRow>(`SELECT * FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC`, type);
+  const r = rows.find((row) => !assistFromWeb(row.target));
+  return r ? rowToJob(r) : null;
+}
+
+/** Fenêtre où une aide de l'app finie pendant l'absence revient sur sa page (exercice, correction). */
+export const WEB_ASSIST_RECALL_MS = 6 * 3600_000;
+
+/** Les aides de l'app d'un type, en cours ou finies depuis moins de `withinMs`, les plus récentes d'abord. */
+export async function listWebAssistJobs(type: JobType, withinMs = WEB_ASSIST_RECALL_MS): Promise<Job[]> {
+  await ensureJobsSchema();
+  await reconcileStaleJobs();
+  const rows = await q.all<JobRow>(
+    `SELECT * FROM jobs WHERE type = ? AND (status IN ${ACTIVE_STATES} OR updated_at >= ?) ORDER BY id DESC LIMIT 50`,
+    type, nowStr(-withinMs),
+  );
+  return rows.filter((r) => assistFromWeb(r.target)).map(rowToJob);
 }
 
 /**

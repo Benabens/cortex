@@ -70,16 +70,54 @@ export function barValue(prev: { id: number; value: number } | null, job: Pick<J
   return prev && prev.id === job.id ? Math.max(prev.value, raw) : raw;
 }
 
-/** La page où l'on retrouve une génération (pastille, notification de fin). */
-export function pageOfJob(type: string, course: string): string | null {
+/** La question d'examen corrigée par un job de correction lancé par l'app (lib/check-job), lue dans sa cible. */
+export type JobQuestion = { examId: number; questionId: number };
+export function questionOfTarget(target: string | null | undefined): JobQuestion | null {
+  try {
+    const q = (JSON.parse(target ?? "null") as { question?: { examId?: unknown; questionId?: unknown } } | null)?.question;
+    return q && Number.isInteger(q.examId) && Number.isInteger(q.questionId) ? { examId: q.examId as number, questionId: q.questionId as number } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Aide lancée depuis l'app (`from: "web"`, lib/jobs ASSIST_FROM_WEB) : celles d'un assistant ne se suivent pas dans la page. */
+export function launchedFromApp(target: string | null | undefined): boolean {
+  try {
+    return (JSON.parse(target ?? "null") as { from?: unknown } | null)?.from === "web";
+  } catch {
+    return false;
+  }
+}
+
+/** La page où l'on retrouve une génération (pastille, notification de fin). `question` : la correction d'une question. */
+export function pageOfJob(type: string, course: string, question?: JobQuestion | null): string | null {
   const q = `?course=${encodeURIComponent(course)}`;
   switch (type) {
     case "exam": case "qcm": return `/examens${q}`;
     case "ingest": case "prepare": case "format": return `/sources${q}`;
     case "blueprint": return `/programme${q}`;
     case "exercise": case "lab-exercise": case "drill": return `/entrainement${q}`;
+    case "check": return question ? `/mock/${question.examId}${q}` : null;
     default: return null;
   }
+}
+
+/**
+ * Le lien d'une notification de fin : le résultat lui-même quand il a une adresse (examen en ligne,
+ * PDF), l'exercice ciblé ou la correction relus par leur job (`job=`), sinon la page d'où relancer.
+ */
+export function finishedHref(t: { type: string; course: string; id: number; status: "done" | "failed"; resultPath: string | null; question?: JobQuestion | null }): string | null {
+  const page = pageOfJob(t.type, t.course, t.question);
+  if (t.status !== "done") return page;
+  if (t.resultPath?.startsWith("/mock/")) return `${t.resultPath}?course=${encodeURIComponent(t.course)}`;
+  if (t.resultPath?.startsWith("/")) return t.resultPath;
+  return page && (t.type === "drill" || t.type === "check") ? `${page}&job=${t.id}` : page;
+}
+
+/** L'avancement mesure-t-il quelque chose ? Un seul appel au modèle (exercice ciblé, correction) : non, la barre n'a pas de pourcentage. */
+export function measuredProgress(type: string): boolean {
+  return type !== "drill" && type !== "check";
 }
 
 /**
