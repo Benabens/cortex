@@ -59,8 +59,8 @@ before(async () => {
           const after = content.slice(m.index);
           const opts = [...after.split(/^\([a-z]\) \[/m)[1]?.matchAll(/^ {2}([A-D])\. (.*)$/gm) ?? []];
           return {
-            index: i, ok: true, issue: "",
-            answer: m[2] === "scq" ? String(Math.max(0, opts.findIndex((o) => o[2].startsWith("Right:")))) : m[2] === "code_output" ? "[1, 2]" : "Engagement feeds ranking: reinforcing loop.",
+            index: i, ok: !(/OKPRESENT/.test(content) && i === 0), issue: /OKPRESENT/.test(content) && i === 0 ? "hors_sujet: feedback loop" : "",
+            answer: /OKPRESENT/.test(content) && i === 0 ? "Z" : m[2] === "scq" ? String(Math.max(0, opts.findIndex((o) => o[2].startsWith("Right:")))) : m[2] === "code_output" ? "[1, 2]" : "Engagement feeds ranking: reinforcing loop.",
           };
         });
         text = JSON.stringify({
@@ -74,7 +74,9 @@ before(async () => {
             : /MISLIST/.test(content) ? [{ index: 0, issue: "reinforcing loop only; the course: reinforcing OR balancing" }]
             : /EMPTYLIST/.test(content) ? [{ index: 0, options: [] }] : "",
           // Banc du 04/11 (CS-290 composite) : le juge a rendu les options en CHAÎNE, l'examen entier plantait.
-          trivial_distractors: /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse", tell: "longueur" }]
+          trivial_distractors: /TRIVPRESENT/.test(content) ? [{ index: 0, options: [/^ {2}([A-D])\. Right: a reinforcing feedback loop/m.exec(content)?.[1] ?? "A"], tell: "hors_sujet", notion: "feedback loop" }]
+            : /TRIVABSENT/.test(content) ? [{ index: 0, options: [/^ {2}([A-D])\. Schwartz value coexistence/m.exec(content)?.[1] ?? "A"], tell: "hors_sujet", notion: "Schwartz value coexistence" }]
+            : /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse", tell: "longueur" }]
             // Banc rs-composite du 22/11 : le juge nomme les options par leur LETTRE dans l'ordre mélangé.
             : /TRIVIAL/.test(content) && /^ {2}B\. /m.test(content) ? [{ index: 0, options: ["B"], tell: "contredit_enonce" }]
             // Banc rs-composite du 23/11 : une notion sœur de la typologie signalée sans marqueur qui la trahisse.
@@ -706,6 +708,27 @@ test("C × hors cours en tableau (banc rs-composite : 100 % des verdicts réels)
   const exam = (await runWithCourse(id, () => getBlockExam(r.id)))!;
   assert.ok(!exam.blocks.some((b) => /OFFLIST|MISLIST/.test(b.scenario)), "un bloc relevé hors cours n'est pas livré");
   assert.ok(exam.blocks.some((b) => /EMPTYLIST/.test(b.scenario)), "une entrée vide ne rejette rien");
+});
+
+test("C × hors sujet : une notion présente dans les extraits passe, une notion absente reste rejetée", async () => {
+  const id = await compositeCourse(2);
+  script = {
+    "Question 1": [block("A", [scq("A"), short("A"), code("[1, 2]")], "TRIVPRESENT OKPRESENT: a feedback loop.")],
+    "Question 2": [
+      block("B", [{ ...scq("B"), options: ["Right: a reinforcing feedback loop", "Schwartz value coexistence", "Illusory truth effect", "Malinformation"] }, short("B"), code("[1, 2]")], "TRIVABSENT: a robot."),
+      block("B2", [scq("B2"), short("B2"), code("[1, 2]")]),
+    ],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateBlockExam(sectionPlan(["ethical theories and stakeholders", "keyword filtering of posts"]), { onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.count, r.requested], [2, 2], steps.join("\n"));
+  assert.ok(!steps.some((s) => /rejetée[^\n]*feedback loop/.test(s)), steps.join("\n"));
+  assert.ok(steps.some((s) => /rejetée[^\n]*Schwartz value coexistence/.test(s)), steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  assert.ok(exam.blocks.some((b) => /TRIVPRESENT/.test(b.scenario)), "la notion voisine présente dans les extraits est livrée");
+  assert.ok(!exam.blocks.some((b) => /TRIVABSENT/.test(b.scenario)), "la notion réellement absente est remplacée");
 });
 
 test("C × distracteurs éliminables (banc rs-composite 23/11, Q1-Q3) : seul un marqueur concret rejette, et la relance dit comment le corriger", async () => {

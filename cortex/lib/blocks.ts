@@ -2,7 +2,7 @@ import { currentCourse } from "@/db/client";
 import { nowStr, q } from "@/db/q";
 import { examSummaryLabel } from "@/lib/exam-summary";
 import { getCourse } from "@/lib/courses";
-import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, evidencePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, evidencePassages, excerptMentionsTerm } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
 import { BLOCK_PART_KINDS, examLanguageFor, type BlockFormat, type BlockPartKind, type PartShape } from "@/lib/exam-format";
@@ -144,12 +144,12 @@ const VERDICT_SCHEMA = {
         additionalProperties: false,
       },
     },
-    off_course: { type: "string", description: "Toute notion employée absente des extraits du cours ; vide sinon." },
+    off_course: { type: "string", description: "Noms exacts, séparés par un point-virgule, des notions employées qui n'apparaissent nulle part dans les extraits ; vide sinon. Aucun commentaire." },
     definition_mismatch: { type: "string", description: "Une définition employée plus étroite, plus large que celle des extraits, ou deux notions voisines confondues : laquelle, ce que dit la question, ce que dit le cours. Vide sinon." },
     trivial_distractors: {
       type: "array",
       description: "Choix unique : les options qu'un étudiant élimine sans connaître le cours.",
-      items: { type: "object", properties: { index: { type: "integer" }, options: { type: "array", items: { type: "string" } }, tell: { type: "string", enum: Object.keys(TELLS) } }, required: ["index", "options", "tell"], additionalProperties: false },
+      items: { type: "object", properties: { index: { type: "integer" }, options: { type: "array", items: { type: "string" } }, tell: { type: "string", enum: Object.keys(TELLS) }, notion: { type: "string", description: "hors_sujet : nom exact de la notion absente ; vide pour les autres marqueurs." } }, required: ["index", "options", "tell", "notion"], additionalProperties: false },
     },
   },
   required: ["verdicts", "off_course", "definition_mismatch", "trivial_distractors"],
@@ -461,16 +461,16 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   const system = [
     `Tu es un correcteur indépendant. Résous chaque sous-question de cette question d'examen composée, SANS corrigé, avec les DÉFINITIONS DES EXTRAITS DU COURS (jamais celles d'une autre source).`,
     `Pour chaque sous-question (index 0 = a) : "answer" = la lettre de l'option juste (scq), la sortie exacte du code (code_output), ou ta réponse en une ou deux phrases (short) ; ok=false si elle est ambiguë, sans réponse unique, ou contraire au cours, et dis pourquoi dans "issue".`,
-    `off_course : toute notion employée absente des extraits. definition_mismatch : une définition employée (scénario, énoncés, options) plus étroite (une condition ajoutée) ou plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues.`,
-    `trivial_distractors : les options fausses qu'un étudiant qui ne connaît PAS le cours élimine quand même, chacune avec le marqueur qui la trahit ("tell") : absurde (réfutable par le bon sens), hors_sujet (ne répond pas à la question posée, notion d'un autre chapitre), absolu (« toujours », « jamais », « garantit »…), grammaire (ne s'accorde pas avec l'énoncé), longueur (forme ou longueur qui la distingue des autres), contredit_enonce (contredit un fait donné par le scénario ou l'énoncé). Une notion du cours de même nature que la bonne réponse, qu'on n'écarte qu'en appliquant sa définition au scénario, n'est PAS triviale : c'est ce que la question évalue. Sans marqueur, ne la cite pas.`,
-    `Réponds UNIQUEMENT avec un objet JSON {"verdicts":[{"index","answer","ok","issue"}],"off_course","definition_mismatch","trivial_distractors":[{"index","options"}]}.`,
+    `off_course : UNIQUEMENT une notion employée qui n'apparaît nulle part dans les extraits. Une notion voisine qui apparaît dans les extraits n'est jamais hors sujet. Donne seulement son nom exact (plusieurs noms séparés par un point-virgule), sans justification ; vide sinon. Ne mets pas ok=false pour ce seul motif. definition_mismatch : une définition employée (scénario, énoncés, options) plus étroite (une condition ajoutée) ou plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues.`,
+    `trivial_distractors : les options fausses qu'un étudiant qui ne connaît PAS le cours élimine quand même, chacune avec le marqueur qui la trahit ("tell") : absurde (réfutable par le bon sens), hors_sujet (la notion visée n'apparaît nulle part dans les extraits), absolu (« toujours », « jamais », « garantit »…), grammaire (ne s'accorde pas avec l'énoncé), longueur (forme ou longueur qui la distingue des autres), contredit_enonce (contredit un fait donné par le scénario ou l'énoncé). Pour hors_sujet, "notion" donne son nom exact ; pour les autres marqueurs, "notion" est vide. Une notion du cours de même nature que la bonne réponse, qu'on n'écarte qu'en appliquant sa définition au scénario, n'est PAS triviale : c'est ce que la question évalue. Sans marqueur, ne la cite pas.`,
+    `Réponds UNIQUEMENT avec un objet JSON {"verdicts":[{"index","answer","ok","issue"}],"off_course","definition_mismatch","trivial_distractors":[{"index","options","tell","notion"}]}.`,
   ].join("\n");
   const prompt = [
     passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)].join("\n") : "Aucun extrait du cours fourni.",
     `SCÉNARIO :\n${b.scenario}`,
     `SOUS-QUESTIONS :\n${body}`,
   ].join("\n\n");
-  let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: unknown; definition_mismatch?: unknown; trivial_distractors?: { index: number; options: string[]; tell?: unknown }[] };
+  let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: unknown; definition_mismatch?: unknown; trivial_distractors?: { index: number; options: string[]; tell?: unknown; notion?: unknown }[] };
   try {
     // Un verdict par sous-question, sinon rien n'est vérifié (jamais de faux « vérifié »).
     const covers = (v: typeof res) => b.parts.every((_, i) => v.verdicts?.some((x) => x.index === i));
@@ -482,10 +482,16 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   }
   const issues: string[] = [];
   const said = (x: unknown) => (passages.length ? flagText(x) : "");
+  const contradictedOffTopicClaim = (text: string) => {
+    const term = /^\s*hors[_ -]?sujet\s*[:(—–-]\s*(.+?)\)?\s*$/i.exec(text)?.[1];
+    return !!term && excerptMentionsTerm(term, passages);
+  };
   for (const [i, p] of b.parts.entries()) {
     const v = res.verdicts!.find((x) => x.index === i)!;
     const at = `(${LETTER[i].toLowerCase()})`;
-    if (v.ok === false) issues.push(`${at} ${v.issue || "ambiguë ou contraire au cours"}`);
+    const falseOffTopic = contradictedOffTopicClaim(v.issue ?? "");
+    if (v.ok === false && !falseOffTopic) issues.push(`${at} ${v.issue || "ambiguë ou contraire au cours"}`);
+    if (falseOffTopic) continue;
     if (p.kind === "scq") {
       const a = String(v.answer ?? "").trim().toUpperCase();
       const k = /^[A-H]\b/.test(a) ? LETTER.indexOf(a[0]) : /^\d+$/.test(a) ? Number(a) : -1;
@@ -494,7 +500,9 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
       issues.push(`${at} sortie du code contestée : le juge lit « ${String(v.answer ?? "").slice(0, 80)} »`);
     }
   }
-  const off = said(res.off_course);
+  // Le modèle peut oublier une occurrence qu'il avait pourtant sous les yeux. Un rejet hors cours
+  // ne tient que pour les notions dont le nom est effectivement absent des extraits fournis.
+  const off = said(res.off_course).split(/\s*;\s*/).filter((term) => term && !excerptMentionsTerm(term.replace(/^\([a-h]\)\s*/i, ""), passages)).join(" ; ");
   if (off) issues.push(`hors cours : ${off}`);
   const mismatch = said(res.definition_mismatch);
   if (mismatch) issues.push(`définition différente du cours : ${mismatch}`);
@@ -521,6 +529,12 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
       // Sans marqueur concret, l'avis ne tient pas d'une version à l'autre (c519f840) : il ne rejette rien.
       const tell = tellOf(t?.tell) || tellOf(reason);
       if (!tell) return [];
+      // `hors_sujet` est factuel : si l'option nomme une notion des extraits, ce motif est faux.
+      if (tell === "hors_sujet") {
+        const legacy = /hors[_ -]?sujet\s*\(\s*(?:parle\s+de\s+)?([^/,;)]+)/i.exec(reason)?.[1]?.trim();
+        const notion = typeof t?.notion === "string" && t.notion.trim() ? t.notion.trim() : legacy;
+        if (!notion || excerptMentionsTerm(notion, passages)) return [];
+      }
       tells.add(tell);
       return [option ? `« ${option.slice(0, 120)} »${reason ? ` (${reason})` : ""}` : text];
     });
