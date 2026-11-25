@@ -139,6 +139,15 @@ export async function register() {
   } catch (e) {
     console.error("[instrumentation] rappels de reconduction non démarrés :", (e as Error)?.message);
   }
+  // Bilan d'exploitation par e-mail (25/11/2026) : alertes du jour à 8 h (Zurich) si un seuil
+  // est franchi, bilan de la semaine le lundi. SQL seul, aucun appel au modèle ; une seule
+  // instance par jour (app_meta). Actif avec OPS_DIGEST_ENABLED=1.
+  try {
+    const { startOpsDigestScheduler } = await import("@/lib/ops-digest");
+    startOpsDigestScheduler();
+  } catch (e) {
+    console.error("[instrumentation] bilan d'exploitation non démarré :", (e as Error)?.message);
+  }
   // Reçus Cortex après paiement (le reçu Stripe porte la marque du compte partagé) :
   // reprise toutes les 5 minutes de ce que le webhook n'a pas pu envoyer.
   try {

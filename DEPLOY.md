@@ -561,6 +561,46 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   (`renewal_reminder.disabled`). **Limite** : l'alerte passe par Resend. Si
   c'est Resend qui refuse (clé révoquée, domaine non vérifié), elle ne part
   pas, et il ne reste que `renewal_alert.not_sent` dans les logs.
+- **Bilan d'exploitation par e-mail** (`lib/ops-digest`, sans appel au modèle) :
+  avec `OPS_DIGEST_ENABLED=1`, le serveur passe chaque jour à 8 h (heure de
+  Zurich, `OPS_DIGEST_HOUR`). Un mail part seulement si un seuil est franchi sur
+  les dernières 24 h ; le lundi, il part toujours, avec le bilan des 7 derniers
+  jours : volumes, échecs, remboursements, coût du modèle face au facturé, durées,
+  étudiants touchés, pistes d'optimisation. Destinataire : `OPS_DIGEST_TO`, à
+  défaut celui des alertes de dépense. Un seul envoi par jour, même avec plusieurs
+  instances (clé `ops_digest:<jour>` dans `app_meta`, seule écriture du bilan).
+  Agrégats tous comptes confondus : ni adresse, ni compte, ni nom de cours dans le
+  mail. Seuils (défauts) :
+
+  | Variable | Défaut | Alerte quand |
+  |---|---|---|
+  | `OPS_ALERT_FAIL_RATE` / `OPS_ALERT_FAIL_MIN_JOBS` | `0.05` / `5` | plus de 5 % d'échecs sur au moins 5 jobs terminés |
+  | `OPS_ALERT_REFUNDS_MIN` | `1` | au moins un remboursement automatique |
+  | `OPS_ALERT_SLOW_FACTOR` / `OPS_ALERT_SLOW_MIN_JOBS` | `2` / `3` | un job plus de 2 × la médiane de son type (7 jours, au moins 3 jobs) |
+  | `OPS_ALERT_COST_CAP_RATIO` | `0.8` | coût du modèle d'un job > 80 % de crédits × `JOB_SPEND_CAP_USD_PER_CREDIT` |
+  | `OPS_ALERT_STUCK_MIN` | `60` | un job « running » sans mise à jour depuis 60 min |
+  | (aucune) | 2 × `STORAGE_MIN_FREE_PERCENT` | volume sous 20 % libres, même seuil que l'alerte Sentry |
+  | `OPS_DB_LIMIT_MB` / `OPS_ALERT_DB_RATIO` | `0` (non mesuré) / `0.8` | base Postgres au-delà de 80 % de la limite déclarée |
+
+  Liens du mail : `OPS_SENTRY_URL`, `OPS_RAILWAY_URL`. Essai à la main, dans le
+  conteneur : `railway ssh --service cortex-app -- npx tsx scripts/ops-digest.ts --test`
+  (`--dry-run` affiche le mail sans l'envoyer).
+- **Alerte Railway immédiate** (`lib/railway-webhook`, sans appel au modèle) :
+  `POST /api/ops/railway-webhook?token=⟨RAILWAY_WEBHOOK_TOKEN⟩`. Sans
+  `RAILWAY_WEBHOOK_TOKEN`, le point répond 404 ; jeton faux, 401. Railway →
+  projet → Settings → Webhooks : coller cette URL (jeton long et aléatoire, propre
+  à ce point : il peut apparaître dans les journaux d'accès). Sur
+  `Deployment.failed`, `Deployment.crashed`, `Deployment.oom_killed` et
+  `Monitor.triggered`, un mail court part aussitôt au destinataire du bilan
+  (service, environnement, événement, heure, lien Railway) ; les autres
+  événements sont ignorés. Corps borné à 64 ko. Au plus un mail par
+  environnement, service et type toutes les 15 min, même avec plusieurs
+  instances (clés `railway_webhook:…` dans `app_meta`, purgées après un jour).
+  Exempté du rate-limit par IP. Limite : un plantage de `cortex-app` est signalé
+  par `cortex-app` lui-même ; Railway réessaie 3 fois, mais pendant une boucle de
+  plantages le mail peut ne pas partir (Sentry et le bilan du lendemain restent).
+  Le bouton « Test Webhook » de Railway envoie un `Deployment.failed` fictif : un
+  mail doit partir.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
