@@ -13,6 +13,8 @@ import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
 import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
 import { assertLlmAuthorized, currentLlmProof } from "./authorization";
+import { OWN_LLM_CODES } from "./errors";
+import { reportFailure } from "@/lib/failure-report";
 
 /**
  * Point d'entrée UNIQUE des appels LLM de l'app.
@@ -190,6 +192,11 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
     inc("cortex_llm_calls_total", { ...labels, result: code });
     observe("cortex_llm_duration_ms", Date.now() - t0, labels);
     log("warn", "llm.error", { ...labels, code, message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    // Panne du fournisseur après les relances. Dans un job, la fin du job la signale avec son code
+    // (lib/jobs) ; un refus voulu (plafond, quota, crédits) ou une annulation n'est pas une panne.
+    if (!job && !OWN_LLM_CODES.has(code) && code !== "ABORTED") {
+      reportFailure({ failure: "llm_failed", level: "warning", code, extra: { provider: provider.name }, exception: e });
+    }
     throw e;
   }
 }
