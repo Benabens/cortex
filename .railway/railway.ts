@@ -110,6 +110,7 @@ export default defineRailway(() => {
       PUBLISHER_EMAIL: preserve(),
       RAILWAY_DEPLOYMENT_DRAINING_SECONDS: preserve(),
       RAILWAY_RUN_UID: preserve(),
+      RAILWAY_WEBHOOK_TOKEN: preserve(),
       RATE_LIMIT_PER_MIN: preserve(),
       REDIRECT_FROM_HOSTS: preserve(),
       RESEND_API_KEY: preserve(),

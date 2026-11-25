@@ -585,6 +585,18 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   Liens du mail : `OPS_SENTRY_URL`, `OPS_RAILWAY_URL`. Essai à la main, dans le
   conteneur : `railway ssh --service cortex-app -- npx tsx scripts/ops-digest.ts --test`
   (`--dry-run` affiche le mail sans l'envoyer).
+- **Alerte Railway immédiate** (`lib/railway-webhook`, sans appel au modèle) :
+  `POST /api/ops/railway-webhook?token=⟨RAILWAY_WEBHOOK_TOKEN⟩`. Sans
+  `RAILWAY_WEBHOOK_TOKEN`, le point répond 404 ; jeton faux, 401. Railway →
+  projet → Settings → Webhooks : coller cette URL (jeton long et aléatoire, propre
+  à ce point : il peut apparaître dans les journaux d'accès). Sur
+  `Deployment.failed`, `Deployment.crashed`, `Deployment.oom_killed` et
+  `Monitor.triggered`, un mail court part aussitôt au destinataire du bilan
+  (service, environnement, événement, heure, lien Railway) ; les autres
+  événements sont ignorés. Corps borné à 64 ko. Au plus un mail par
+  environnement, service et type toutes les 15 min, même avec plusieurs
+  instances (clés `railway_webhook:…` dans `app_meta`). Le bouton « Test
+  Webhook » de Railway envoie un `Deployment.failed` fictif : un mail doit partir.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)

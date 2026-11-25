@@ -26,7 +26,7 @@ const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
 // /verify-request et /signout : atteintes AVANT ou PENDANT la perte de session (lien
 // magique envoyé, déconnexion en cours) — jamais de session à ce moment-là.
-const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/verify-request", "/signout", "/api/health", "/api/relais", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/",
+const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/verify-request", "/signout", "/api/health", "/api/relais", "/api/metrics", "/api/billing/webhook", "/api/ops/railway-webhook", "/_next", "/favicon", "/brand/",
   // Outil gratuit sans compte (lib/exam-topics) : page, résultats partageables et son API.
   "/whats-on-my-exam", "/api/exam-topics"];
 

@@ -446,8 +446,8 @@ function links(): { text: string; html: string } {
   };
 }
 
-/** Destinataire : OPS_DIGEST_TO, sinon l'adresse des alertes du propriétaire. */
-async function recipient(): Promise<string | null> {
+/** Destinataire : OPS_DIGEST_TO, sinon l'adresse des alertes du propriétaire (aussi celui du webhook Railway). */
+export async function opsRecipient(): Promise<string | null> {
   const to = process.env.OPS_DIGEST_TO?.trim();
   if (to) return to;
   const { ownerAlertRecipient } = await import("@/lib/billing/owner-alert");
@@ -463,7 +463,7 @@ export async function runOpsDigest(deps: Deps = {}): Promise<DigestResult> {
   if (!manual && process.env.OPS_DIGEST_ENABLED !== "1") return { status: "disabled" };
   const z = zurich(now);
   if (!manual && z.hour < digestThresholds().hour) return { status: "too_early" };
-  const to = await recipient();
+  const to = await opsRecipient();
   if (!to) return { status: "no_recipient" };
 
   const key = `ops_digest:${z.day}`;
