@@ -206,3 +206,18 @@ test("interrupteur : CORTEX_VERIFY_V2 ne s'active qu'avec « 1 »", async () => 
     assert.ok(!prompts.some((p) => /RÉSOLUTION INDÉPENDANTE/.test(p)), `CORTEX_VERIFY_V2=${JSON.stringify(v)}`);
   }
 });
+
+test("une réparation qui contient une primitive refusée par tex-guard n'est jamais appliquée (sinon tout l'examen tombe au PDF)", async () => {
+  // Banc du 24/11/2026 (CS-202, Opus 5.5) : un corrigé réparé écrivait « \read » (l'appel système) ;
+  // tex-guard refusait le source au rendu et l'examen entier échouait (0/8, crédits rendus).
+  const bad = FIXED.replace("Une requête ARP", "Après \\read{} du descripteur, une requête ARP");
+  for (const v2 of ["1", undefined]) {
+    if (v2) process.env.CORTEX_VERIFY_V2 = v2; else delete process.env.CORTEX_VERIFY_V2;
+    reply.compare = (p) => (/= 1\{,\}3/.test(p) ? { verdict: "wrong", issue: "1.2 faux", corrected_solution_tex: bad } : { verdict: "ok" });
+    const { spec } = await harden(0);
+    assert.equal(spec.questions[0].solution_tex, SOLUTION, `CORTEX_VERIFY_V2=${v2 ?? "absent"} : corrigé d'origine gardé`);
+    reply.compare = () => ({ verdict: "ambiguous", issue: "cache ARP", corrected_statement_tex: STATEMENT_FIXED + " \\input{/etc/passwd}", corrected_solution_tex: FIXED });
+    const amb = await harden(0);
+    assert.equal(amb.spec.questions[0].statement_tex, STATEMENT, `CORTEX_VERIFY_V2=${v2 ?? "absent"} : énoncé d'origine gardé`);
+  }
+});
