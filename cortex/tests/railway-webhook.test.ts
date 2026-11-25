@@ -145,7 +145,7 @@ test("rafale : un autre type, un autre service ou un autre environnement passe q
 });
 
 test("payload inattendu : type inconnu ignoré (2xx), JSON invalide ou non-objet refusé (400), jamais de mail", async () => {
-  for (const type of ["Deployment.success", "Deployment.building", "Volume.alert", "", 42]) {
+  for (const type of ["Deployment.success", "Deployment.building", "Volume.alert", "", 42, "constructor", "toString", "__proto__", "hasOwnProperty"]) {
     const res = await hook(req(event(type as string)));
     assert.ok(res.status >= 200 && res.status < 300, String(type));
   }
@@ -192,4 +192,30 @@ test("proxy : le webhook est joignable sans session, le reste de /api/ops non", 
   const { publicPath } = await import("../proxy");
   assert.equal(publicPath("/api/ops/railway-webhook"), true);
   for (const p of ["/api/ops", "/api/ops/digest", "/api/opsx"]) assert.equal(publicPath(p), false, p);
+});
+
+test("proxy : le webhook n'est pas soumis au rate-limit par IP (l'alerte arrive quand le trafic monte)", async () => {
+  (process.env as Record<string, string | undefined>).AUTH_ENABLED = "1";
+  process.env.RATE_LIMIT_PER_MIN = "2";
+  const { NextRequest } = await import("next/server");
+  const { default: proxy } = await import("../proxy");
+  const call = (p: string) => proxy(new NextRequest(`http://cortex.test${p}`, { method: "POST", headers: { "x-forwarded-for": "203.0.113.9" } }));
+  const statuses: number[] = [];
+  for (let i = 0; i < 5; i++) statuses.push((await call("/api/ops/railway-webhook?token=x")).status);
+  assert.ok(!statuses.includes(429), String(statuses));
+  const other: number[] = [];
+  for (let i = 0; i < 5; i++) other.push((await call("/api/metrics")).status); // public, mais limité
+  assert.ok(other.includes(429), "le reste reste limité");
+  delete process.env.RATE_LIMIT_PER_MIN;
+});
+
+test("les clés d'anti-rafale envoyées il y a plus d'un jour sont purgées au prochain envoi", async () => {
+  await hook(req(event("Deployment.crashed")), minutes(-2 * 24 * 60));
+  await hook(req(event("Deployment.failed")), minutes(-30));
+  await hook(req(event("Deployment.oom_killed")));
+  const { authAll } = await import("../db/auth-store");
+  const keys = (await authAll<{ key: string }>(`SELECT key FROM app_meta WHERE key LIKE 'railway_webhook:%'`)).map((r) => r.key);
+  assert.equal(sent.length, 3);
+  assert.equal(keys.length, 2, keys.join(", "));
+  assert.ok(!keys.some((k) => k.includes("Deployment.crashed")), "la clé d'avant-hier est partie");
 });

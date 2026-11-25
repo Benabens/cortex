@@ -1,8 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
-import { authGet } from "@/db/auth-store";
-import { claimOnce, isSent, releaseClaim, settleClaim, STALE_CLAIM_MS } from "@/lib/claim-once";
+import { authRun } from "@/db/auth-store";
+import { claimOnce, peekClaim, releaseClaim, settleClaim, STALE_CLAIM_MS } from "@/lib/claim-once";
 import type { EmailOutcome } from "@/lib/email";
 import { log } from "@/lib/metrics";
+import { safeEqual } from "@/lib/oauth/secrets";
 import { PayloadTooLarge, readText } from "@/lib/upload-limit";
 
 /**
@@ -13,12 +13,17 @@ import { PayloadTooLarge, readText } from "@/lib/upload-limit";
  * rien d'autre n'est fait.
  *
  * - Désactivé (404) tant que RAILWAY_WEBHOOK_TOKEN n'est pas posée ; jeton de l'URL comparé en
- *   temps constant, 401 sinon — AVANT de lire le corps. Le jeton est en query string (choix de
- *   Ben : c'est ce que le formulaire Railway sait poser le plus simplement) ; il peut donc
- *   apparaître dans les journaux d'accès, d'où un jeton propre à ce point, sans autre pouvoir.
+ *   temps constant, 401 sinon — AVANT de lire le corps. Le jeton est en query string (décision
+ *   de Ben, 25/11 ; Railway saurait aussi poser un en-tête, cf. /api/metrics qui le refuse en
+ *   URL) : il peut apparaître dans les journaux d'accès, d'où un jeton propre à ce point, sans
+ *   autre pouvoir. Sentry ne le voit pas (scrubEvent coupe la query string).
+ * - Limite : un plantage de cortex-app est signalé… à cortex-app. Railway réessaie (3 fois) une
+ *   réponse hors 2xx ; pendant une boucle de plantages, le mail peut ne jamais partir.
  * - Corps borné à 64 ko (octets réels, pas Content-Length).
  * - Anti-rafale : au plus un mail par environnement, service et type toutes les 15 min, entre
  *   process (claim-once sur une clé par quart d'heure + regard sur le quart d'heure précédent).
+ *   Deux process à cheval sur la bascule du quart d'heure peuvent, rarement, envoyer chacun le
+ *   leur. Les clés envoyées de plus d'un jour sont purgées à chaque envoi.
  * - Le mail ne reprend du corps que des noms nettoyés et bornés (service, environnement), des
  *   identifiants au format UUID (pour le lien) et la gravité : jamais l'auteur ni le message
  *   du commit, ni le nom de l'espace de travail.
@@ -27,24 +32,18 @@ import { PayloadTooLarge, readText } from "@/lib/upload-limit";
 const MAX_BODY = 64 * 1024;
 const WINDOW_MS = 15 * 60_000;
 
-const EVENTS: Record<string, string> = {
-  "Deployment.failed": "déploiement en échec",
-  "Deployment.crashed": "service planté",
-  "Deployment.oom_killed": "mémoire épuisée (OOM)",
-  "Monitor.triggered": "alerte de monitor déclenchée",
-};
+/** Une Map, pas un objet : `type: "constructor"` ne doit pas trouver un libellé hérité. */
+const EVENTS = new Map<string, string>([
+  ["Deployment.failed", "déploiement en échec"],
+  ["Deployment.crashed", "service planté"],
+  ["Deployment.oom_killed", "mémoire épuisée (OOM)"],
+  ["Monitor.triggered", "alerte de monitor déclenchée"],
+]);
 
 type Mail = { to: string; subject: string; text: string; idempotencyKey?: string };
 type Deps = { now?: Date; send?: (m: Mail) => Promise<EmailOutcome> };
 
 const reply = (status: number, body?: Record<string, string>) => body ? Response.json(body, { status }) : new Response(null, { status });
-
-function tokenMatches(provided: string | null, expected: string): boolean {
-  if (!provided) return false;
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuid = (v: unknown): string | null => (typeof v === "string" && UUID.test(v) ? v.toLowerCase() : null);
@@ -65,15 +64,12 @@ function zurichTime(d: Date): string {
 
 /** Le quart d'heure précédent a-t-il déjà envoyé (ou envoie-t-il) depuis moins de 15 min ? */
 async function recentlySent(key: string, now: Date): Promise<boolean> {
-  const held = (await authGet<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, key))?.value;
+  const held = await peekClaim(key);
   if (!held) return false;
-  if (isSent(held)) {
-    const at = Date.parse(held.split(" ")[1] ?? "");
-    return !Number.isFinite(at) || now.getTime() - at < WINDOW_MS;
-  }
-  // Envoi en cours ailleurs : récent tant que sa réclamation n'est pas celle d'un process mort.
-  const since = Date.parse(held.split(" ")[0]);
-  return !(Date.now() - since > STALE_CLAIM_MS);
+  if (held.state === "sent") return held.at === null || now.getTime() - held.at < WINDOW_MS;
+  // Envoi en cours ailleurs : récent tant que sa réclamation n'est pas celle d'un process mort
+  // (même horloge que claimOnce pour en juger).
+  return !(Date.now() - held.since > STALE_CLAIM_MS);
 }
 
 async function defaultSend(m: Mail): Promise<EmailOutcome> {
@@ -85,7 +81,7 @@ async function defaultSend(m: Mail): Promise<EmailOutcome> {
 export async function handleRailwayWebhook(req: Request, deps: Deps = {}): Promise<Response> {
   const expected = process.env.RAILWAY_WEBHOOK_TOKEN?.trim();
   if (!expected) return reply(404);
-  if (!tokenMatches(new URL(req.url).searchParams.get("token"), expected)) return reply(401);
+  if (!safeEqual(new URL(req.url).searchParams.get("token") ?? "", expected)) return reply(401);
 
   let raw: string;
   try {
@@ -99,7 +95,7 @@ export async function handleRailwayWebhook(req: Request, deps: Deps = {}): Promi
   if (!body || typeof body !== "object" || Array.isArray(body)) return reply(400);
 
   const type = field(body, "type");
-  const label = typeof type === "string" ? EVENTS[type] : undefined;
+  const label = typeof type === "string" ? EVENTS.get(type) : undefined;
   if (!label) return reply(200, { status: "ignored" });
 
   const now = deps.now ?? new Date();
@@ -142,17 +138,19 @@ export async function handleRailwayWebhook(req: Request, deps: Deps = {}): Promi
     "",
     `Railway : ${link}`,
     "",
-    "Au plus un mail par service et type d'événement toutes les 15 min.",
+    "Au plus un mail par environnement, service et type d'événement toutes les 15 min.",
   ].join("\n");
   const subject = `Cortex — Railway : ${label} · ${svcName} (${envName})`;
 
   const out = await (deps.send ?? defaultSend)({ to, subject, text, idempotencyKey: `${key}:${claim.chain}` });
   if (out.ok) {
     await settleClaim(key, claim.token, `sent ${now.toISOString()}`);
+    // Les clés envoyées de plus d'un jour ne servent plus (seul le quart d'heure précédent est relu).
+    await authRun(`DELETE FROM app_meta WHERE key LIKE 'railway_webhook:%' AND value LIKE 'sent %' AND value < ?`, `sent ${new Date(now.getTime() - 86_400_000).toISOString()}`);
     return reply(200, { status: "sent" });
   }
   log("error", "railway_webhook.send_failed", { type, reason: out.reason.slice(0, 200), uncertain: !!out.uncertain, status: out.status });
-  // Peut-être parti : la clé reste prise (la reprise passe par la même chaîne, donc la même clé d'idempotence).
+  // Peut-être parti : la clé reste prise, aucun second mail dans ce quart d'heure.
   if (!out.uncertain) await releaseClaim(key, claim.token);
   return reply(502);
 }

@@ -7,8 +7,9 @@ import { authGet, authRun } from "@/db/auth-store";
  * dont la clé primaire ne laisse passer que lui. Sert aux alertes de dépense
  * (lib/billing/spend-alerts, et par compte et par heure lib/billing/account-spend-alerts),
  * au rappel de reconduction de l'abonnement annuel (lib/billing/renewal-reminders), à
- * l'alerte de ses échecs (lib/billing/renewal-alerts) et au reçu Cortex après paiement
- * (lib/billing/receipts).
+ * l'alerte de ses échecs (lib/billing/renewal-alerts), au reçu Cortex après paiement
+ * (lib/billing/receipts), au bilan d'exploitation (lib/ops-digest) et aux alertes du
+ * webhook Railway (lib/railway-webhook).
  *
  * Valeur de la ligne : un jeton « date chaîne essai » tant que l'envoi est en
  * cours, puis « sent » (suivi ou non de la date d'envoi) une fois parti. La
@@ -58,4 +59,18 @@ export async function settleClaim(key: string, token: string, value: string = SE
 /** Rend la clé après un refus net (rien n'est parti). Seul le détenteur du jeton efface : un process repris entre-temps garde son travail. */
 export async function releaseClaim(key: string, token: string): Promise<void> {
   await authRun(`DELETE FROM app_meta WHERE key = ? AND value = ?`, key, token);
+}
+
+/**
+ * État d'une clé sans la réclamer : envoyée (`at` = date d'envoi, si la valeur la porte), en
+ * cours depuis `since`, ou libre (null). Le format de la valeur reste l'affaire de ce module.
+ */
+export async function peekClaim(key: string): Promise<{ state: "sent"; at: number | null } | { state: "pending"; since: number } | null> {
+  const held = (await authGet<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, key))?.value;
+  if (held === undefined) return null;
+  if (isSent(held)) {
+    const at = Date.parse(held.split(" ")[1] ?? "");
+    return { state: "sent", at: Number.isFinite(at) ? at : null };
+  }
+  return { state: "pending", since: Date.parse(held.split(" ")[0]) };
 }

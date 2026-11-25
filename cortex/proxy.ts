@@ -145,8 +145,10 @@ async function guarded(req: NextRequest): Promise<NextResponse> {
 
 /** Chemins JAMAIS soumis au rate-limit : le healthcheck de la plateforme (le
  *  limiter provoquerait une boucle de redémarrage), le webhook de paiement
- *  (Stripe réessaie et le client ne serait pas crédité) et les assets Next. */
-const RL_EXEMPT = ["/api/health", "/api/billing/webhook", "/_next", "/favicon"];
+ *  (Stripe réessaie et le client ne serait pas crédité), le webhook Railway (l'alerte
+ *  d'un incident arrive justement quand le trafic monte ; jeton long, sans autre pouvoir)
+ *  et les assets Next. */
+const RL_EXEMPT = ["/api/health", "/api/billing/webhook", "/api/ops/railway-webhook", "/_next", "/favicon"];
 
 export default function proxy(req: NextRequest) {
   // Le rate-limit protège aussi une instance SANS auth (démo ouverte) : il est

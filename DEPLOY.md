@@ -595,8 +595,12 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   (service, environnement, événement, heure, lien Railway) ; les autres
   événements sont ignorés. Corps borné à 64 ko. Au plus un mail par
   environnement, service et type toutes les 15 min, même avec plusieurs
-  instances (clés `railway_webhook:…` dans `app_meta`). Le bouton « Test
-  Webhook » de Railway envoie un `Deployment.failed` fictif : un mail doit partir.
+  instances (clés `railway_webhook:…` dans `app_meta`, purgées après un jour).
+  Exempté du rate-limit par IP. Limite : un plantage de `cortex-app` est signalé
+  par `cortex-app` lui-même ; Railway réessaie 3 fois, mais pendant une boucle de
+  plantages le mail peut ne pas partir (Sentry et le bilan du lendemain restent).
+  Le bouton « Test Webhook » de Railway envoie un `Deployment.failed` fictif : un
+  mail doit partir.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
