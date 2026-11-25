@@ -75,6 +75,11 @@ function volume(): { free: number; total: number } | null {
   return disk && disk.total > 0 ? disk : null;
 }
 
+/** Espace du volume de données (octets libres et total), ou null hors mesure : lu par le bilan d'exploitation. */
+export function volumeSpace(): { free: number; total: number } | null {
+  return volume();
+}
+
 /** Marge d'espace libre exigée d'un envoi (fraction du volume). */
 function minFreeRatio(): number {
   return _statfs ? MIN_FREE_RATIO : storageMinFreeRatio();
