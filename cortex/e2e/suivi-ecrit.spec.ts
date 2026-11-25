@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect, type Page, type Route } from "@playwright/test";
-import { loginPersona } from "./helpers";
+import { expectNoHorizontalScroll, loginPersona } from "./helpers";
 import { stageTracker, type StageInfo } from "../lib/job-stage";
 import { stageText } from "../lib/i18n/job-text";
 
@@ -18,6 +18,8 @@ import { stageText } from "../lib/i18n/job-text";
  */
 
 const JOB_ID = 9301;
+/** Ce que la carte doit dire (messages/fr.json : jobText.stage.check + jobText.stageCount). */
+const STEP = "Vérification des questions · 4/4 exercices prêts";
 
 /** Phrases du moteur (lib/exam.ts), deux lots de deux exercices ; le lot 2 finit d'écrire après le début des vérifications. */
 const ENGINE_STEPS = [
@@ -46,7 +48,7 @@ function runningJob(course: string, startedAt: number) {
   return {
     id: JOB_ID, type: "exam", status: "verifying", progress: 88, target: null, course, courseLabel: course,
     currentStep: stageText(stepInfo, "fr"), stepInfo,
-    eta: "Moins d’une minute", etaRange: { lowMs: 20_000, highMs: 50_000 }, etaLate: false,
+    eta: "moins d'une minute", etaRange: { lowMs: 20_000, highMs: 50_000 }, etaLate: false,
     createdAt: sqlTime(startedAt), charged: true,
   };
 }
@@ -58,9 +60,9 @@ async function serveRunningJob(page: Page, job: ReturnType<typeof runningJob>) {
     if (url.pathname === "/api/jobs/running") return route.fulfill({ json: { jobs: [job] } });
     if (url.pathname === `/api/jobs/${JOB_ID}`) return route.fulfill({ json: job });
     if (url.pathname === "/api/jobs" && url.searchParams.get("type") === "exam") {
-      return route.fulfill({ json: { active: { id: JOB_ID, type: "exam", target: null } } });
+      return route.fulfill({ json: { active: { id: JOB_ID, type: "exam", target: null }, recent: [] } });
     }
-    if (url.pathname === "/api/jobs") return route.fulfill({ json: { active: null } });
+    if (url.pathname === "/api/jobs") return route.fulfill({ json: { active: null, recent: [] } });
     return route.continue();
   });
 }
@@ -77,11 +79,6 @@ async function newWrittenCourse(page: Page): Promise<string> {
   });
   expect(course).toBeTruthy();
   return course!;
-}
-
-async function expectNoHorizontalScroll(page: Page) {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow, "la page défile horizontalement").toBeLessThanOrEqual(1);
 }
 
 const SHOT_VARIANTS = [
@@ -101,7 +98,7 @@ test("examen écrit : la carte dit « 4/4 exercices prêts » à la fin des vér
   const card = page.getByRole("region", { name: "Suivi de la génération" });
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute("data-stage", "check");
-  await expect(card.getByText("Vérification des questions · 4/4 exercices prêts")).toBeVisible();
+  await expect(card.getByText(STEP)).toBeVisible();
   await expect(card.getByText("Moins d’une minute")).toBeVisible();
   await expect(card.getByText(/Lancée il y a 2 min/)).toBeVisible();
   await expect(card.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "88");
@@ -121,9 +118,9 @@ test("examen écrit : la carte dit « 4/4 exercices prêts » à la fin des vér
       deviceScaleFactor: v.dpr, isMobile: v.mobile, hasTouch: v.mobile,
     });
     const shot = await ctx.newPage();
-    await serveRunningJob(shot, job);
+    await serveRunningJob(shot, runningJob(course, Date.now() - 141_000));
     await shot.goto(`/examens?course=${course}`);
-    await expect(shot.getByRole("region", { name: "Suivi de la génération" }).getByText(job.currentStep)).toBeVisible();
+    await expect(shot.getByRole("region", { name: "Suivi de la génération" }).getByText(STEP)).toBeVisible();
     // La pastille du haut montre le job le temps que la carte se monte, puis s'efface (useShowJob).
     await expect(shot.getByRole("link", { name: /Vérification des questions/ })).toHaveCount(0);
     await shot.waitForLoadState("networkidle");
