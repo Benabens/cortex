@@ -474,7 +474,7 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   try {
     // Un verdict par sous-question, sinon rien n'est vérifié (jamais de faux « vérifié »).
     const covers = (v: typeof res) => b.parts.every((_, i) => v.verdicts?.some((x) => x.index === i));
-    res = await completeJson({ system, prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
+    res = await completeJson({ system, prompt, model: "opus", effort: hardTaskEffort("judgeBlock"), timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
       check: (v: typeof res) => (!Array.isArray(v?.verdicts) ? "le champ « verdicts » manque" : covers(v) ? null : `un verdict par sous-question (index 0 à ${b.parts.length - 1})`),
     });
   } catch {

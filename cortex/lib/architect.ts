@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { repairExerciseClosers } from "@/lib/tex-closers";
 
 /**
  * L'ARCHITECTE D'EXAMEN (pipeline multi-passes pour UN exercice ciblé).
@@ -218,7 +219,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     JSON.stringify(DESIGN_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("P1 : conception du piège (étude de la vraie page + design)…", 22);
-  const d = await completeJson<DesignBrief>({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 300_000, json: { schema: DESIGN_SCHEMA } });
+  const d = await completeJson<DesignBrief>({ prompt, model: "opus", effort: hardTaskEffort("designTrap"), timeoutMs: 300_000, json: { schema: DESIGN_SCHEMA } });
   // BLINDAGE : le modèle peut omettre un champ du schéma ; des défauts sûrs évitent
   // un crash `undefined.join/.map` en P2 (constaté sur un run réel : 3 questions perdues).
   return {
@@ -281,8 +282,8 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
   ].filter((l) => l != null).join("\n");
   step("P2 : rédaction de l'énoncé multi-étapes (format du cours + piège)…", 38);
   // Avec figure, figure_spec est un objet libre : le fournisseur repasse en texte libre (lib/llm).
-  const q = await completeJson<ExamQuestion & { figure_spec?: FigureSpec }>({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 480_000, json: { schema }, ...WRITE_LIMITS }, { retryTruncated: false });
-  return { ...q, category: a.category, points: pts };
+  const q = await completeJson<ExamQuestion & { figure_spec?: FigureSpec }>({ prompt, model: "opus", effort: hardTaskEffort("writeFromDesign"), timeoutMs: 480_000, json: { schema }, ...WRITE_LIMITS }, { retryTruncated: false });
+  return repairExerciseClosers({ ...q, category: a.category, points: pts });
 }
 
 /**
@@ -326,7 +327,7 @@ async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string 
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(AUDIT_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  return completeJson<Audit>({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 340_000, json: { schema: AUDIT_SCHEMA } });
+  return completeJson<Audit>({ prompt, model: "opus", effort: hardTaskEffort("adversarialAudit"), timeoutMs: 340_000, json: { schema: AUDIT_SCHEMA } });
 }
 
 /** P3 — révision chirurgicale d'après l'audit (durcir le piège / réparer, pas réécrire de zéro). */
@@ -358,8 +359,8 @@ async function reviseFromAudit(a: Archetype, q: ExamQuestion, audit: Audit, refI
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points} (version durcie/réparée). Le corrigé doit rester JUSTE. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  const r = await completeJson<ExamQuestion>({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 480_000, json: { schema: ONE_EX_SCHEMA }, ...WRITE_LIMITS }, { retryTruncated: false });
-  return { ...r, category: a.category, points: q.points };
+  const r = await completeJson<ExamQuestion>({ prompt, model: "opus", effort: hardTaskEffort("reviseFromAudit"), timeoutMs: 480_000, json: { schema: ONE_EX_SCHEMA }, ...WRITE_LIMITS }, { retryTruncated: false });
+  return repairExerciseClosers({ ...r, category: a.category, points: q.points });
 }
 
 export type ArchitectAudit = Audit;

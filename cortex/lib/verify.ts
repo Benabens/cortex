@@ -10,6 +10,7 @@ import { verifyV2Enabled } from "@/lib/verif-switches";
 import { examsDir } from "@/lib/paths";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import path from "node:path";
+import { repairMarkdownClosers } from "@/lib/tex-closers";
 
 export type VerifyResult = {
   verdict: "ok" | "wrong" | "ambiguous";
@@ -251,7 +252,7 @@ async function verifyOneLegacy(q: ExamQuestion, opts?: VerifyOpts): Promise<Veri
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
     // Sans limite propre, l'API coupait à 16 000 tokens la vérification qui trouve l'erreur et
     // réécrit le corrigé (banc du 17/11 : 65 % d'entre elles) → exercice livré « non vérifié ».
-    const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort(), timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
+    const text = await completeText({ prompt, model: "opus", effort: hardTaskEffort("verifyOneLegacy"), timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
     const r = extractJson<VerifyResult>(text);
     if (!r || !r.verdict) return null;
     // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
@@ -336,11 +337,11 @@ function isCompleteCorrection(corrected: string, statement: string): boolean {
  * garde les mêmes sous-questions : une réparation qui en perd ou en ajoute n'est pas une réparation.
  */
 function repairOf(q: ExamQuestion, r: VerifyResult): ExamQuestion | null {
-  const sol = r.corrected_solution_tex?.trim() ?? "";
+  const sol = repairMarkdownClosers(r.corrected_solution_tex?.trim() ?? "");
   if (sol.length <= 10) return null;
   if (r.verdict === "wrong") return isCompleteCorrection(sol, q.statement_tex) ? { ...q, solution_tex: sol } : null;
   if (r.verdict !== "ambiguous") return null;
-  const st = r.corrected_statement_tex?.trim() ?? "";
+  const st = repairMarkdownClosers(r.corrected_statement_tex?.trim() ?? "");
   if (st.length < q.statement_tex.length / 2 || findTexHazards(st).length) return null;
   if (subquestionLabels(st).join("|") !== subquestionLabels(q.statement_tex).join("|")) return null;
   return isCompleteCorrection(sol, st) ? { ...q, statement_tex: st, solution_tex: sol } : null;
@@ -391,7 +392,7 @@ export async function verifyAndHarden(
     if (!res) verified = null;
     else if (res.verdict === "ok" && !res.violates_exclusion && !res.too_easy) verified = 1;
     else if (res.verdict === "wrong" && res.corrected_solution_tex && res.corrected_solution_tex.length > 10 && isCompleteCorrection(res.corrected_solution_tex, q.statement_tex)) {
-      q.solution_tex = res.corrected_solution_tex;
+      q.solution_tex = repairMarkdownClosers(res.corrected_solution_tex);
       verified = 1;
       fixedSol = true;
     } else if (res.violates_exclusion) {
