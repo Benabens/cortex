@@ -20,6 +20,7 @@ import path from "node:path";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds } from "@/lib/source-scope";
 import { examSummaryLabel } from "@/lib/exam-summary";
+import { currentLocale } from "@/lib/i18n/current";
 import { examKindLabel } from "@/lib/exam-template";
 
 const EXAM_DIR = () => examsDir();
@@ -300,7 +301,9 @@ export async function listExams() {
     `SELECT e.id, e.created_at, e.status, e.html_path, e.format_template, ${verifyCol} verify_summary,
             (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id)
               + (SELECT count(*) FROM qcm_items i WHERE i.exam_id = e.id)
-              + (SELECT count(*) FROM exam_blocks b WHERE b.exam_id = e.id) nq
+              + (SELECT count(*) FROM exam_blocks b WHERE b.exam_id = e.id) nq,
+            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nwritten,
+            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id AND q.verified = 1) nverified
      FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
      ORDER BY e.created_at DESC, e.id DESC`
   );
@@ -321,7 +324,8 @@ export async function listExams() {
       status: r.status,
       kind: qcm ? "qcm" as const : r.format_template === "blocks" ? "blocks" as const : "written" as const,
       questionCount: Number(r.nq ?? 0),
-      verifySummary: examSummaryLabel(r.verify_summary ?? null),
+      // Examen écrit : le compte vient de ses exercices, pas du rapport du moteur (lib/exam-summary).
+      verifySummary: examSummaryLabel(r.verify_summary ?? null, currentLocale(), { verified: Number(r.nverified ?? 0), total: Number(r.nwritten ?? 0) }),
       // Page en ligne, TOUJOURS ouvrable (examen 4 de CS-290 : sans PDF, la carte n'ouvrait rien).
       onlineUrl: online ? `/mock/${r.id}${courseQ()}` : url,
       url,

@@ -1361,6 +1361,11 @@
     "refund": "{credits, plural, one {# credit refunded} other {# credits refunded}}",
     "comment": "“{comment}”"
   },
+  "examSummary": {
+    "writtenAll": "{count, plural, one {# exercise verified} other {# exercises verified}}",
+    "writtenNone": "{count, plural, one {# exercise not verified} other {# exercises not verified}}",
+    "writtenPart": "{verified} of {total, plural, one {# exercise} other {# exercises}} verified"
+  },
   "examsPage": {
     "pdfFailed": "The PDF couldn’t be regenerated.",
     "deleteConfirm": "Delete exam #{id}? The generated PDF will be lost.",

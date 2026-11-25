@@ -1361,6 +1361,11 @@
     "refund": "{credits, number} crédit rendu",
     "comment": "« {comment} »"
   },
+  "examSummary": {
+    "writtenAll": "{count, plural, one {# exercice vérifié} other {# exercices vérifiés}}",
+    "writtenNone": "{count, plural, one {# exercice non vérifié} other {# exercices non vérifiés}}",
+    "writtenPart": "{verified, plural, one {# exercice vérifié} other {# exercices vérifiés}} sur {total}"
+  },
   "examsPage": {
     "pdfFailed": "Le PDF n’a pas pu être régénéré.",
     "deleteConfirm": "Supprimer l’examen #{id} ? Le PDF généré sera perdu.",
