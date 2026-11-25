@@ -3,6 +3,7 @@ import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
+import { reportFailure } from "@/lib/failure-report";
 import { refusal, type Refusal } from "@/lib/i18n/user-error";
 import { requestIp } from "@/lib/client-ip";
 import { claimFreeOffer } from "./free-offer";
@@ -545,6 +546,8 @@ export async function refundGeneration(
     });
   } catch (e) {
     log("warn", "credits.refund_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    // Un remboursement dû et pas appliqué : l'étudiant a payé pour rien, sans que personne le sache.
+    reportFailure({ failure: "refund_failed", level: "error", code: "refund_exception", jobType: kind });
     return 0;
   }
 }

@@ -21,6 +21,7 @@ import { INGEST_REPORT_ENV, ingestFailureMessage } from "../lib/ingest-report";
 import { jobErrorOf, type JobError } from "../lib/i18n/job-text";
 import { userError } from "../lib/i18n/user-error";
 import { readIngestReport } from "../lib/ingest-report-file";
+import { reportIngestProblems } from "../lib/failure-report";
 import { ingestMaxHeapMb, ingestTimeoutMs, spawnBounded } from "../lib/ingest-limits";
 import fs from "node:fs";
 import os from "node:os";
@@ -54,42 +55,15 @@ function finish(code: number): Promise<never> {
  * et du lecteur français.
  */
 async function fail(msg: string, info: JobError = userError("job_failed"), opts: { refund?: boolean } = {}): Promise<never> {
-  // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
-  // « done » aussi : un QCM annulé après livraison est clos par cancelJob avec ce qu'il contenait.
-  try { if (["canceled", "done"].includes((await getJob(jobId))?.status ?? "")) process.exit(0); } catch {}
-  try {
-    // « exam »/« qcm » SEULEMENT : leur progression PAR PHASE (lib/progress) peut afficher
-    // un pourcentage très avancé pour un échec immédiat — un lot QCM qui échoue vaut « son
-    // unité faite » pour l'ETA (progress.done("QCM", 1) dans lib/qcm.ts), ce qui gonfle
-    // l'avancement même à 0 question construite (constat prod 14/11, job 21 HUM-285 :
-    // plafond de dépense touché en 2 s, progress_pct affiché à 99). resultId n'est posé QUE
-    // par ces deux types (onExamReady) : sans lui, rien de livrable, 0 est le seul pourcentage
-    // honnête. Les autres types (ingest, prepare, format, blueprint…) avancent pas à pas
-    // (stepFields) : leur pourcentage à l'échec est déjà réel — ne JAMAIS l'écraser (régression
-    // du 14/11 : un prepare_course qui échoue après une ingestion réussie retombait à 0 %).
-    const current = await getJob(jobId);
-    const resetProgress = current && (current.type === "exam" || current.type === "qcm") && !current.resultId;
-    await setJob(jobId, { status: "error", error: msg, errorInfo: info, ...(resetProgress ? { progress: 0 } : {}) });
-    await logJob(jobId, "ERREUR : " + msg);
-  } catch {}
-  // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
-  // Étiquettes techniques seulement — le message de job peut citer un cours.
-  try {
-    const { captureError, flushErrorTracking } = await import("../lib/observability");
-    captureError(new Error(msg), { service: "worker", job: String(jobId) });
-    // L'envoi est asynchrone et le worker sort juste après : sans attente, l'erreur partait avec lui.
-    await flushErrorTracking();
-  } catch {}
-  // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier (idempotent — ref
-  // refund:job:…, et seulement si le débit a eu lieu) ; après des appels payants,
-  // en crédits offerts, que le budget lié au revenu borne. No-op sans BILLING_ENABLED.
+  // État, journal, remboursement et événement Sentry : lib/jobs recordJobFailure. Annulé entre-temps
+  // par l'utilisateur, ou déjà livré : cancelJob a statué, on sort sans rien écraser.
   // Un drill a déjà appliqué la règle des aides (lib/drill-job) : opts.refund = false.
-  if (opts.refund !== false) try {
-    const { refundJobCredits } = await import("../lib/jobs");
-    const { fmtCreditsBack } = await import("../lib/billing/credits");
-    const j = await getJob(jobId);
-    const back = j ? await refundJobCredits(j, "failed") : 0;
-    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.`, errorInfo: { ...info, creditsBackCenti: back } });
+  const { recordJobFailure } = await import("../lib/jobs");
+  if ((await recordJobFailure(jobId, msg, info, opts).catch(() => "failed")) === "skipped") process.exit(0);
+  // L'envoi est asynchrone et le worker sort juste après : sans attente, l'erreur partait avec lui.
+  try {
+    const { flushErrorTracking } = await import("../lib/observability");
+    await flushErrorTracking();
   } catch {}
   return finish(1);
 }
@@ -118,6 +92,7 @@ async function runIngestJob(target: string | null): Promise<void> {
       const report = readIngestReport(reportFile);
       fs.rmSync(reportFile, { force: true });
       if (report) await setJobReport(jobId, report).catch(() => {});
+      reportIngestProblems(report, (await getJob(jobId).catch(() => null))?.type ?? "ingest");
       for (const f of report?.files ?? []) read.add(f.path);
     }
     // Compte gratuit : un fichier arrivé pendant la lecture n'a pas été lu, et son original ne reste
@@ -340,10 +315,7 @@ async function main() {
       const { doneStep, settleShortfallDetail } = await import("../lib/jobs");
       const shortfall = await settleShortfallDetail(job, res.count + res.open, res.requested + res.openRequested);
       // PDF non compilé : dit, comme pour l'examen écrit (avant : silencieux, seul le .tex existait).
-      if (res.texError) {
-        await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, l'examen reste lisible dans l'app. Détail : ${res.texError.slice(0, 500)}`, errorInfo: userError("job_pdf_failed") });
-        await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
-      }
+      if (res.texError) await (await import("../lib/jobs")).recordPdfFailure(jobId, job.type, res.texError);
       await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, ...doneStep(shortfall, `Mock QCM #${res.id} — ${qcmExamSummary(res)}`) });
       await saveJobCheckpoint(jobId, null).catch(() => {}); // job livré : le point de reprise ne sert plus
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
@@ -419,11 +391,8 @@ async function main() {
           ? await generateLabExercise(job.target ?? "", { onStep })
           // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
           : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, paidCenti: job.type === "exam" ? costForJob("exam", job.target) : undefined, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number, order?: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order?.requested }); } });
-    if (res.texError) {
-      // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
-      await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}`, errorInfo: userError("job_pdf_failed") });
-      await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
-    }
+    // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
+    if (res.texError) await (await import("../lib/jobs")).recordPdfFailure(jobId, job.type, res.texError);
     const { doneStep, settleShortfallDetail } = await import("../lib/jobs");
     // Seul l'examen blanc compte ses questions (MockExamResult) ; exercices et labs n'en ont qu'une.
     const counts = res as { produced?: number; requested?: number };
