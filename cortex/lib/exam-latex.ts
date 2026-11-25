@@ -8,7 +8,7 @@ import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
-import { reportFailure } from "@/lib/failure-report";
+import { reportAnswerKeyPdfFailure } from "@/lib/failure-report";
 import { examLayout, examPdf, type ExamLayout } from "@/lib/exam-layout";
 import { epflLongDate } from "@/lib/exam-layout-epfl";
 import { courseTemplate, courseWords, pointsText } from "@/lib/exam-template";
@@ -841,7 +841,7 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) {
       console.error(`[exo] corrigé #${id} non compilé :`, (e as Error).message);
-      reportFailure({ failure: "answer_key_pdf_failed", level: "warning", code: "answer_key_pdf" });
+      reportAnswerKeyPdfFailure();
     }
     return { file: pdf, kind: "pdf" };
   } catch (e) {
@@ -872,7 +872,7 @@ export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: s
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) {
       console.error(`[exam] corrigé #${id} non compilé :`, (e as Error).message);
-      reportFailure({ failure: "answer_key_pdf_failed", level: "warning", code: "answer_key_pdf" });
+      reportAnswerKeyPdfFailure();
     }
     return { file: pdf, kind: "pdf" };
   } catch (e) {

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { currentCourse } from "@/db/client";
+import { currentCourse, hasCourseContext } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { tryGetCourse } from "@/lib/courses";
 import { currentJob } from "@/lib/billing/usage-context";
@@ -32,7 +32,9 @@ export type FailureKind =
   /** Fichiers d'un cours illisibles à l'ingestion. */
   | "ingest_files_failed"
   /** Appel au modèle en échec après les relances, hors job (aide synchrone, connecteur). */
-  | "llm_failed";
+  | "llm_failed"
+  /** Étape de contrôle sautée en cours de job (relecture, vérification) : livré, mais moins vérifié. */
+  | "generation_degraded";
 
 export type FailureReport = {
   failure: FailureKind;
@@ -54,8 +56,19 @@ export type CourseKind = "curated" | "generic" | "unknown";
 /** Domaine, comme les autres alertes de l'app (lib/storage-quota, lib/backup-schedule) : `area`. */
 const AREA: Record<FailureKind, string> = {
   job_failed: "jobs", job_abandoned: "jobs", exam_incomplete: "jobs", pdf_failed: "pdf", answer_key_pdf_failed: "pdf",
-  refund_failed: "billing", ingest_files_failed: "ingest", llm_failed: "llm",
+  refund_failed: "billing", ingest_files_failed: "ingest", llm_failed: "llm", generation_degraded: "jobs",
 };
+
+/**
+ * Refus voulus qui finissent un job : plafonds de dépense, cours sans support. L'étudiant n'a
+ * rien, mais Cortex a fait ce qu'il doit (et rembourse) : avertissement, pas erreur.
+ */
+const REFUSAL_CODES = new Set(["llm_global_spend_cap", "llm_user_spend_cap", "llm_reservation_spend_cap", "job_corpus_missing"]);
+
+/** Niveau de l'échec d'un job selon son code : un refus voulu n'est pas une panne. */
+export function jobFailureLevel(code: string): "error" | "warning" {
+  return REFUSAL_CODES.has(code) ? "warning" : "error";
+}
 
 /**
  * Empreinte anonyme d'un compte : HMAC par une clé du serveur, pour qu'une liste d'e-mails
@@ -67,9 +80,11 @@ export function userHash(userId: string): string {
 }
 
 /** Cours à profil curaté (lib/profiles) ou générique ; inconnu hors contexte de cours. */
-export function courseKindOf(courseId: string = currentCourse()): CourseKind {
+export function courseKindOf(courseId?: string): CourseKind {
+  // Sans contexte, currentCourse() rend cs-202 par défaut : ce serait « curated » à tort.
+  if (courseId === undefined && !hasCourseContext()) return "unknown";
   try {
-    const c = tryGetCourse(courseId);
+    const c = tryGetCourse(courseId ?? currentCourse());
     return !c ? "unknown" : c.profileId ? "curated" : "generic";
   } catch {
     return "unknown";
@@ -86,16 +101,19 @@ function token(s: string | undefined, fallback = "none"): string {
 export function reportFailure(f: FailureReport): void {
   try {
     const code = token(f.code);
-    const jobType = token(f.jobType ?? currentJob()?.type, "-");
-    const tags: Record<string, string> = {
+    // Même vocabulaire partout : la réservation d'une aide dit « assist_drill », le job « drill ».
+    const jobType = token((f.jobType ?? currentJob()?.type)?.replace(/^assist_/, ""), "-");
+    const tags: Record<string, string> = {};
+    // Les étiquettes en plus d'abord : elles ne peuvent pas écraser les étiquettes de base.
+    for (const [k, v] of Object.entries(f.extra ?? {})) tags[token(k)] = token(v);
+    Object.assign(tags, {
       area: AREA[f.failure],
       failure: f.failure,
       job_type: jobType,
       course_kind: f.courseKind ?? courseKindOf(),
       error_code: code,
       user_hash: userHash(currentUser()),
-    };
-    for (const [k, v] of Object.entries(f.extra ?? {})) tags[token(k)] = token(v);
+    });
     markReported(f.exception);
     const what = jobType === "-" ? f.failure : `${f.failure} (${jobType})`;
     captureError(new Error(`Échec étudiant : ${what}, code ${code}`), tags, {
@@ -116,4 +134,23 @@ export function reportIngestProblems(report: IngestReport | null | undefined, jo
   const unreadable = report?.files.filter((f) => f.status === "unreadable").length ?? 0;
   if (!unreadable) return;
   reportFailure({ failure: "ingest_files_failed", level: "warning", code: "unreadable", jobType, extra: { files_unreadable: String(unreadable) } });
+}
+
+/** PDF du corrigé non compilé (exam-latex, qcm-latex) : l'examen est livré, le corrigé PDF manque. */
+export function reportAnswerKeyPdfFailure(): void {
+  reportFailure({ failure: "answer_key_pdf_failed", level: "warning", code: "answer_key_pdf" });
+}
+
+/**
+ * Étape de contrôle sautée en cours de job parce que l'appel au modèle a échoué : le résultat
+ * part quand même, moins vérifié. `step` est un nom de site fixe (jamais un message).
+ */
+export function reportDegraded(step: string, exception?: unknown): void {
+  const code = (exception as { code?: unknown } | null)?.code;
+  // Job annulé par l'étudiant : l'appel en vol s'arrête, ce n'est pas une étape sautée.
+  if (code === "ABORTED") return;
+  reportFailure({
+    failure: "generation_degraded", level: "warning", code: step,
+    extra: { cause: typeof code === "string" ? code : "unknown" }, exception,
+  });
 }

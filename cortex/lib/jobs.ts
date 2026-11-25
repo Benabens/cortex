@@ -15,7 +15,7 @@ import type { IngestReport } from "@/lib/ingest-report";
 import type { JobError, JobStepInfo } from "@/lib/i18n/job-text";
 import { stageTracker, type StageInfo } from "@/lib/job-stage";
 import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
-import { reportFailure } from "@/lib/failure-report";
+import { reportFailure, jobFailureLevel } from "@/lib/failure-report";
 
 /**
  * Jobs de génération en ARRIÈRE-PLAN, découplés de la requête HTTP.
@@ -910,7 +910,7 @@ export async function recordJobFailure(jobId: number, msg: string, info: JobErro
   // reste au journal, l'événement ne porte que son code.
   // Une aide (refund: false) a appliqué sa propre règle de remboursement (lib/drill-job) : sans objet ici.
   const creditsBack = opts.refund === false ? "assist_rule" : back > 0 ? "yes" : "no";
-  reportFailure({ failure: "job_failed", level: "error", code: info.code, jobType: type, extra: { credits_back: creditsBack } });
+  reportFailure({ failure: "job_failed", level: jobFailureLevel(info.code), code: info.code, jobType: type, extra: { credits_back: creditsBack } });
   return "failed";
 }
 

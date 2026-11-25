@@ -194,7 +194,8 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
     log("warn", "llm.error", { ...labels, code, message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     // Panne du fournisseur après les relances. Dans un job, la fin du job la signale avec son code
     // (lib/jobs) ; un refus voulu (plafond, quota, crédits) ou une annulation n'est pas une panne.
-    if (!job && !OWN_LLM_CODES.has(code) && code !== "ABORTED") {
+    // Seule une LlmError : un bogue de code (TypeError) garde sa propre trace, relevée par la route.
+    if (!job && e instanceof LlmError && !OWN_LLM_CODES.has(code) && code !== "ABORTED") {
       reportFailure({ failure: "llm_failed", level: "warning", code, extra: { provider: provider.name }, exception: e });
     }
     throw e;

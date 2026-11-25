@@ -9,7 +9,7 @@ import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
 import { examsDir } from "@/lib/paths";
-import { reportFailure } from "@/lib/failure-report";
+import { reportAnswerKeyPdfFailure } from "@/lib/failure-report";
 import type { QcmItem } from "@/lib/qcm";
 import fs from "node:fs";
 import path from "node:path";
@@ -273,7 +273,7 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
     } catch (e2) {
       warning = `${warning ? `${warning} ; ` : ""}corrigé non compilé : ${why(e2)}`;
       console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message);
-      reportFailure({ failure: "answer_key_pdf_failed", level: "warning", code: "answer_key_pdf" });
+      reportAnswerKeyPdfFailure();
     }
   }
   if (formulasAsText) warning = `${warning ? `${warning} ; ` : ""}formules imprimées en texte (elles ne compilaient pas)`;
