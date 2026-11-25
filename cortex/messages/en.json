@@ -1716,7 +1716,7 @@
       "review": "Final review",
       "render": "Laying out the PDF"
     },
-    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {MCQs ready} lot {batches ready} other {questions ready}}"
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {MCQs ready} exercise {exercises ready} lot {batches ready} other {questions ready}}"
   },
   "order": {
     "product": {

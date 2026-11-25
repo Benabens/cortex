@@ -1716,7 +1716,7 @@
       "review": "Relecture finale",
       "render": "Mise en page du PDF"
     },
-    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {QCM prêts} lot {lots prêts} other {questions prêtes}}"
+    "stageCount": "{stage} · {done}/{total} {unit, select, qcm {QCM prêts} exercise {exercices prêts} lot {lots prêts} other {questions prêtes}}"
   },
   "order": {
     "product": {

@@ -819,7 +819,9 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   /** Slots restés sans exercice, par lot (comblés en fin de génération). */
   const missingByLot: Slot[][] = [];
   let lastError: unknown = null;
+  // Exercices rédigés, puis vérifiés, tous lots confondus : l'étape les compte (lib/job-stage).
   let qDone = 0;
+  let qChecked = 0;
   const qTotal = slots.length;
 
   // checkpoint : lots déjà générés lors d'un run précédent interrompu.
@@ -875,7 +877,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           step(`Lot ${lotIdx + 1} · Q${k + 1} : architecte échoué (${(e as Error).message.slice(0, 80)}) → repli one-shot`, 0);
         }
         qDone++;
-        step(`Architecte : ${qDone}/${qTotal} questions construites`, 10 + Math.round((qDone / qTotal) * 30));
+        step(`Architecte : ${qDone}/${qTotal} exercices construits`, 10 + Math.round((qDone / qTotal) * 30));
       }
     };
     await Promise.all([worker(), worker()]);
@@ -913,15 +915,15 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           throw new Error("timeout simulé (test de résilience)");
         let qs: ExamQuestion[];
         if (saved[i]?.length === bslots.length) {
-          step(`Lot ${i + 1}/${nBatches} repris du checkpoint`, 20);
           qs = saved[i]!;
           qDone += bslots.length;
+          step(`${qDone}/${qTotal} exercices repris du checkpoint (lot ${i + 1}/${nBatches})`, 20);
         } else if (useArchitect) {
           step(`Lot ${i + 1}/${nBatches} : ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
           qs = await architectBatch(bslots, i);
           saved[i] = qs;
           await saveCkpt(i);
-          step(`Lot ${i + 1}/${nBatches} construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
+          step(`${qDone}/${qTotal} exercices construits par l'architecte ✓ (lot ${i + 1}/${nBatches}, ${Math.round((Date.now() - t0) / 1000)}s)`, 40);
         } else {
           // cours sans architecte : voie one-shot, RÉSILIENTE — le lot, puis chaque exercice manquant seul.
           step(`Lot ${i + 1}/${nBatches} : génération de ${bslots.length} exercices…`, 8 + i * 2);
@@ -938,14 +940,17 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
             saved[i] = qs;
             await saveCkpt(i);
           }
-          step(`Lot ${i + 1}/${nBatches} généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 30);
+          qDone += qs.length;
+          step(`${qDone}/${qTotal} exercices rédigés ✓ (lot ${i + 1}/${nBatches}, ${Math.round((Date.now() - t0) / 1000)}s)`, 30);
         }
         if (!qs.length) return { questions: [], report: null as VerifyReport | null };
         if (!doVerify) return { questions: qs, report: null as VerifyReport | null };
-        step(`Lot ${i + 1}/${nBatches} : vérification à l'aveugle + durcissement…`, 45);
+        step(`Lot ${i + 1}/${nBatches} : vérification à l'aveugle + durcissement (${qChecked}/${qTotal} exercices vérifiés)…`, 45);
         try {
           const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0), { dropUnfixed: true });
-          step(`Lot ${i + 1}/${nBatches} vérifié ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 70);
+          // Retirés compris : ils sont passés par la vérification, le compte finit au total.
+          qChecked += qs.length;
+          step(`${qChecked}/${qTotal} exercices vérifiés ✓ (lot ${i + 1}/${nBatches}, ${Math.round((Date.now() - t0) / 1000)}s)`, 70);
           return { questions: v.spec.questions, report: v.report as VerifyReport | null };
         } catch (e) {
           step(`Lot ${i + 1}, vérif interrompue : ${(e as Error).message}`, 70);

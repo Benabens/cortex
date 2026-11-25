@@ -13,8 +13,8 @@
 export const STAGES = ["read", "format", "program", "plan", "write", "check", "refill", "review", "render"] as const;
 export type Stage = (typeof STAGES)[number];
 
-/** Ce qu'on compte : des questions composées, des lots d'exercices, des QCM. */
-export type StageUnit = "question" | "lot" | "qcm";
+/** Ce qu'on compte : des questions composées, des exercices (examen écrit), des QCM. */
+export type StageUnit = "question" | "exercise" | "qcm";
 
 export type StageInfo = {
   key: "stage";
@@ -39,7 +39,7 @@ const RULES: Rule[] = [
   { re: /manquant\(s\) →|lot\(s\) de comblement|régénération ciblée|→ (remplacement|nouveau complément)|: reprise sur |refaite|nouvel essai|à régénérer|réessai/u, stage: "refill" },
   { re: /^(Revue finale|Audit final|Audit des doublons|Contrôle final|Contrôles déterministes|Dernière vérification|Doublons|Explications assemblées)|→ revue finale|faute de remplaçant|sous-question \([a-z]\) retirée/u, stage: "review" },
   { re: /Vérif|vérifi|à l'aveugle|^QCM (gardé|rejeté|à régénérer)|rejetée|inutilisable|distracteur|clé contestée|hors cours|hors matière|durcissement|critique adversariale|dernière passe|validé \(piège|trop faible|écarté/u, stage: "check" },
-  { re: /^Génération de \d+ QCM|^Lot QCM|^Ouverte \d|^Question ouverte|^Question composée|génération de \d+ exercice|rédaction de l'énoncé|conception du piège|^Lot \d+ · Q\d|questions construites|généré ✓|^Génération de l'examen|^Lot \d+\/\d+ ?[:—-]|étude : archétype/u, stage: "write" },
+  { re: /^Génération de \d+ QCM|^Lot QCM|^Ouverte \d|^Question ouverte|^Question composée|génération de \d+ exercice|rédaction de l'énoncé|conception du piège|^Lot \d+ · Q\d|questions construites|exercices (rédigés|construits|repris)|généré ✓|^Génération de l'examen|^Lot \d+\/\d+ ?[:—-]|étude : archétype/u, stage: "write" },
   { re: /^(Architecte|Faits testables|Composition ramenée)/u, stage: "plan" },
   { re: /^(Blueprint|Analyse du programme|Index\b)|index exo-par-exo/u, stage: "program" },
   { re: /^Format\b|Détection du format/u, stage: (type) => (type === "exam" || type === "qcm" ? "plan" : "format") },
@@ -55,16 +55,11 @@ export function classifyStep(type: string, step: string): Omit<StageInfo, "key">
   const stage = typeof rule.stage === "function" ? rule.stage(type) : rule.stage;
   const out: Omit<StageInfo, "key"> = { stage };
   const built = /(\d+)\s*\/\s*(\d+) QCM construits/u.exec(s) ?? /^(\d+) QCM construits \+ vérifiés pour (\d+) places/u.exec(s);
-  const architect = /^Architecte : (\d+)\/(\d+) questions construites/u.exec(s);
-  const lot = /^Lot (\d+)\/(\d+)/u.exec(s);
+  // Examen écrit : les exercices de l'examen, pas ses lots (« Lot 2/3 » ne disait rien à l'étudiant,
+  // et les lots tournent en parallèle). Compteur propre à l'étape : rédigés, puis vérifiés.
+  const exercises = /(\d+)\/(\d+) exercices (rédigés|construits|repris|vérifiés)/u.exec(s);
   if (built) Object.assign(out, { stage: "write" as const, done: Number(built[1]), total: Number(built[2]), unit: "qcm" as const });
-  else if (architect) Object.assign(out, { done: Number(architect[1]), total: Number(architect[2]), unit: "question" as const });
-  else if (lot) {
-    // Compteur propre à l'étape : « Lot 2/3 généré ✓ » = 2 lots rédigés, « Lot 2/3 vérifié ✓ » = 2 lots
-    // vérifiés ; « Lot 2/3 : génération… » = le 2e en cours, 1 fini.
-    const finished = /(généré|vérifié) ✓/u.test(s) ? Number(lot[1]) : Number(lot[1]) - 1;
-    Object.assign(out, { done: Math.max(0, finished), total: Number(lot[2]), unit: "lot" as const });
-  }
+  else if (exercises) Object.assign(out, { done: Number(exercises[1]), total: Number(exercises[2]), unit: "exercise" as const });
   const version = /\(version (\d+)\)/u.exec(s);
   if (version) out.version = Number(version[1]);
   return out;
@@ -74,9 +69,9 @@ const COMPOSED = /^Question composée \d+\/(\d+)/u;
 const COMPOSED_READY = /^(\d+)\/(\d+) questions composées prêtes/u;
 const LOOP: Stage[] = ["write", "check", "refill"];
 
-/** Un compteur de QCM vaut pour toute la boucle rédiger → vérifier → remplacer ; celui d'un lot, pour son étape. */
+/** Un compteur de QCM vaut pour toute la boucle rédiger → vérifier → remplacer ; celui des exercices, pour son étape. */
 function carries(last: StageInfo, stage: Stage): boolean {
-  if (last.unit === "lot") return last.stage === stage;
+  if (last.unit === "exercise") return last.stage === stage;
   return last.stage === stage || (LOOP.includes(last.stage) && LOOP.includes(stage));
 }
 
@@ -97,6 +92,9 @@ export function stageTracker(type: string): (step: string) => StageInfo | null {
     else if (started && !composed) composed = { done: 0, total: Number(started[1]) };
     const c = ready ? { stage: last?.stage && LOOP.includes(last.stage) ? last.stage : "write" as Stage } : classifyStep(type, s);
     if (!c) return last;
+    // Écrit : les lots tournent en parallèle ; celui qui s'écrit encore ne ramène pas le suivi à la
+    // rédaction une fois la vérification commencée (« Vérification · 2/4 » puis « Rédaction · 4/4 »).
+    if (last?.unit === "exercise" && last.stage === "check" && c.stage === "write") return last;
     const next: StageInfo = { key: "stage", ...c };
     if (composed && next.stage !== "render") Object.assign(next, { done: composed.done, total: composed.total, unit: "question" as const });
     else if (next.done === undefined && last?.done !== undefined && carries(last, next.stage)) {
